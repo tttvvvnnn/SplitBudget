@@ -1,9 +1,18 @@
 # CI/CD: автодеплой на сервер через GitHub Actions
 
-Как это работает: пушите в ветку `main` → GitHub Actions собирает Docker-образ → пушит его в
-GitHub Container Registry (ghcr.io) → по SSH заходит на ваш сервер → скачивает свежий образ и
-перезапускает контейнер (`docker-compose.prod.yml`). Сервер сам ничего не собирает — только
-скачивает готовый образ, поэтому деплой быстрый и серверу не нужен git.
+Как это работает: на каждый пуш/PR гоняются автотесты (`.github/workflows/ci.yml`) — это не
+имеет отношения к деплою, просто проверка, что код рабочий. А сам релиз запускается отдельно и
+осознанно: вы ставите git-тег версии (`v1.2.0`) → `.github/workflows/release.yml` ещё раз
+прогоняет тесты → собирает Docker-образ → пушит его в GitHub Container Registry (ghcr.io) →
+создаёт релиз на GitHub → по SSH заходит на сервер → скачивает этот образ и перезапускает
+контейнер (`docker-compose.prod.yml`). Сервер сам ничего не собирает — только скачивает готовый
+образ, поэтому деплой быстрый и серверу не нужен git.
+
+Почему по тегам, а не на каждый пуш в `main`: так `main` может спокойно копить незавершённые
+изменения без риска случайно выкатить их на прод, а версия, которая крутится на сервере, всегда
+однозначно соответствует конкретному тегу и записи в `CHANGELOG.md` — это и есть контроль версий
+в том смысле, в котором он обычно устроен у настоящих приложений. Как именно оформлять релиз
+(что писать в CHANGELOG, как называть тег) — в `RELEASING.md`.
 
 ## Шаг 1. Создать репозиторий на GitHub
 
@@ -120,22 +129,29 @@ sudo chown -R deploy:deploy /opt/family-expenses-bot
 
 ## Шаг 5. Деплой
 
-Дальше всё автоматически: пуш/мёрж в `main` → workflow `.github/workflows/deploy.yml` соберёт
-образ, запушит в `ghcr.io/<логин>/family-expenses-bot:latest` и `:<commit-sha>`, затем зайдёт по
-SSH на сервер и выполнит `docker compose -f docker-compose.prod.yml pull && up -d`.
+Дальше деплой происходит по тегам версий, не по каждому пушу — сам процесс выпуска релиза
+(обновление CHANGELOG, `git tag`, `git push --tags`) описан в `RELEASING.md`. Коротко:
 
-Прогресс — во вкладке **Actions** репозитория. Запустить деплой вручную (без пуша) можно там же:
-Actions → Build and deploy → Run workflow.
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+Это запускает `.github/workflows/release.yml`: тесты → образ `ghcr.io/<логин>/family-expenses-bot`
+с тегами `:1.0.0`, `:1.0`, `:latest` → релиз на GitHub → деплой по SSH
+(`docker compose -f docker-compose.prod.yml pull && up -d`).
+
+Прогресс — во вкладке **Actions** репозитория.
 
 ## Откат на предыдущую версию
 
-Каждый билд дополнительно тегируется хэшем коммита. Если `latest` оказался с багом:
+Раз каждый релиз затегирован версией, откат — это просто пересборка `latest` на предыдущий тег:
 
 ```bash
 # на сервере
-docker pull ghcr.io/<логин>/family-expenses-bot:<sha-предыдущего-коммита>
-docker tag ghcr.io/<логин>/family-expenses-bot:<sha-предыдущего-коммита> ghcr.io/<логин>/family-expenses-bot:latest
+docker pull ghcr.io/<логин>/family-expenses-bot:0.9.0
+docker tag ghcr.io/<логин>/family-expenses-bot:0.9.0 ghcr.io/<логин>/family-expenses-bot:latest
 docker compose -f docker-compose.prod.yml up -d
 ```
 
-SHA нужного коммита видно в истории `git log` или во вкладке Actions (у каждого прогона свой).
+Список версий — в GitHub Releases репозитория или `git tag -l`.

@@ -1,0 +1,32 @@
+name: CI
+
+# Прогоняет автотесты на каждый пуш и каждый PR в main. Ничего не собирает и никуда не
+# деплоит — это чисто проверка "код рабочий", отдельно от релизов (см. release.yml).
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Byte-compile check
+        run: python -m py_compile $(find app migrations tests -name "*.py")
+
+      - name: Run tests
+        run: pytest -v

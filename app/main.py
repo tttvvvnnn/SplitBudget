@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -15,19 +16,27 @@ from app.api.routers import balances, chats, expenses, export, recurring, stats
 from app.bot.bot_instance import bot
 from app.bot.runner import start_polling
 from app.bot.scheduler import setup_scheduler
-from app.shared.database import init_db
+from app.shared.database import configure_sqlite
+from app.shared.migrate import upgrade_to_head
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 WEBAPP_DIR = Path(__file__).resolve().parent.parent / "webapp"
 
+# Прокидывается из Dockerfile (ARG/ENV APP_VERSION), который release.yml заполняет тегом релиза
+# (например "1.2.0"). Вне релизного билда (локальный запуск, dev) остаётся "dev".
+APP_VERSION = os.environ.get("APP_VERSION", "dev")
+
 _background_tasks: set[asyncio.Task] = set()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await init_db()
+    # alembic upgrade head — синхронный/блокирующий вызов, уводим в отдельный поток,
+    # чтобы не блокировать event loop на старте.
+    await asyncio.to_thread(upgrade_to_head)
+    await configure_sqlite()
 
     bot_task = asyncio.create_task(start_polling())
     _background_tasks.add(bot_task)
@@ -64,7 +73,7 @@ for router in (chats.router, expenses.router, balances.router, recurring.router,
 
 @app.get("/healthz")
 async def healthz():
-    return {"status": "ok"}
+    return {"status": "ok", "version": APP_VERSION}
 
 
 if WEBAPP_DIR.is_dir():
