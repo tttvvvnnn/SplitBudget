@@ -11,6 +11,11 @@
   --border: rgba(120, 120, 128, 0.2);
   --danger: #ff3b30;
   --success: #34c759;
+  /* отдельный контраст для полей ввода — иначе они сливаются с фоном шторки (оба были
+     var(--bg)): чуть заметный залив + более плотная граница, чтобы поле читалось
+     как поле, а не просто текст на фоне */
+  --field-bg: var(--tg-theme-secondary-bg-color, #f2f2f7);
+  --field-border: rgba(120, 120, 128, 0.35);
 }
 
 html, body {
@@ -21,6 +26,9 @@ html, body {
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   -webkit-tap-highlight-color: transparent;
+  /* запрет pinch-zoom и двойного тапа — плюс к user-scalable=no в viewport-мете:
+     без этого некоторые WebView всё равно позволяют щипковый зум */
+  touch-action: pan-x pan-y;
 }
 
 #app {
@@ -245,10 +253,23 @@ html, body {
   width: 100%;
   padding: 11px 12px;
   border-radius: 10px;
-  border: 1px solid var(--border);
-  background: var(--bg);
+  border: 1.5px solid var(--field-border);
+  background: var(--field-bg);
   color: var(--text);
-  font-size: 15px;
+  /* минимум 16px — иначе iOS Safari/WebView сам зумит страницу при фокусе на поле,
+     это и есть тот самый "приближает" эффект в форме добавления траты */
+  font-size: 16px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.field input[type=text]:focus,
+.field input[type=number]:focus,
+.field input[type=date]:focus,
+.field select:focus,
+.field textarea:focus {
+  outline: none;
+  border-color: var(--link);
+  box-shadow: 0 0 0 3px rgba(36, 129, 204, 0.15);
 }
 
 .chip-row {

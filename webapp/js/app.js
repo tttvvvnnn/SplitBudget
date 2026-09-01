@@ -38,6 +38,24 @@ function todayISO() {
   return local.toISOString().slice(0, 10);
 }
 
+/* Иконки категорий — только для отображения, на сервер и в БД не уходят (категория
+   как была строкой, так и осталась). Список категорий настраивается в
+   app/shared/config.py — если добавите новую, впишите и сюда, иначе будет 🏷️. */
+const CATEGORY_ICONS = {
+  "Еда": "🍔",
+  "Транспорт": "🚗",
+  "ЖКХ": "🏠",
+  "Развлечения": "🎬",
+  "Здоровье": "💊",
+  "Одежда": "👕",
+  "Подписки": "📱",
+  "Другое": "📦",
+};
+
+function categoryIcon(category) {
+  return CATEGORY_ICONS[category] || "🏷️";
+}
+
 function monthLabel(ym) {
   const [y, m] = ym.split("-").map(Number);
   const names = [
@@ -304,14 +322,14 @@ async function renderExpensesTab() {
 function expenseCardHtml(e) {
   const thumb = e.photo_url
     ? `<img class="expense-thumb" data-photo="${escapeHtml(e.photo_url)}">`
-    : `<div class="expense-thumb placeholder">🧾</div>`;
+    : `<div class="expense-thumb placeholder">${categoryIcon(e.category)}</div>`;
   return `
     <div class="card expense-card" data-id="${e.id}">
       ${thumb}
       <div class="expense-main">
         <div class="expense-title">${escapeHtml(e.title)}</div>
         <div class="expense-meta">
-          <span class="badge">${escapeHtml(e.category)}</span>
+          <span class="badge">${categoryIcon(e.category)} ${escapeHtml(e.category)}</span>
           ${new Date(e.expense_date).toLocaleDateString("ru-RU")} · ${escapeHtml(memberLabel(e.payer_member_id))}
           ${e.is_recurring ? " · 🔁" : ""}
         </div>
@@ -373,7 +391,7 @@ function openExpenseModal(existing) {
     <div class="field">
       <label>Категория</label>
       <select id="f-category">
-        ${state.categories.map((c) => `<option value="${escapeHtml(c)}" ${existing && existing.category === c ? "selected" : ""}>${escapeHtml(c)}</option>`).join("")}
+        ${state.categories.map((c) => `<option value="${escapeHtml(c)}" ${existing && existing.category === c ? "selected" : ""}>${categoryIcon(c)} ${escapeHtml(c)}</option>`).join("")}
       </select>
     </div>
     <div class="field">
@@ -661,7 +679,7 @@ async function renderStatsTab() {
       <div class="card">
         ${stats.by_category.map((c) => `
           <div class="balance-row">
-            <span>${escapeHtml(c.category)} <span class="hint-text">(${c.count})</span></span>
+            <span>${categoryIcon(c.category)} ${escapeHtml(c.category)} <span class="hint-text">(${c.count})</span></span>
             <span>${fmtMoney(c.total)}</span>
           </div>`).join("")}
       </div>`}
@@ -681,7 +699,7 @@ async function renderStatsTab() {
     statsChart = new Chart(ctx, {
       type: "doughnut",
       data: {
-        labels: stats.by_category.map((c) => c.category),
+        labels: stats.by_category.map((c) => `${categoryIcon(c.category)} ${c.category}`),
         datasets: [{
           data: stats.by_category.map((c) => Number(c.total)),
           backgroundColor: stats.by_category.map((_, i) => palette[i % palette.length]),
@@ -716,7 +734,7 @@ async function renderRecurringTab() {
         <div class="expense-main">
           <div class="expense-title">${escapeHtml(r.title)}</div>
           <div class="expense-meta">
-            <span class="badge">${escapeHtml(r.category)}</span>
+            <span class="badge">${categoryIcon(r.category)} ${escapeHtml(r.category)}</span>
             каждое ${r.day_of_month} число · ${escapeHtml(memberLabel(r.payer_member_id))}
             ${r.is_active ? "" : " · остановлено"}
           </div>
@@ -753,7 +771,7 @@ function openRecurringModal(existing) {
     <div class="field">
       <label>Категория</label>
       <select id="r-category">
-        ${state.categories.map((c) => `<option value="${escapeHtml(c)}" ${existing && existing.category === c ? "selected" : ""}>${escapeHtml(c)}</option>`).join("")}
+        ${state.categories.map((c) => `<option value="${escapeHtml(c)}" ${existing && existing.category === c ? "selected" : ""}>${categoryIcon(c)} ${escapeHtml(c)}</option>`).join("")}
       </select>
     </div>
     <div class="field">
