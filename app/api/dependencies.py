@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
+from app.bot.avatars import sync_member_avatar
 from app.bot.bot_instance import bot
 from app.shared.crud import get_or_create_member
 from app.shared.database import get_session
@@ -59,6 +60,7 @@ async def get_chat_context(
             username=user.get("username"),
             full_name=full_name,
         )
+        await sync_member_avatar(bot, session, member)
         await session.commit()
 
     return ChatContext(chat=chat, member=member, session=session)

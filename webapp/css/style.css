@@ -235,14 +235,97 @@ html, body {
 }
 
 .field {
-  margin-bottom: 14px;
+  margin-bottom: 10px;
 }
 
 .field label {
   display: block;
-  font-size: 13px;
+  font-size: 12.5px;
   color: var(--hint);
-  margin-bottom: 6px;
+  margin-bottom: 5px;
+}
+
+/* Пара полей в одну строку (например «Кто оплатил» + «Сумма») — компактнее, чем
+   отдельными строками, и совпадает с формой без прокрутки */
+.field-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.field-row .field {
+  flex: 1;
+  margin-bottom: 0;
+  min-width: 0;
+}
+
+/* Название траты + квадратная кнопка фото чека в один ряд */
+.title-photo-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+
+.title-photo-row .field {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+.photo-picker {
+  flex-shrink: 0;
+  width: 46px;
+  height: 46px;
+  border-radius: 10px;
+  border: 1.5px dashed var(--field-border);
+  background: var(--field-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  cursor: pointer;
+  overflow: hidden;
+  position: relative;
+  /* компенсация высоты лейбла соседнего поля, чтобы кнопка была вровень с инпутом */
+  margin-top: 21px;
+}
+
+.photo-picker img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.photo-picker input[type=file] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+/* Аватарки участников — везде одинаковый вид: круглое фото или кружок с инициалом,
+   если фото профиля недоступно (закрыта приватность, ещё не синхронизировалось и т.п.) */
+.avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: var(--field-bg);
+}
+
+.avatar-fallback {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--button-text);
+  background: var(--link);
 }
 
 .field input[type=text],
@@ -279,7 +362,10 @@ html, body {
 }
 
 .chip {
-  padding: 8px 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px 6px 6px;
   border-radius: 20px;
   background: var(--secondary-bg);
   border: 1px solid var(--border);
@@ -288,25 +374,39 @@ html, body {
   user-select: none;
 }
 
+.chip .avatar,
+.chip .avatar-fallback {
+  width: 22px;
+  height: 22px;
+  font-size: 10.5px;
+}
+
 .chip.selected {
   background: var(--button);
   color: var(--button-text);
   border-color: var(--button);
 }
 
+/* Сегмент-контрол переключения режима сплита — единый "трек" с плавающей активной
+   пилюлей внутри, вместо прежних смежных прямоугольников */
 .split-toggle {
   display: flex;
-  border-radius: 10px;
-  overflow: hidden;
-  border: 1px solid var(--border);
+  gap: 3px;
+  padding: 3px;
+  border-radius: 12px;
+  background: var(--field-bg);
+  border: 1.5px solid var(--field-border);
 }
 
 .split-toggle div {
   flex: 1;
   text-align: center;
-  padding: 9px 0;
+  padding: 8px 0;
   font-size: 13.5px;
+  font-weight: 600;
+  border-radius: 9px;
   cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
 .split-toggle div.active {
@@ -321,7 +421,13 @@ html, body {
   margin-bottom: 8px;
 }
 
-.custom-share-row .name { flex: 1; font-size: 14px; }
+.custom-share-row .name {
+  flex: 1;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .custom-share-row input { width: 100px; }
 
 .sheet-overlay {
@@ -336,10 +442,13 @@ html, body {
 .sheet {
   background: var(--bg);
   width: 100%;
-  max-height: 90vh;
+  /* 96vh, а не 90 — форма трата рассчитана помещаться без прокрутки на большинстве
+     экранов; overflow-y остаётся как страховка для маленьких экранов/чатов с
+     большим числом участников, а не как основной сценарий */
+  max-height: 96vh;
   overflow-y: auto;
   border-radius: 18px 18px 0 0;
-  padding: 16px 16px calc(20px + env(safe-area-inset-bottom));
+  padding: 12px 16px calc(16px + env(safe-area-inset-bottom));
 }
 
 .sheet-handle {
@@ -347,13 +456,13 @@ html, body {
   height: 4px;
   background: var(--border);
   border-radius: 4px;
-  margin: 0 auto 14px;
+  margin: 0 auto 10px;
 }
 
 .sheet-title {
   font-size: 17px;
   font-weight: 700;
-  margin-bottom: 14px;
+  margin-bottom: 10px;
 }
 
 .hint-text {

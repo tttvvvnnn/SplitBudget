@@ -49,9 +49,19 @@ class Member(Base):
     username: Mapped[str | None] = mapped_column(String(255), nullable=True)
     full_name: Mapped[str] = mapped_column(String(255), default="")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)  # False, если покинул группу
+    # Имя файла аватарки участника (фото профиля Telegram на момент последней синхронизации),
+    # лежит в том же PHOTOS_DIR, что и фото чеков — см. app/bot/avatars.py. NULL, пока не
+    # синхронизировано, или если у пользователя нет фото профиля.
+    avatar_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
     added_at: Mapped[dt.datetime] = mapped_column(DateTime, default=dt.datetime.utcnow)
 
     chat: Mapped["Chat"] = relationship(back_populates="members")
+
+    @property
+    def avatar_url(self) -> str | None:
+        """Относительный путь для GET /chats/{chat_id}/photos/{filename} — тот же эндпоинт,
+        что уже отдаёт фото чеков (файл начинается с chat_id, проверка доступа та же)."""
+        return f"photos/{self.avatar_path}" if self.avatar_path else None
 
 
 class Expense(Base):

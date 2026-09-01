@@ -11,6 +11,7 @@ from aiogram.types import (
 )
 from sqlalchemy import select
 
+from app.bot.avatars import sync_member_avatar
 from app.bot.keyboards import open_app_keyboard, open_app_keyboard_group
 from app.shared.config import settings
 from app.shared.crud import deactivate_member, get_or_create_chat, get_or_create_member
@@ -39,13 +40,14 @@ async def start_in_group(message: Message, bot: Bot) -> None:
     async with async_session_maker() as session:
         await get_or_create_chat(session, message.chat.id, message.chat.title or "")
         if message.from_user:
-            await get_or_create_member(
+            member = await get_or_create_member(
                 session,
                 chat_id=message.chat.id,
                 tg_user_id=message.from_user.id,
                 username=message.from_user.username,
                 full_name=message.from_user.full_name,
             )
+            await sync_member_avatar(bot, session, member)
         await session.commit()
     me = await bot.get_me()
     await message.answer(
@@ -110,13 +112,14 @@ async def on_new_members(message: Message, bot: Bot) -> None:
                 )
                 continue
             if not user.is_bot:
-                await get_or_create_member(
+                new_member = await get_or_create_member(
                     session,
                     chat_id=message.chat.id,
                     tg_user_id=user.id,
                     username=user.username,
                     full_name=user.full_name,
                 )
+                await sync_member_avatar(bot, session, new_member)
         await session.commit()
 
 

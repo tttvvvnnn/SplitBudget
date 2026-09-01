@@ -56,6 +56,27 @@ function categoryIcon(category) {
   return CATEGORY_ICONS[category] || "🏷️";
 }
 
+/* Аватарки участников — настоящее фото профиля Telegram, если бот успел его синхронизировать
+   (member.avatar_url), иначе кружок с первой буквой имени. Цвет кружка стабильно зависит от
+   id участника — просто чтобы разных людей было легче отличить друг от друга на глаз. */
+const AVATAR_PALETTE = ["#2481cc", "#34c759", "#ff9500", "#ff3b30", "#af52de", "#5ac8fa", "#ffcc00", "#8e8e93"];
+
+function avatarHtml(member) {
+  if (member && member.avatar_url) {
+    return `<img class="avatar" data-avatar="${escapeHtml(member.avatar_url)}">`;
+  }
+  const name = (member && member.full_name) || "?";
+  const initial = (name.trim().charAt(0) || "?").toUpperCase();
+  const color = AVATAR_PALETTE[Math.abs((member && member.id) || 0) % AVATAR_PALETTE.length];
+  return `<div class="avatar-fallback" style="background:${color}">${escapeHtml(initial)}</div>`;
+}
+
+function loadAvatarsIn(container) {
+  container.querySelectorAll(".avatar[data-avatar]").forEach((img) => {
+    loadAuthedImage(img, `/chats/${state.chatId}/${img.dataset.avatar}`);
+  });
+}
+
 function monthLabel(ym) {
   const [y, m] = ym.split("-").map(Number);
   const names = [
@@ -380,34 +401,40 @@ function openExpenseModal(existing) {
 
   const overlay = openSheet(`
     <div class="sheet-title">${isEdit ? "Редактировать трату" : "Новая трата"}</div>
-    <div class="field">
-      <label>Название</label>
-      <input type="text" id="f-title" value="${existing ? escapeHtml(existing.title) : ""}" placeholder="Продукты, аренда, такси…">
+    <div class="title-photo-row">
+      <div class="field">
+        <label>Название</label>
+        <input type="text" id="f-title" value="${existing ? escapeHtml(existing.title) : ""}" placeholder="Продукты, аренда, такси…">
+      </div>
+      <label class="photo-picker" id="f-photo-picker" title="Фото чека (необязательно)">
+        <span id="f-photo-icon">📷</span>
+        <img id="f-photo-preview" style="display:none;">
+        <input type="file" id="f-photo" accept="image/*" capture="environment">
+      </label>
     </div>
-    <div class="field">
-      <label>Сумма (${escapeHtml(state.chat.currency)})</label>
-      <input type="number" id="f-amount" min="0" step="0.01" value="${existing ? existing.amount : ""}">
+    <div class="field-row">
+      <div class="field">
+        <label>Кто оплатил</label>
+        <select id="f-payer">
+          ${state.members.map((m) => `<option value="${m.id}" ${(existing ? existing.payer_member_id : state.member.id) === m.id ? "selected" : ""}>${escapeHtml(m.full_name)}</option>`).join("")}
+        </select>
+      </div>
+      <div class="field">
+        <label>Сумма (${escapeHtml(state.chat.currency)})</label>
+        <input type="number" id="f-amount" min="0" step="0.01" value="${existing ? existing.amount : ""}">
+      </div>
     </div>
-    <div class="field">
-      <label>Категория</label>
-      <select id="f-category">
-        ${state.categories.map((c) => `<option value="${escapeHtml(c)}" ${existing && existing.category === c ? "selected" : ""}>${categoryIcon(c)} ${escapeHtml(c)}</option>`).join("")}
-      </select>
-    </div>
-    <div class="field">
-      <label>Дата</label>
-      <input type="date" id="f-date" value="${existing ? existing.expense_date : todayISO()}">
-    </div>
-    <div class="field">
-      <label>Кто оплатил</label>
-      <select id="f-payer">
-        ${state.members.map((m) => `<option value="${m.id}" ${(existing ? existing.payer_member_id : state.member.id) === m.id ? "selected" : ""}>${escapeHtml(m.full_name)}</option>`).join("")}
-      </select>
-    </div>
-    <div class="field">
-      <label>Фото чека (необязательно)</label>
-      <input type="file" id="f-photo" accept="image/*" capture="environment">
-      <img class="photo-preview" id="f-photo-preview">
+    <div class="field-row">
+      <div class="field">
+        <label>Категория</label>
+        <select id="f-category">
+          ${state.categories.map((c) => `<option value="${escapeHtml(c)}" ${existing && existing.category === c ? "selected" : ""}>${categoryIcon(c)} ${escapeHtml(c)}</option>`).join("")}
+        </select>
+      </div>
+      <div class="field">
+        <label>Дата</label>
+        <input type="date" id="f-date" value="${existing ? existing.expense_date : todayISO()}">
+      </div>
     </div>
     <div class="field">
       <label>Как делить</label>
@@ -424,15 +451,20 @@ function openExpenseModal(existing) {
 
   const photoInput = overlay.querySelector("#f-photo");
   const photoPreview = overlay.querySelector("#f-photo-preview");
-  if (existing && existing.photo_url) {
+  const photoIcon = overlay.querySelector("#f-photo-icon");
+  function showPhotoPreview() {
     photoPreview.style.display = "block";
+    photoIcon.style.display = "none";
+  }
+  if (existing && existing.photo_url) {
+    showPhotoPreview();
     loadAuthedImage(photoPreview, `/chats/${state.chatId}/${existing.photo_url}`);
   }
   photoInput.addEventListener("change", () => {
     const file = photoInput.files[0];
     if (file) {
       photoPreview.src = URL.createObjectURL(file);
-      photoPreview.style.display = "block";
+      showPhotoPreview();
     }
   });
 
@@ -446,8 +478,9 @@ function openExpenseModal(existing) {
       block.innerHTML = `
         <label>Участники (делим поровну)</label>
         <div class="chip-row">
-          ${state.members.map((m) => `<div class="chip ${selectedIds.has(m.id) ? "selected" : ""}" data-id="${m.id}">${escapeHtml(m.full_name)}</div>`).join("")}
+          ${state.members.map((m) => `<div class="chip ${selectedIds.has(m.id) ? "selected" : ""}" data-id="${m.id}">${avatarHtml(m)}${escapeHtml(m.full_name)}</div>`).join("")}
         </div>`;
+      loadAvatarsIn(block);
       block.querySelectorAll(".chip").forEach((chip) => {
         chip.addEventListener("click", () => {
           const id = Number(chip.dataset.id);
@@ -462,10 +495,11 @@ function openExpenseModal(existing) {
         <label>Сумма на каждого</label>
         ${state.members.map((m) => `
           <div class="custom-share-row">
-            <div class="name">${escapeHtml(m.full_name)}</div>
+            <div class="name">${avatarHtml(m)}${escapeHtml(m.full_name)}</div>
             <input type="number" min="0" step="0.01" data-id="${m.id}" class="custom-amount" value="${customAmounts[m.id] || ""}">
           </div>`).join("")}
         <div class="hint-text" id="sum-hint">Указано: ${sum.toFixed(2)} из ${amount.toFixed(2)} ${state.chat.currency}</div>`;
+      loadAvatarsIn(block);
       block.querySelectorAll(".custom-amount").forEach((inp) => {
         inp.addEventListener("input", () => {
           customAmounts[Number(inp.dataset.id)] = Number(inp.value || 0);

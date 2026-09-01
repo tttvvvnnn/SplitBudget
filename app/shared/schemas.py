@@ -13,6 +13,7 @@ class MemberOut(BaseModel):
     username: str | None
     full_name: str
     is_active: bool
+    avatar_url: str | None
 
     model_config = {"from_attributes": True}
 
