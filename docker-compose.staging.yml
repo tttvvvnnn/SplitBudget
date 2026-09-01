@@ -1,0 +1,17 @@
+services:
+  app:
+    build: .
+    container_name: splitbudget-dev
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data/db:/data/db
+      - ./data/photos:/data/photos
+    networks:
+      - reverse-proxy
+
+networks:
+  reverse-proxy:
+    name: remnawave-network
+    external: true
