@@ -1,0 +1,20 @@
+# Продовый compose-файл для автодеплоя из GitHub Actions.
+# В отличие от docker-compose.yml (который собирает образ на месте), этот файл только
+# СКАЧИВАЕТ уже готовый образ из GitHub Container Registry — сервер ничего не билдит.
+#
+# Перед первым запуском замените OWNER на ваш GitHub-логин/организацию (только строчными
+# буквами — так требует GHCR) и один раз сделайте `docker login ghcr.io` на сервере
+# (см. DEPLOYMENT.md).
+
+services:
+  app:
+    image: ghcr.io/OWNER/family-expenses-bot:latest
+    container_name: family-expenses-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./data/db:/data/db
+      - ./data/photos:/data/photos

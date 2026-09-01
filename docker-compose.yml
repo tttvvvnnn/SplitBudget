@@ -1,0 +1,12 @@
+services:
+  app:
+    build: .
+    container_name: family-expenses-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./data/db:/data/db
+      - ./data/photos:/data/photos
