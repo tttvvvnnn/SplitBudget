@@ -129,6 +129,12 @@ function confirmAction(message) {
 async function init() {
   const params = new URLSearchParams(window.location.search);
   state.chatId = params.get("chat_id");
+  // Кнопка в группах открывает приложение через прямую ссылку t.me/бот?startapp=chat_id
+  // (Telegram не разрешает web_app-кнопки вне личных чатов) — тогда chat_id приходит не
+  // через query-параметр, а через initDataUnsafe.start_param.
+  if (!state.chatId && tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) {
+    state.chatId = tg.initDataUnsafe.start_param;
+  }
   state.initData = tg ? tg.initData : "";
 
   if (tg && tg.themeParams && tg.themeParams.bg_color) {

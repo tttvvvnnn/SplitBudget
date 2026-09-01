@@ -11,7 +11,7 @@ from aiogram.types import (
 )
 from sqlalchemy import select
 
-from app.bot.keyboards import open_app_keyboard
+from app.bot.keyboards import open_app_keyboard, open_app_keyboard_group
 from app.shared.config import settings
 from app.shared.crud import deactivate_member, get_or_create_chat, get_or_create_member
 from app.shared.database import async_session_maker
@@ -35,7 +35,7 @@ WELCOME_PRIVATE_NO_CHATS = (
 
 
 @router.message(CommandStart(), F.chat.type.in_({"group", "supergroup"}))
-async def start_in_group(message: Message) -> None:
+async def start_in_group(message: Message, bot: Bot) -> None:
     async with async_session_maker() as session:
         await get_or_create_chat(session, message.chat.id, message.chat.title or "")
         if message.from_user:
@@ -47,12 +47,18 @@ async def start_in_group(message: Message) -> None:
                 full_name=message.from_user.full_name,
             )
         await session.commit()
-    await message.answer(WELCOME_GROUP, reply_markup=open_app_keyboard(message.chat.id))
+    me = await bot.get_me()
+    await message.answer(
+        WELCOME_GROUP, reply_markup=open_app_keyboard_group(me.username, message.chat.id)
+    )
 
 
 @router.message(Command("app", "expenses"), F.chat.type.in_({"group", "supergroup"}))
-async def open_app_in_group(message: Message) -> None:
-    await message.answer("💸 Открыть учёт трат:", reply_markup=open_app_keyboard(message.chat.id))
+async def open_app_in_group(message: Message, bot: Bot) -> None:
+    me = await bot.get_me()
+    await message.answer(
+        "💸 Открыть учёт трат:", reply_markup=open_app_keyboard_group(me.username, message.chat.id)
+    )
 
 
 @router.message(CommandStart(), F.chat.type == "private")
@@ -98,7 +104,10 @@ async def on_new_members(message: Message, bot: Bot) -> None:
         for user in message.new_chat_members or []:
             if user.id == me.id:
                 await session.commit()
-                await message.answer(WELCOME_GROUP, reply_markup=open_app_keyboard(message.chat.id))
+                await message.answer(
+                    WELCOME_GROUP,
+                    reply_markup=open_app_keyboard_group(me.username, message.chat.id),
+                )
                 continue
             if not user.is_bot:
                 await get_or_create_member(
