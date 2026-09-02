@@ -512,6 +512,7 @@ html, body {
 .top-actions {
   display: flex;
   justify-content: flex-end;
+  gap: 8px;
   padding: 8px 4px 0;
 }
 

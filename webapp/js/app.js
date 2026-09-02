@@ -19,6 +19,8 @@ const state = {
   month: todayMonth(),
   expenses: [],
   expenseCategory: "",
+  filters: { search: "", category: "", payer: "" },
+  filtersOpen: false,
   balances: null,
   settlements: [],
   recurring: [],
@@ -146,6 +148,7 @@ async function loadAuthedImage(imgEl, path) {
 }
 
 function toast(message) {
+  haptic("notification", "error"); // toast() в этом коде зовётся только из catch-веток
   if (tg && tg.showAlert) {
     tg.showAlert(message);
   } else {
@@ -161,6 +164,18 @@ function confirmAction(message) {
       resolve(confirm(message));
     }
   });
+}
+
+/* Тактильный отклик через Telegram WebApp API — короткая вибрация на действие, без неё
+   интерфейс ощущается «веб-страницей», а не частью Telegram. На старых клиентах, где
+   HapticFeedback не поддерживается, тихо ничего не делает. */
+function haptic(kind, style) {
+  if (!tg || !tg.HapticFeedback) return;
+  try {
+    if (kind === "impact") tg.HapticFeedback.impactOccurred(style || "light");
+    else if (kind === "notification") tg.HapticFeedback.notificationOccurred(style || "success");
+    else if (kind === "selection") tg.HapticFeedback.selectionChanged();
+  } catch (e) { /* не критично */ }
 }
 
 /* ---------------- Инициализация ---------------- */
@@ -273,6 +288,8 @@ function renderShell() {
 
   app.querySelectorAll(".tabbar button").forEach((btn) => {
     btn.addEventListener("click", async () => {
+      if (btn.dataset.tab === state.tab) return;
+      haptic("selection");
       state.tab = btn.dataset.tab;
       app.querySelectorAll(".tabbar button").forEach((b) => b.classList.toggle("active", b === btn));
       document.getElementById("fab-add").style.display = state.tab === "stats" ? "none" : "flex";
@@ -281,6 +298,7 @@ function renderShell() {
   });
 
   document.getElementById("fab-add").addEventListener("click", () => {
+    haptic("impact", "light");
     if (state.tab === "recurring") openRecurringModal(null);
     else openExpenseModal(null);
   });
@@ -306,7 +324,7 @@ async function renderExpensesTab() {
     return;
   }
 
-  const total = state.expenses.reduce((s, e) => s + Number(e.amount), 0);
+  const hasFilters = !!(state.filters.search || state.filters.category || state.filters.payer);
 
   content.innerHTML = `
     <div class="month-picker">
@@ -314,28 +332,126 @@ async function renderExpensesTab() {
       <div class="label">${monthLabel(state.month)}</div>
       <button data-dir="1">›</button>
     </div>
-    <div class="total-line">${fmtMoney(total)}</div>
+    <div class="total-line" id="total-line"></div>
     <div class="top-actions">
-      <button class="btn small secondary" id="export-btn">⬇️ Экспорт в Excel</button>
+      <button class="btn small secondary" id="filter-toggle-btn">🔍 Фильтр${hasFilters ? " •" : ""}</button>
+      <button class="btn small secondary" id="export-btn">⬇️ Excel</button>
     </div>
-    <div id="expense-list">
-      ${state.expenses.length === 0 ? '<div class="empty-state">Трат за этот месяц пока нет.<br>Нажмите «+», чтобы добавить первую.</div>' : state.expenses.map(expenseCardHtml).join("")}
-    </div>`;
+    <div id="filter-panel" style="display:${state.filtersOpen ? "block" : "none"}; margin: 0 0 10px;">
+      <div class="field">
+        <input type="text" id="filter-search" placeholder="Поиск по названию…" value="${escapeHtml(state.filters.search)}">
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <select id="filter-category">
+            <option value="">Все категории</option>
+            ${state.categories.map((c) => `<option value="${escapeHtml(c)}" ${state.filters.category === c ? "selected" : ""}>${categoryIcon(c)} ${escapeHtml(c)}</option>`).join("")}
+          </select>
+        </div>
+        <div class="field">
+          <select id="filter-payer">
+            <option value="">Все участники</option>
+            ${state.members.map((m) => `<option value="${m.id}" ${String(state.filters.payer) === String(m.id) ? "selected" : ""}>${escapeHtml(m.full_name)}</option>`).join("")}
+          </select>
+        </div>
+      </div>
+    </div>
+    <div id="expense-list"></div>`;
 
   content.querySelectorAll(".month-picker button").forEach((b) => {
     b.addEventListener("click", async () => {
+      haptic("selection");
       state.month = shiftMonth(state.month, Number(b.dataset.dir));
       await renderExpensesTab();
     });
   });
-  content.querySelectorAll(".expense-card").forEach((el) => {
+  document.getElementById("export-btn").addEventListener("click", exportXlsx);
+
+  const filterPanel = document.getElementById("filter-panel");
+  const filterToggleBtn = document.getElementById("filter-toggle-btn");
+  filterToggleBtn.addEventListener("click", () => {
+    haptic("selection");
+    state.filtersOpen = !state.filtersOpen;
+    filterPanel.style.display = state.filtersOpen ? "block" : "none";
+  });
+
+  function updateFilterUI() {
+    const active = !!(state.filters.search || state.filters.category || state.filters.payer);
+    filterToggleBtn.textContent = `🔍 Фильтр${active ? " •" : ""}`;
+    let resetBtn = document.getElementById("filter-reset-btn");
+    if (active && !resetBtn) {
+      resetBtn = document.createElement("button");
+      resetBtn.type = "button";
+      resetBtn.className = "btn small secondary";
+      resetBtn.id = "filter-reset-btn";
+      resetBtn.style.marginTop = "8px";
+      resetBtn.textContent = "✕ Сбросить фильтр";
+      resetBtn.addEventListener("click", () => {
+        haptic("selection");
+        state.filters = { search: "", category: "", payer: "" };
+        document.getElementById("filter-search").value = "";
+        document.getElementById("filter-category").value = "";
+        document.getElementById("filter-payer").value = "";
+        updateFilterUI();
+        renderExpenseList();
+      });
+      filterPanel.appendChild(resetBtn);
+    } else if (!active && resetBtn) {
+      resetBtn.remove();
+    }
+  }
+
+  document.getElementById("filter-search").addEventListener("input", (ev) => {
+    state.filters.search = ev.target.value;
+    updateFilterUI();
+    renderExpenseList();
+  });
+  document.getElementById("filter-category").addEventListener("change", (ev) => {
+    haptic("selection");
+    state.filters.category = ev.target.value;
+    updateFilterUI();
+    renderExpenseList();
+  });
+  document.getElementById("filter-payer").addEventListener("change", (ev) => {
+    haptic("selection");
+    state.filters.payer = ev.target.value;
+    updateFilterUI();
+    renderExpenseList();
+  });
+
+  updateFilterUI();
+  renderExpenseList();
+}
+
+function renderExpenseList() {
+  const list = document.getElementById("expense-list");
+  const totalLine = document.getElementById("total-line");
+  if (!list) return;
+
+  const q = state.filters.search.trim().toLowerCase();
+  const { category, payer } = state.filters;
+  const filtered = state.expenses.filter((e) => {
+    if (q && !e.title.toLowerCase().includes(q)) return false;
+    if (category && e.category !== category) return false;
+    if (payer && String(e.payer_member_id) !== String(payer)) return false;
+    return true;
+  });
+
+  const total = filtered.reduce((s, e) => s + Number(e.amount), 0);
+  totalLine.textContent = fmtMoney(total);
+
+  const hasAnyFilter = !!(q || category || payer);
+  list.innerHTML = filtered.length === 0
+    ? `<div class="empty-state">${hasAnyFilter ? "Ничего не найдено." : "Трат за этот месяц пока нет.<br>Нажмите «+», чтобы добавить первую."}</div>`
+    : filtered.map(expenseCardHtml).join("");
+
+  list.querySelectorAll(".expense-card").forEach((el) => {
     el.addEventListener("click", () => {
       const expense = state.expenses.find((e) => e.id === Number(el.dataset.id));
       openExpenseModal(expense);
     });
   });
-  document.getElementById("export-btn").addEventListener("click", exportXlsx);
-  content.querySelectorAll(".expense-thumb[data-photo]").forEach((img) => {
+  list.querySelectorAll(".expense-thumb[data-photo]").forEach((img) => {
     loadAuthedImage(img, `/chats/${state.chatId}/${img.dataset.photo}`);
   });
 }
@@ -379,14 +495,56 @@ async function exportXlsx() {
 /* ---------------- Модалка добавления/редактирования траты ---------------- */
 
 function openSheet(innerHtml) {
+  // на всякий случай сбрасываем нативные кнопки от предыдущей шторки, если та не закрылась
+  // штатно (не должно случаться, но так спокойнее)
+  if (tg && tg.MainButton) tg.MainButton.hide();
+  if (tg && tg.BackButton) tg.BackButton.hide();
+
   const overlay = document.createElement("div");
   overlay.className = "sheet-overlay";
   overlay.innerHTML = `<div class="sheet"><div class="sheet-handle"></div>${innerHtml}</div>`;
   overlay.addEventListener("click", (ev) => {
-    if (ev.target === overlay) overlay.remove();
+    if (ev.target === overlay) closeSheet(overlay);
   });
   document.body.appendChild(overlay);
+
+  // Системная кнопка «назад» Telegram закрывает текущую шторку так же, как тап по фону
+  if (tg && tg.BackButton) {
+    const backHandler = () => closeSheet(overlay);
+    overlay._backHandler = backHandler;
+    tg.BackButton.onClick(backHandler);
+    tg.BackButton.show();
+  }
   return overlay;
+}
+
+function closeSheet(overlay) {
+  if (tg && tg.MainButton) {
+    if (overlay._mainHandler) tg.MainButton.offClick(overlay._mainHandler);
+    tg.MainButton.hide();
+  }
+  if (tg && tg.BackButton) {
+    if (overlay._backHandler) tg.BackButton.offClick(overlay._backHandler);
+    tg.BackButton.hide();
+  }
+  haptic("impact", "light");
+  overlay.remove();
+}
+
+/* Подменяет самодельную кнопку submit/save внутри шторки на нативную нижнюю кнопку
+   Telegram (MainButton) — просто прячет исходную кнопку и проксирует тап на неё же, чтобы
+   вся логика клика (валидация, запрос к API, обработка ошибок) осталась в одном месте.
+   Если MainButton недоступен (старый клиент Telegram или тестирование вне Telegram) —
+   исходная кнопка остаётся видимой и рабочей, как раньше. */
+function useMainButtonFor(overlay, btn, text) {
+  if (!tg || !tg.MainButton) return;
+  btn.style.display = "none";
+  tg.MainButton.setText(text);
+  tg.MainButton.show();
+  tg.MainButton.enable();
+  const handler = () => btn.click();
+  overlay._mainHandler = handler;
+  tg.MainButton.onClick(handler);
 }
 
 function openExpenseModal(existing) {
@@ -483,6 +641,7 @@ function openExpenseModal(existing) {
       loadAvatarsIn(block);
       block.querySelectorAll(".chip").forEach((chip) => {
         chip.addEventListener("click", () => {
+          haptic("selection");
           const id = Number(chip.dataset.id);
           if (selectedIds.has(id)) selectedIds.delete(id); else selectedIds.add(id);
           chip.classList.toggle("selected");
@@ -517,6 +676,7 @@ function openExpenseModal(existing) {
 
   overlay.querySelectorAll(".split-toggle div").forEach((el) => {
     el.addEventListener("click", () => {
+      haptic("selection");
       splitType = el.dataset.v;
       overlay.querySelectorAll(".split-toggle div").forEach((x) => x.classList.toggle("active", x === el));
       renderParticipants();
@@ -562,18 +722,23 @@ function openExpenseModal(existing) {
     const photoFile = photoInput.files[0];
     if (photoFile) form.append("photo", photoFile);
 
+    if (tg && tg.MainButton) tg.MainButton.showProgress(false);
     try {
       if (isEdit) {
         await api(`/chats/${state.chatId}/expenses/${existing.id}`, { method: "PATCH", body: form, isForm: true });
       } else {
         await api(`/chats/${state.chatId}/expenses`, { method: "POST", body: form, isForm: true });
       }
-      overlay.remove();
+      haptic("notification", "success");
+      closeSheet(overlay);
       await renderExpensesTab();
     } catch (e) {
       showFormError(errorEl, e.message);
+    } finally {
+      if (tg && tg.MainButton) tg.MainButton.hideProgress();
     }
   });
+  useMainButtonFor(overlay, overlay.querySelector("#f-submit"), isEdit ? "Сохранить" : "Добавить трату");
 
   const deleteBtn = overlay.querySelector("#f-delete");
   if (deleteBtn) {
@@ -582,7 +747,8 @@ function openExpenseModal(existing) {
       if (!ok) return;
       try {
         await api(`/chats/${state.chatId}/expenses/${existing.id}`, { method: "DELETE" });
-        overlay.remove();
+        haptic("notification", "success");
+        closeSheet(overlay);
         await renderExpensesTab();
       } catch (e) {
         toast(e.message);
@@ -592,6 +758,7 @@ function openExpenseModal(existing) {
 }
 
 function showFormError(el, message) {
+  haptic("notification", "error");
   el.textContent = message;
   el.style.display = "block";
 }
@@ -643,7 +810,10 @@ async function renderBalanceTab() {
   `;
 
   content.querySelectorAll(".settle-btn").forEach((btn) => {
-    btn.addEventListener("click", () => openSettleModal(debts[Number(btn.dataset.idx)]));
+    btn.addEventListener("click", () => {
+      haptic("impact", "light");
+      openSettleModal(debts[Number(btn.dataset.idx)]);
+    });
   });
 }
 
@@ -669,6 +839,7 @@ function openSettleModal(debt) {
     const errorEl = overlay.querySelector("#s-error");
     const amount = Number(overlay.querySelector("#s-amount").value || 0);
     if (!amount || amount <= 0) { showFormError(errorEl, "Укажите сумму больше нуля"); return; }
+    if (tg && tg.MainButton) tg.MainButton.showProgress(false);
     try {
       await api(`/chats/${state.chatId}/settlements`, {
         method: "POST",
@@ -679,12 +850,16 @@ function openSettleModal(debt) {
           note: overlay.querySelector("#s-note").value || null,
         },
       });
-      overlay.remove();
+      haptic("notification", "success");
+      closeSheet(overlay);
       await renderBalanceTab();
     } catch (e) {
       showFormError(errorEl, e.message);
+    } finally {
+      if (tg && tg.MainButton) tg.MainButton.hideProgress();
     }
   });
+  useMainButtonFor(overlay, overlay.querySelector("#s-submit"), "Подтвердить");
 }
 
 /* ---------------- Вкладка «Статистика» ---------------- */
@@ -721,6 +896,7 @@ async function renderStatsTab() {
 
   content.querySelectorAll(".month-picker button").forEach((b) => {
     b.addEventListener("click", async () => {
+      haptic("selection");
       state.month = shiftMonth(state.month, Number(b.dataset.dir));
       await renderStatsTab();
     });
@@ -844,6 +1020,7 @@ function openRecurringModal(existing) {
         </div>`;
       block.querySelectorAll(".chip").forEach((chip) => {
         chip.addEventListener("click", () => {
+          haptic("selection");
           const id = Number(chip.dataset.id);
           if (selectedIds.has(id)) selectedIds.delete(id); else selectedIds.add(id);
           chip.classList.toggle("selected");
@@ -874,6 +1051,7 @@ function openRecurringModal(existing) {
   overlay.querySelector("#r-amount").addEventListener("input", () => { if (splitType === "custom") renderParticipants(); });
   overlay.querySelectorAll(".split-toggle div").forEach((el) => {
     el.addEventListener("click", () => {
+      haptic("selection");
       splitType = el.dataset.v;
       overlay.querySelectorAll(".split-toggle div").forEach((x) => x.classList.toggle("active", x === el));
       renderParticipants();
@@ -915,18 +1093,23 @@ function openRecurringModal(existing) {
     };
     if (isEdit) payload.is_active = overlay.querySelector("#r-active").checked;
 
+    if (tg && tg.MainButton) tg.MainButton.showProgress(false);
     try {
       if (isEdit) {
         await api(`/chats/${state.chatId}/recurring/${existing.id}`, { method: "PATCH", body: payload });
       } else {
         await api(`/chats/${state.chatId}/recurring`, { method: "POST", body: payload });
       }
-      overlay.remove();
+      haptic("notification", "success");
+      closeSheet(overlay);
       await renderRecurringTab();
     } catch (e) {
       showFormError(errorEl, e.message);
+    } finally {
+      if (tg && tg.MainButton) tg.MainButton.hideProgress();
     }
   });
+  useMainButtonFor(overlay, overlay.querySelector("#r-submit"), isEdit ? "Сохранить" : "Добавить");
 
   const deleteBtn = overlay.querySelector("#r-delete");
   if (deleteBtn) {
@@ -935,7 +1118,8 @@ function openRecurringModal(existing) {
       if (!ok) return;
       try {
         await api(`/chats/${state.chatId}/recurring/${existing.id}`, { method: "DELETE" });
-        overlay.remove();
+        haptic("notification", "success");
+        closeSheet(overlay);
         await renderRecurringTab();
       } catch (e) {
         toast(e.message);
