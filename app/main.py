@@ -67,6 +67,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def no_cache_webapp_static(request, call_next):
+    """Mini app (HTML/JS/CSS) отдаём с обязательной ревалидацией на каждый запрос.
+
+    По умолчанию StaticFiles не ставит Cache-Control вообще, и тогда браузеры/WebView сами
+    решают, сколько кешировать (эвристика). Мобильный WebView внутри Telegram особенно
+    агрессивен: после передеплоя интерфейс мог не обновляться даже после очистки кеша
+    Telegram и перезапуска приложения. ETag/Last-Modified у StaticFiles уже есть, так что
+    ревалидация дешёвая — почти всегда 304 Not Modified, а не полная перекачка файла.
+    """
+    response = await call_next(request)
+    if not request.url.path.startswith("/api") and request.url.path != "/healthz":
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 for router in (chats.router, expenses.router, balances.router, recurring.router, stats.router, export.router):
     app.include_router(router, prefix="/api")
 
