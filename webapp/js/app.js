@@ -335,7 +335,6 @@ async function renderExpensesTab() {
     <div class="total-line" id="total-line"></div>
     <div class="top-actions">
       <button class="btn small secondary" id="filter-toggle-btn">🔍 Фильтр${hasFilters ? " •" : ""}</button>
-      <button class="btn small secondary" id="export-btn">⬇️ Excel</button>
     </div>
     <div id="filter-panel" style="display:${state.filtersOpen ? "block" : "none"}; margin: 0 0 10px;">
       <div class="field">
@@ -365,8 +364,6 @@ async function renderExpensesTab() {
       await renderExpensesTab();
     });
   });
-  document.getElementById("export-btn").addEventListener("click", exportXlsx);
-
   const filterPanel = document.getElementById("filter-panel");
   const filterToggleBtn = document.getElementById("filter-toggle-btn");
   filterToggleBtn.addEventListener("click", () => {
@@ -473,23 +470,6 @@ function expenseCardHtml(e) {
       </div>
       <div class="expense-amount">${fmtMoney(e.amount)}</div>
     </div>`;
-}
-
-async function exportXlsx() {
-  try {
-    const res = await api(`/chats/${state.chatId}/export?month=${state.month}`);
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `expenses_${state.month}.xlsx`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 5000);
-  } catch (e) {
-    toast(e.message);
-  }
 }
 
 /* ---------------- Модалка добавления/редактирования траты ---------------- */
