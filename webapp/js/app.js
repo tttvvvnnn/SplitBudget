@@ -108,6 +108,17 @@ function memberLabel(memberId) {
   return m.username ? `@${m.username}` : m.full_name;
 }
 
+function memberById(memberId) {
+  return state.members.find((x) => x.id === memberId) || null;
+}
+
+/* Маленькая аватарка/инициал + имя вместе, одной строкой — используется везде, где раньше
+   был просто escapeHtml(memberLabel(id)): в списке трат («кто оплатил»), на вкладке
+   «Баланс» (долги, баланс участников, платежи). Сам escapeHtml уже внутри. */
+function memberInlineHtml(memberId) {
+  return `<span class="member-inline">${avatarHtml(memberById(memberId))}${escapeHtml(memberLabel(memberId))}</span>`;
+}
+
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => (
     { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
@@ -438,9 +449,22 @@ function renderExpenseList() {
   totalLine.textContent = fmtMoney(total);
 
   const hasAnyFilter = !!(q || category || payer);
-  list.innerHTML = filtered.length === 0
-    ? `<div class="empty-state">${hasAnyFilter ? "Ничего не найдено." : "Трат за этот месяц пока нет.<br>Нажмите «+», чтобы добавить первую."}</div>`
-    : filtered.map(expenseCardHtml).join("");
+  if (filtered.length === 0) {
+    list.innerHTML = `<div class="empty-state">${hasAnyFilter ? "Ничего не найдено." : "Трат за этот месяц пока нет.<br>Нажмите «+», чтобы добавить первую."}</div>`;
+  } else {
+    // Список уже приходит с бэкенда отсортированным по expense_date DESC — просто вставляем
+    // заголовок при смене даты, без дополнительной группировки на клиенте
+    let html = "";
+    let lastDate = null;
+    for (const e of filtered) {
+      if (e.expense_date !== lastDate) {
+        html += `<div class="day-header">${dayHeaderLabel(e.expense_date)}</div>`;
+        lastDate = e.expense_date;
+      }
+      html += expenseCardHtml(e);
+    }
+    list.innerHTML = html;
+  }
 
   list.querySelectorAll(".expense-card").forEach((el) => {
     el.addEventListener("click", () => {
@@ -451,6 +475,19 @@ function renderExpenseList() {
   list.querySelectorAll(".expense-thumb[data-photo]").forEach((img) => {
     loadAuthedImage(img, `/chats/${state.chatId}/${img.dataset.photo}`);
   });
+  loadAvatarsIn(list);
+}
+
+/* «Сегодня» / «Вчера» / «пн, 3 сен» — заголовок группы трат за один день в списке */
+function dayHeaderLabel(dateStr) {
+  const d = new Date(`${dateStr}T00:00:00`);
+  const today = new Date(`${todayISO()}T00:00:00`);
+  const diffDays = Math.round((today - d) / 86400000);
+  if (diffDays === 0) return "Сегодня";
+  if (diffDays === 1) return "Вчера";
+  const weekdays = ["вс", "пн", "вт", "ср", "чт", "пт", "сб"];
+  const months = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
+  return `${weekdays[d.getDay()]}, ${d.getDate()} ${months[d.getMonth()]}`;
 }
 
 function expenseCardHtml(e) {
@@ -464,8 +501,7 @@ function expenseCardHtml(e) {
         <div class="expense-title">${escapeHtml(e.title)}</div>
         <div class="expense-meta">
           <span class="badge">${categoryIcon(e.category)} ${escapeHtml(e.category)}</span>
-          ${new Date(e.expense_date).toLocaleDateString("ru-RU")} · ${escapeHtml(memberLabel(e.payer_member_id))}
-          ${e.is_recurring ? " · 🔁" : ""}
+          · ${memberInlineHtml(e.payer_member_id)}${e.is_recurring ? " · 🔁" : ""}
         </div>
       </div>
       <div class="expense-amount">${fmtMoney(e.amount)}</div>
@@ -562,17 +598,15 @@ function openExpenseModal(existing) {
         <input type="number" id="f-amount" min="0" step="0.01" value="${existing ? existing.amount : ""}">
       </div>
     </div>
-    <div class="field-row">
-      <div class="field">
-        <label>Категория</label>
-        <select id="f-category">
-          ${state.categories.map((c) => `<option value="${escapeHtml(c)}" ${existing && existing.category === c ? "selected" : ""}>${categoryIcon(c)} ${escapeHtml(c)}</option>`).join("")}
-        </select>
-      </div>
-      <div class="field">
-        <label>Дата</label>
-        <input type="date" id="f-date" value="${existing ? existing.expense_date : todayISO()}">
-      </div>
+    <div class="field">
+      <label>Категория</label>
+      <select id="f-category">
+        ${state.categories.map((c) => `<option value="${escapeHtml(c)}" ${existing && existing.category === c ? "selected" : ""}>${categoryIcon(c)} ${escapeHtml(c)}</option>`).join("")}
+      </select>
+    </div>
+    <div class="field">
+      <label>Дата</label>
+      <input type="date" id="f-date" value="${existing ? existing.expense_date : todayISO()}">
     </div>
     <div class="field">
       <label>Как делить</label>
@@ -762,7 +796,7 @@ async function renderBalanceTab() {
       ? '<div class="card empty-state" style="padding:20px;">Все в расчёте 🎉</div>'
       : debts.map((d, i) => `
         <div class="card debt-row" data-idx="${i}">
-          <div class="who">${escapeHtml(memberLabel(d.from_member_id))} → ${escapeHtml(memberLabel(d.to_member_id))}</div>
+          <div class="who">${memberInlineHtml(d.from_member_id)} → ${memberInlineHtml(d.to_member_id)}</div>
           <div style="display:flex; align-items:center; gap:10px;">
             <b>${fmtMoney(d.amount)}</b>
             <button class="btn small settle-btn" data-idx="${i}">Погасить</button>
@@ -773,7 +807,7 @@ async function renderBalanceTab() {
     <div class="card">
       ${state.balances.balances.map((b) => `
         <div class="balance-row">
-          <span>${escapeHtml(memberLabel(b.member_id))}</span>
+          ${memberInlineHtml(b.member_id)}
           <span class="${Number(b.net) >= 0 ? "positive" : "negative"}">${Number(b.net) >= 0 ? "+" : ""}${fmtMoney(b.net)}</span>
         </div>`).join("")}
     </div>
@@ -783,7 +817,7 @@ async function renderBalanceTab() {
       <div class="card">
         ${state.settlements.slice(0, 10).map((s) => `
           <div class="balance-row">
-            <span>${escapeHtml(memberLabel(s.from_member_id))} → ${escapeHtml(memberLabel(s.to_member_id))}</span>
+            <span>${memberInlineHtml(s.from_member_id)} → ${memberInlineHtml(s.to_member_id)}</span>
             <span>${fmtMoney(s.amount)}</span>
           </div>`).join("")}
       </div>` : ""}
@@ -795,6 +829,7 @@ async function renderBalanceTab() {
       openSettleModal(debts[Number(btn.dataset.idx)]);
     });
   });
+  loadAvatarsIn(content);
 }
 
 function openSettleModal(debt) {

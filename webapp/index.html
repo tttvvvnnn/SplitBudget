@@ -12,7 +12,10 @@
     <div class="loading" id="global-loading">Загрузка…</div>
   </div>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+  <!-- Раньше грузился с cdnjs.cloudflare.com — этот CDN недоступен на части сетей в России,
+       из-за чего график в статистике молча не строился (window.Chart оставался undefined).
+       Теперь файл лежит прямо в проекте, никакой внешней зависимости на рантайме. -->
+  <script src="vendor/chart.umd.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

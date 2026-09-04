@@ -87,6 +87,9 @@ html, body {
 
 .card {
   background: var(--secondary-bg);
+  /* в некоторых темах Telegram secondary_bg_color почти не отличается от основного фона —
+     без границы карточки трат в такой теме визуально сливались со страницей */
+  border: 1px solid var(--border);
   border-radius: 14px;
   padding: 12px 14px;
   margin-bottom: 10px;
@@ -131,6 +134,34 @@ html, body {
 .expense-meta {
   font-size: 12.5px;
   color: var(--hint);
+  margin-top: 2px;
+}
+
+/* Маленькая аватарка + имя одной строкой — в списке трат («кто оплатил») и на вкладке
+   «Баланс» (долги, баланс участников, платежи), везде вместо голого текста */
+.member-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  vertical-align: middle;
+}
+
+.member-inline .avatar,
+.member-inline .avatar-fallback {
+  width: 16px;
+  height: 16px;
+  font-size: 8px;
+}
+
+/* Заголовок группы трат за один день в списке — «Сегодня» / «Вчера» / «пн, 3 сен» */
+.day-header {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--hint);
+  margin: 14px 4px 6px;
+}
+
+.day-header:first-child {
   margin-top: 2px;
 }
 
