@@ -446,23 +446,21 @@ html, body {
 }
 
 .field input[type=date] {
-  /* Даже в своей собственной полноширинной строке поле даты всё равно вылезало за край
-     шторки на iOS. Причина не в CSS-ширине самого input — width:100%/box-sizing тут ни при
-     чём, — а в том, что WebKit рисует внутри date-инпута свою кнопку "очистить" (крестик) и
-     спиннер с отступами, которые НЕ учитываются в объявленной ширине и раздвигают реальный
-     рендер поля за её пределы. Убираем эти нативные элементы и жёстко ограничиваем max-width
-     как страховку. */
-  max-width: 100%;
+  /* Прошлая попытка (скрыть ::-webkit-clear-button/::-webkit-inner-spin-button) не
+     сработала — на iOS date-инпут вообще не рисует эти псевдоэлементы, это чисто
+     Chromium/десктопная история, так что она ни на что не влияла. На iOS Safari/WKWebView
+     <input type=date> рендерится через нативный UI (UIDatePicker) со своим внутренним
+     "аппирансом", который может игнорировать объявленную width целиком. appearance: none
+     отключает нативный вид и отдаёт расчёт размеров браузерному CSS-движку — это и есть
+     стандартный фикс именно для этой проблемы (в отличие от предыдущей попытки).
+     !important — подстраховка на случай, если UA-стили для этого типа поля более
+     специфичны, чем наши. */
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100% !important;
+  max-width: 100% !important;
   min-width: 0;
-}
-
-.field input[type=date]::-webkit-clear-button,
-.field input[type=date]::-webkit-inner-spin-button {
-  display: none;
-}
-
-.field input[type=date]::-webkit-calendar-picker-indicator {
-  margin-left: 4px;
+  box-sizing: border-box;
 }
 
 .field input[type=text]:focus,
