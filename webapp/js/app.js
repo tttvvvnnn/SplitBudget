@@ -26,6 +26,8 @@ const state = {
   recurring: [],
   editingExpense: null,
   editingRecurring: null,
+  version: "",
+  buildInfo: "",
 };
 
 function todayMonth() {
@@ -266,10 +268,40 @@ async function loadMeAndRender() {
     state.members = me.members;
     state.categories = me.categories;
     renderShell();
+    loadVersionBadge(); // не блокирует основной рендер — бейдж в углу подтянется чуть позже
     await renderTab();
   } catch (e) {
     renderError(e.message);
   }
+}
+
+/* Версия/сборка в правом верхнем углу шапки — чтобы после пересборки контейнера на стенде
+   было видно на глаз, старый код сейчас открыт или уже новый. /healthz отдаётся без
+   Cache-Control-кеширования специально для этого (см. app/main.py). */
+async function loadVersionBadge() {
+  try {
+    const res = await fetch("/healthz", { cache: "no-store" });
+    if (!res.ok) return;
+    const data = await res.json();
+    state.version = data.version || "dev";
+    state.buildInfo = data.build || "";
+    renderVersionBadge();
+  } catch (e) {
+    // не критично — просто не покажем бейдж
+  }
+}
+
+function renderVersionBadge() {
+  const header = document.querySelector(".header");
+  if (!header) return;
+  let badge = document.getElementById("version-badge");
+  if (!badge) {
+    badge = document.createElement("div");
+    badge.id = "version-badge";
+    badge.className = "version-badge";
+    header.appendChild(badge);
+  }
+  badge.textContent = [state.version, state.buildInfo].filter(Boolean).join(" · ");
 }
 
 /* ---------------- Каркас: шапка + вкладки ---------------- */
