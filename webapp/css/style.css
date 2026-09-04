@@ -57,6 +57,40 @@ html, body {
   color: var(--hint);
 }
 
+/* Компактная сводка личного баланса вверху вкладки «Траты» — см. balanceBannerHtml() */
+.balance-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-radius: 12px;
+  margin-top: 4px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.balance-banner.positive {
+  background: rgba(52, 199, 89, 0.12);
+  color: var(--success);
+}
+
+.balance-banner.negative {
+  background: rgba(255, 59, 48, 0.12);
+  color: var(--danger);
+}
+
+.balance-banner.neutral {
+  background: var(--secondary-bg);
+  color: var(--hint);
+  border: 1px solid var(--border);
+}
+
+.balance-banner .chevron {
+  opacity: 0.6;
+  font-weight: 400;
+}
+
 .month-picker {
   display: flex;
   align-items: center;
@@ -176,7 +210,13 @@ html, body {
   font-size: 11px;
   padding: 2px 8px;
   border-radius: 20px;
+  /* Раньше был захардкожен синий rgba(36, 129, 204, ...) — цвет темы Telegram по
+     умолчанию. В цветных темах (Настройки → Оформление) --link становится другим
+     цветом (розовым, зелёным и т.д.), а бейдж оставался синим и на тёмном фоне читался
+     как «просто тёмный». color-mix() подмешивает прозрачность к РЕАЛЬНОМУ цвету темы;
+     rgba-фолбэк выше — для браузеров без поддержки color-mix (просто игнорируют строку). */
   background: rgba(36, 129, 204, 0.12);
+  background: color-mix(in srgb, var(--link) 12%, transparent);
   color: var(--link);
   margin-right: 6px;
 }
@@ -389,7 +429,10 @@ html, body {
 .field textarea:focus {
   outline: none;
   border-color: var(--link);
+  /* тот же фикс, что и у .badge — раньше свечение фокуса было захардкожено синим и не
+     подстраивалось под цветные темы Telegram */
   box-shadow: 0 0 0 3px rgba(36, 129, 204, 0.15);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--link) 15%, transparent);
 }
 
 .chip-row {

@@ -298,14 +298,7 @@ function renderShell() {
     </div>`;
 
   app.querySelectorAll(".tabbar button").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      if (btn.dataset.tab === state.tab) return;
-      haptic("selection");
-      state.tab = btn.dataset.tab;
-      app.querySelectorAll(".tabbar button").forEach((b) => b.classList.toggle("active", b === btn));
-      document.getElementById("fab-add").style.display = state.tab === "stats" ? "none" : "flex";
-      await renderTab();
-    });
+    btn.addEventListener("click", () => switchTab(btn.dataset.tab));
   });
 
   document.getElementById("fab-add").addEventListener("click", () => {
@@ -313,6 +306,17 @@ function renderShell() {
     if (state.tab === "recurring") openRecurringModal(null);
     else openExpenseModal(null);
   });
+}
+
+/* Переключение вкладки — вынесено отдельно, чтобы можно было вызвать не только из таббара
+   внизу, но и, например, тапом по сводке баланса вверху вкладки «Траты» */
+async function switchTab(tabId) {
+  if (tabId === state.tab) return;
+  haptic("selection");
+  state.tab = tabId;
+  document.querySelectorAll(".tabbar button").forEach((b) => b.classList.toggle("active", b.dataset.tab === tabId));
+  document.getElementById("fab-add").style.display = tabId === "stats" ? "none" : "flex";
+  await renderTab();
 }
 
 async function renderTab() {
@@ -324,12 +328,40 @@ async function renderTab() {
   else if (state.tab === "recurring") await renderRecurringTab();
 }
 
+/* Компактная сводка личного баланса вверху вкладки «Траты» — чтобы не нужно было заходить
+   на вкладку «Баланс» просто ради того, чтобы понять, кто кому сейчас должен. Тап по ней
+   переключает на вкладку «Баланс» с полной картиной (кто кому и кнопка «Погасить»). */
+function balanceBannerHtml() {
+  if (!state.balances) return "";
+  const mine = state.balances.balances.find((b) => b.member_id === state.member.id);
+  const net = mine ? Number(mine.net) : 0;
+  let cls = "neutral";
+  let text = "Баланс: все в расчёте 🎉";
+  if (net > 0.005) {
+    cls = "positive";
+    text = `Вам должны ${fmtMoney(net)}`;
+  } else if (net < -0.005) {
+    cls = "negative";
+    text = `Вы должны ${fmtMoney(-net)}`;
+  }
+  return `
+    <div class="balance-banner ${cls}" id="balance-banner">
+      <span>${escapeHtml(text)}</span>
+      <span class="chevron">›</span>
+    </div>`;
+}
+
 /* ---------------- Вкладка «Траты» ---------------- */
 
 async function renderExpensesTab() {
   const content = document.getElementById("content");
   try {
-    state.expenses = await api(`/chats/${state.chatId}/expenses?month=${state.month}`);
+    const [expenses, balances] = await Promise.all([
+      api(`/chats/${state.chatId}/expenses?month=${state.month}`),
+      api(`/chats/${state.chatId}/balances`),
+    ]);
+    state.expenses = expenses;
+    state.balances = balances;
   } catch (e) {
     content.innerHTML = `<div class="empty-state">${escapeHtml(e.message)}</div>`;
     return;
@@ -338,6 +370,7 @@ async function renderExpensesTab() {
   const hasFilters = !!(state.filters.search || state.filters.category || state.filters.payer);
 
   content.innerHTML = `
+    ${balanceBannerHtml()}
     <div class="month-picker">
       <button data-dir="-1">‹</button>
       <div class="label">${monthLabel(state.month)}</div>
@@ -367,6 +400,9 @@ async function renderExpensesTab() {
       </div>
     </div>
     <div id="expense-list"></div>`;
+
+  const balanceBanner = document.getElementById("balance-banner");
+  if (balanceBanner) balanceBanner.addEventListener("click", () => switchTab("balance"));
 
   content.querySelectorAll(".month-picker button").forEach((b) => {
     b.addEventListener("click", async () => {
