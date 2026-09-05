@@ -181,9 +181,20 @@ html, body {
 }
 
 .expense-meta {
+  /* Раньше это была просто строка текста с точкой-разделителем между бейджем категории и
+     "кто оплатил" — при длинном @username (не короткое имя, как в тестах раньше) он не
+     помещался на строку целиком, и точка повисала в конце первой строки, а аватар+юзернейм
+     переносились на вторую — выглядело как будто элементы наезжают друг на друга. Теперь
+     это flex-ряд с явным переносом и одинаковыми отступами между чипами в обе стороны —
+     перенос на вторую строку (если не помещается) выглядит аккуратно в любом случае. */
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 6px;
+  row-gap: 3px;
   font-size: 12.5px;
   color: var(--hint);
-  margin-top: 2px;
+  margin-top: 4px;
 }
 
 /* Маленькая аватарка + имя одной строкой — в списке трат («кто оплатил») и на вкладке
@@ -193,6 +204,13 @@ html, body {
   align-items: center;
   gap: 4px;
   vertical-align: middle;
+  min-width: 0;
+}
+
+.member-inline span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .member-inline .avatar,
@@ -221,7 +239,9 @@ html, body {
 }
 
 .badge {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
   font-size: 11px;
   padding: 2px 8px;
   border-radius: 20px;
@@ -229,11 +249,16 @@ html, body {
      умолчанию. В цветных темах (Настройки → Оформление) --link становится другим
      цветом (розовым, зелёным и т.д.), а бейдж оставался синим и на тёмном фоне читался
      как «просто тёмный». color-mix() подмешивает прозрачность к РЕАЛЬНОМУ цвету темы;
-     rgba-фолбэк выше — для браузеров без поддержки color-mix (просто игнорируют строку). */
-  background: rgba(36, 129, 204, 0.12);
-  background: color-mix(in srgb, var(--link) 12%, transparent);
+     rgba-фолбэк выше — для браузеров без поддержки color-mix (просто игнорируют строку).
+     Фон подняли с 12% до 18% и добавили тонкую рамку того же цвета — в темах с приглушённым
+     (не ярким) акцентным цветом текст и фон одного оттенка на 12%-подложке сливались почти
+     до нечитаемости, рамка даёт чёткую границу независимо от того, насколько тёмный акцент
+     в конкретной теме. */
+  background: rgba(36, 129, 204, 0.18);
+  background: color-mix(in srgb, var(--link) 18%, transparent);
+  border: 1px solid rgba(36, 129, 204, 0.3);
+  border: 1px solid color-mix(in srgb, var(--link) 30%, transparent);
   color: var(--link);
-  margin-right: 6px;
 }
 
 .empty-state {

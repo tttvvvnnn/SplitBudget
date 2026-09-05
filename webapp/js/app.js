@@ -569,7 +569,8 @@ function expenseCardHtml(e) {
         <div class="expense-title">${escapeHtml(e.title)}</div>
         <div class="expense-meta">
           <span class="badge">${categoryIcon(e.category)} ${escapeHtml(e.category)}</span>
-          · ${memberInlineHtml(e.payer_member_id)}${e.is_recurring ? " · 🔁" : ""}
+          ${memberInlineHtml(e.payer_member_id)}
+          ${e.is_recurring ? '<span title="Повторяющаяся">🔁</span>' : ""}
         </div>
       </div>
       <div class="expense-amount">${fmtMoney(e.amount)}</div>
