@@ -18,7 +18,7 @@ async def sync_member_avatar(bot: Bot, session: AsyncSession, member: Member) ->
     защищённый эндпоинт GET /chats/{chat_id}/photos/{filename}. Ошибки (нет сети, нет фото
     у пользователя, приватность профиля закрыта и т.п.) намеренно не всплывают наружу —
     это не должно ломать обработку сообщения/команды, из-за которой участник был создан."""
-    if member.avatar_path:
+    if member.avatar_path or member.tg_user_id is None:
         return
     try:
         photos = await bot.get_user_profile_photos(member.tg_user_id, limit=1)

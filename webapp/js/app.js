@@ -19,11 +19,15 @@ const state = {
   month: todayMonth(),
   expenses: [],
   expenseCategory: "",
+  filters: { search: "", category: "", payer: "" },
+  filtersOpen: false,
   balances: null,
   settlements: [],
   recurring: [],
   editingExpense: null,
   editingRecurring: null,
+  version: "",
+  buildInfo: "",
 };
 
 function todayMonth() {
@@ -106,6 +110,17 @@ function memberLabel(memberId) {
   return m.username ? `@${m.username}` : m.full_name;
 }
 
+function memberById(memberId) {
+  return state.members.find((x) => x.id === memberId) || null;
+}
+
+/* Маленькая аватарка/инициал + имя вместе, одной строкой — используется везде, где раньше
+   был просто escapeHtml(memberLabel(id)): в списке трат («кто оплатил»), на вкладке
+   «Баланс» (долги, баланс участников, платежи). Сам escapeHtml уже внутри. */
+function memberInlineHtml(memberId) {
+  return `<span class="member-inline">${avatarHtml(memberById(memberId))}${escapeHtml(memberLabel(memberId))}</span>`;
+}
+
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => (
     { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
@@ -146,6 +161,7 @@ async function loadAuthedImage(imgEl, path) {
 }
 
 function toast(message) {
+  haptic("notification", "error"); // toast() в этом коде зовётся только из catch-веток
   if (tg && tg.showAlert) {
     tg.showAlert(message);
   } else {
@@ -161,6 +177,18 @@ function confirmAction(message) {
       resolve(confirm(message));
     }
   });
+}
+
+/* Тактильный отклик через Telegram WebApp API — короткая вибрация на действие, без неё
+   интерфейс ощущается «веб-страницей», а не частью Telegram. На старых клиентах, где
+   HapticFeedback не поддерживается, тихо ничего не делает. */
+function haptic(kind, style) {
+  if (!tg || !tg.HapticFeedback) return;
+  try {
+    if (kind === "impact") tg.HapticFeedback.impactOccurred(style || "light");
+    else if (kind === "notification") tg.HapticFeedback.notificationOccurred(style || "success");
+    else if (kind === "selection") tg.HapticFeedback.selectionChanged();
+  } catch (e) { /* не критично */ }
 }
 
 /* ---------------- Инициализация ---------------- */
@@ -240,10 +268,40 @@ async function loadMeAndRender() {
     state.members = me.members;
     state.categories = me.categories;
     renderShell();
+    loadVersionBadge(); // не блокирует основной рендер — бейдж в углу подтянется чуть позже
     await renderTab();
   } catch (e) {
     renderError(e.message);
   }
+}
+
+/* Версия/сборка в правом верхнем углу шапки — чтобы после пересборки контейнера на стенде
+   было видно на глаз, старый код сейчас открыт или уже новый. /healthz отдаётся без
+   Cache-Control-кеширования специально для этого (см. app/main.py). */
+async function loadVersionBadge() {
+  try {
+    const res = await fetch("/healthz", { cache: "no-store" });
+    if (!res.ok) return;
+    const data = await res.json();
+    state.version = data.version || "dev";
+    state.buildInfo = data.build || "";
+    renderVersionBadge();
+  } catch (e) {
+    // не критично — просто не покажем бейдж
+  }
+}
+
+function renderVersionBadge() {
+  const header = document.querySelector(".header");
+  if (!header) return;
+  let badge = document.getElementById("version-badge");
+  if (!badge) {
+    badge = document.createElement("div");
+    badge.id = "version-badge";
+    badge.className = "version-badge";
+    header.appendChild(badge);
+  }
+  badge.textContent = [state.version, state.buildInfo].filter(Boolean).join(" · ");
 }
 
 /* ---------------- Каркас: шапка + вкладки ---------------- */
@@ -272,18 +330,25 @@ function renderShell() {
     </div>`;
 
   app.querySelectorAll(".tabbar button").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      state.tab = btn.dataset.tab;
-      app.querySelectorAll(".tabbar button").forEach((b) => b.classList.toggle("active", b === btn));
-      document.getElementById("fab-add").style.display = state.tab === "stats" ? "none" : "flex";
-      await renderTab();
-    });
+    btn.addEventListener("click", () => switchTab(btn.dataset.tab));
   });
 
   document.getElementById("fab-add").addEventListener("click", () => {
+    haptic("impact", "light");
     if (state.tab === "recurring") openRecurringModal(null);
     else openExpenseModal(null);
   });
+}
+
+/* Переключение вкладки — вынесено отдельно, чтобы можно было вызвать не только из таббара
+   внизу, но и, например, тапом по сводке баланса вверху вкладки «Траты» */
+async function switchTab(tabId) {
+  if (tabId === state.tab) return;
+  haptic("selection");
+  state.tab = tabId;
+  document.querySelectorAll(".tabbar button").forEach((b) => b.classList.toggle("active", b.dataset.tab === tabId));
+  document.getElementById("fab-add").style.display = tabId === "stats" ? "none" : "flex";
+  await renderTab();
 }
 
 async function renderTab() {
@@ -295,55 +360,214 @@ async function renderTab() {
   else if (state.tab === "recurring") await renderRecurringTab();
 }
 
+/* Компактная сводка личного баланса вверху вкладки «Траты» — чтобы не нужно было заходить
+   на вкладку «Баланс» просто ради того, чтобы понять, кто кому сейчас должен. Тап по ней
+   переключает на вкладку «Баланс» с полной картиной (кто кому и кнопка «Погасить»). */
+function balanceBannerHtml() {
+  if (!state.balances) return "";
+  const mine = state.balances.balances.find((b) => b.member_id === state.member.id);
+  const net = mine ? Number(mine.net) : 0;
+  let cls = "neutral";
+  let text = "Баланс: все в расчёте 🎉";
+  if (net > 0.005) {
+    cls = "positive";
+    text = `Вам должны ${fmtMoney(net)}`;
+  } else if (net < -0.005) {
+    cls = "negative";
+    text = `Вы должны ${fmtMoney(-net)}`;
+  }
+  return `
+    <div class="balance-banner ${cls}" id="balance-banner">
+      <span>${escapeHtml(text)}</span>
+      <span class="chevron">›</span>
+    </div>`;
+}
+
 /* ---------------- Вкладка «Траты» ---------------- */
 
 async function renderExpensesTab() {
   const content = document.getElementById("content");
   try {
-    state.expenses = await api(`/chats/${state.chatId}/expenses?month=${state.month}`);
+    const [expenses, balances] = await Promise.all([
+      api(`/chats/${state.chatId}/expenses?month=${state.month}`),
+      api(`/chats/${state.chatId}/balances`),
+    ]);
+    state.expenses = expenses;
+    state.balances = balances;
   } catch (e) {
     content.innerHTML = `<div class="empty-state">${escapeHtml(e.message)}</div>`;
     return;
   }
 
-  const total = state.expenses.reduce((s, e) => s + Number(e.amount), 0);
+  const hasFilters = !!(state.filters.search || state.filters.category || state.filters.payer);
 
   content.innerHTML = `
+    ${balanceBannerHtml()}
     <div class="month-picker">
       <button data-dir="-1">‹</button>
       <div class="label">${monthLabel(state.month)}</div>
       <button data-dir="1">›</button>
     </div>
-    <div class="total-line">${fmtMoney(total)}</div>
+    <div class="total-line" id="total-line"></div>
     <div class="top-actions">
-      <button class="btn small secondary" id="export-btn">⬇️ Экспорт в Excel</button>
+      <button class="btn small secondary" id="filter-toggle-btn">🔍 Фильтр${hasFilters ? " •" : ""}</button>
     </div>
-    <div id="expense-list">
-      ${state.expenses.length === 0 ? '<div class="empty-state">Трат за этот месяц пока нет.<br>Нажмите «+», чтобы добавить первую.</div>' : state.expenses.map(expenseCardHtml).join("")}
-    </div>`;
+    <div id="filter-panel" style="display:${state.filtersOpen ? "block" : "none"}; margin: 0 0 10px;">
+      <div class="field">
+        <input type="text" id="filter-search" placeholder="Поиск по названию…" value="${escapeHtml(state.filters.search)}">
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <select id="filter-category">
+            <option value="">Все категории</option>
+            ${state.categories.map((c) => `<option value="${escapeHtml(c)}" ${state.filters.category === c ? "selected" : ""}>${categoryIcon(c)} ${escapeHtml(c)}</option>`).join("")}
+          </select>
+        </div>
+        <div class="field">
+          <select id="filter-payer">
+            <option value="">Все участники</option>
+            ${state.members.map((m) => `<option value="${m.id}" ${String(state.filters.payer) === String(m.id) ? "selected" : ""}>${escapeHtml(m.full_name)}</option>`).join("")}
+          </select>
+        </div>
+      </div>
+    </div>
+    <div id="expense-list"></div>`;
+
+  const balanceBanner = document.getElementById("balance-banner");
+  if (balanceBanner) balanceBanner.addEventListener("click", () => switchTab("balance"));
 
   content.querySelectorAll(".month-picker button").forEach((b) => {
     b.addEventListener("click", async () => {
+      haptic("selection");
       state.month = shiftMonth(state.month, Number(b.dataset.dir));
       await renderExpensesTab();
     });
   });
-  content.querySelectorAll(".expense-card").forEach((el) => {
+  const filterPanel = document.getElementById("filter-panel");
+  const filterToggleBtn = document.getElementById("filter-toggle-btn");
+  filterToggleBtn.addEventListener("click", () => {
+    haptic("selection");
+    state.filtersOpen = !state.filtersOpen;
+    filterPanel.style.display = state.filtersOpen ? "block" : "none";
+  });
+
+  function updateFilterUI() {
+    const active = !!(state.filters.search || state.filters.category || state.filters.payer);
+    filterToggleBtn.textContent = `🔍 Фильтр${active ? " •" : ""}`;
+    let resetBtn = document.getElementById("filter-reset-btn");
+    if (active && !resetBtn) {
+      resetBtn = document.createElement("button");
+      resetBtn.type = "button";
+      resetBtn.className = "btn small secondary";
+      resetBtn.id = "filter-reset-btn";
+      resetBtn.style.marginTop = "8px";
+      resetBtn.textContent = "✕ Сбросить фильтр";
+      resetBtn.addEventListener("click", () => {
+        haptic("selection");
+        state.filters = { search: "", category: "", payer: "" };
+        document.getElementById("filter-search").value = "";
+        document.getElementById("filter-category").value = "";
+        document.getElementById("filter-payer").value = "";
+        updateFilterUI();
+        renderExpenseList();
+      });
+      filterPanel.appendChild(resetBtn);
+    } else if (!active && resetBtn) {
+      resetBtn.remove();
+    }
+  }
+
+  document.getElementById("filter-search").addEventListener("input", (ev) => {
+    state.filters.search = ev.target.value;
+    updateFilterUI();
+    renderExpenseList();
+  });
+  document.getElementById("filter-category").addEventListener("change", (ev) => {
+    haptic("selection");
+    state.filters.category = ev.target.value;
+    updateFilterUI();
+    renderExpenseList();
+  });
+  document.getElementById("filter-payer").addEventListener("change", (ev) => {
+    haptic("selection");
+    state.filters.payer = ev.target.value;
+    updateFilterUI();
+    renderExpenseList();
+  });
+
+  updateFilterUI();
+  renderExpenseList();
+}
+
+function renderExpenseList() {
+  const list = document.getElementById("expense-list");
+  const totalLine = document.getElementById("total-line");
+  if (!list) return;
+
+  const q = state.filters.search.trim().toLowerCase();
+  const { category, payer } = state.filters;
+  const filtered = state.expenses.filter((e) => {
+    if (q && !e.title.toLowerCase().includes(q)) return false;
+    if (category && e.category !== category) return false;
+    if (payer && String(e.payer_member_id) !== String(payer)) return false;
+    return true;
+  });
+
+  const total = filtered.reduce((s, e) => s + Number(e.amount), 0);
+  totalLine.textContent = fmtMoney(total);
+
+  const hasAnyFilter = !!(q || category || payer);
+  if (filtered.length === 0) {
+    list.innerHTML = `<div class="empty-state">${hasAnyFilter ? "Ничего не найдено." : "Трат за этот месяц пока нет.<br>Нажмите «+», чтобы добавить первую."}</div>`;
+  } else {
+    // Список уже приходит с бэкенда отсортированным по expense_date DESC — просто вставляем
+    // заголовок при смене даты, без дополнительной группировки на клиенте
+    let html = "";
+    let lastDate = null;
+    for (const e of filtered) {
+      if (e.expense_date !== lastDate) {
+        html += `<div class="day-header">${dayHeaderLabel(e.expense_date)}</div>`;
+        lastDate = e.expense_date;
+      }
+      html += expenseCardHtml(e);
+    }
+    list.innerHTML = html;
+  }
+
+  list.querySelectorAll(".expense-card").forEach((el) => {
     el.addEventListener("click", () => {
       const expense = state.expenses.find((e) => e.id === Number(el.dataset.id));
       openExpenseModal(expense);
     });
   });
-  document.getElementById("export-btn").addEventListener("click", exportXlsx);
-  content.querySelectorAll(".expense-thumb[data-photo]").forEach((img) => {
+  list.querySelectorAll(".expense-thumb[data-photo]").forEach((img) => {
     loadAuthedImage(img, `/chats/${state.chatId}/${img.dataset.photo}`);
   });
+  loadAvatarsIn(list);
+}
+
+/* «Сегодня» / «Вчера» / «пн, 3 сен» — заголовок группы трат за один день в списке */
+function dayHeaderLabel(dateStr) {
+  const d = new Date(`${dateStr}T00:00:00`);
+  const today = new Date(`${todayISO()}T00:00:00`);
+  const diffDays = Math.round((today - d) / 86400000);
+  if (diffDays === 0) return "Сегодня";
+  if (diffDays === 1) return "Вчера";
+  const weekdays = ["вс", "пн", "вт", "ср", "чт", "пт", "сб"];
+  const months = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
+  return `${weekdays[d.getDay()]}, ${d.getDate()} ${months[d.getMonth()]}`;
 }
 
 function expenseCardHtml(e) {
   const thumb = e.photo_url
     ? `<img class="expense-thumb" data-photo="${escapeHtml(e.photo_url)}">`
     : `<div class="expense-thumb placeholder">${categoryIcon(e.category)}</div>`;
+  const payer = memberById(e.payer_member_id);
+  // Кто должен скинуться на эту трату — участники из shares (обычно включая самого
+  // плательщика, если он тоже участвует своей долей). Только аватарки, без имён — иначе
+  // строка мета не помещалась бы уже при 3-4 участниках; полный список — во всплывающей
+  // подсказке (title) и при открытии самой траты.
+  const participants = e.shares.map((s) => memberById(s.member_id));
   return `
     <div class="card expense-card" data-id="${e.id}">
       ${thumb}
@@ -351,42 +575,71 @@ function expenseCardHtml(e) {
         <div class="expense-title">${escapeHtml(e.title)}</div>
         <div class="expense-meta">
           <span class="badge">${categoryIcon(e.category)} ${escapeHtml(e.category)}</span>
-          ${new Date(e.expense_date).toLocaleDateString("ru-RU")} · ${escapeHtml(memberLabel(e.payer_member_id))}
-          ${e.is_recurring ? " · 🔁" : ""}
+          <span class="payer-avatar" title="Оплатил(а): ${escapeHtml(payer ? payer.full_name : "—")}">${avatarHtml(payer)}</span>
+          ${participants.length > 0 ? `
+            <span class="split-avatars" title="Делят: ${escapeHtml(participants.map((m) => (m ? m.full_name : "—")).join(", "))}">
+              ${participants.map((m) => avatarHtml(m)).join("")}
+            </span>` : ""}
+          ${e.is_recurring ? '<span title="Повторяющаяся">🔁</span>' : ""}
         </div>
       </div>
       <div class="expense-amount">${fmtMoney(e.amount)}</div>
     </div>`;
 }
 
-async function exportXlsx() {
-  try {
-    const res = await api(`/chats/${state.chatId}/export?month=${state.month}`);
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `expenses_${state.month}.xlsx`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 5000);
-  } catch (e) {
-    toast(e.message);
-  }
-}
-
 /* ---------------- Модалка добавления/редактирования траты ---------------- */
 
 function openSheet(innerHtml) {
+  // на всякий случай сбрасываем нативные кнопки от предыдущей шторки, если та не закрылась
+  // штатно (не должно случаться, но так спокойнее)
+  if (tg && tg.MainButton) tg.MainButton.hide();
+  if (tg && tg.BackButton) tg.BackButton.hide();
+
   const overlay = document.createElement("div");
   overlay.className = "sheet-overlay";
   overlay.innerHTML = `<div class="sheet"><div class="sheet-handle"></div>${innerHtml}</div>`;
   overlay.addEventListener("click", (ev) => {
-    if (ev.target === overlay) overlay.remove();
+    if (ev.target === overlay) closeSheet(overlay);
   });
   document.body.appendChild(overlay);
+
+  // Системная кнопка «назад» Telegram закрывает текущую шторку так же, как тап по фону
+  if (tg && tg.BackButton) {
+    const backHandler = () => closeSheet(overlay);
+    overlay._backHandler = backHandler;
+    tg.BackButton.onClick(backHandler);
+    tg.BackButton.show();
+  }
   return overlay;
+}
+
+function closeSheet(overlay) {
+  if (tg && tg.MainButton) {
+    if (overlay._mainHandler) tg.MainButton.offClick(overlay._mainHandler);
+    tg.MainButton.hide();
+  }
+  if (tg && tg.BackButton) {
+    if (overlay._backHandler) tg.BackButton.offClick(overlay._backHandler);
+    tg.BackButton.hide();
+  }
+  haptic("impact", "light");
+  overlay.remove();
+}
+
+/* Подменяет самодельную кнопку submit/save внутри шторки на нативную нижнюю кнопку
+   Telegram (MainButton) — просто прячет исходную кнопку и проксирует тап на неё же, чтобы
+   вся логика клика (валидация, запрос к API, обработка ошибок) осталась в одном месте.
+   Если MainButton недоступен (старый клиент Telegram или тестирование вне Telegram) —
+   исходная кнопка остаётся видимой и рабочей, как раньше. */
+function useMainButtonFor(overlay, btn, text) {
+  if (!tg || !tg.MainButton) return;
+  btn.style.display = "none";
+  tg.MainButton.setText(text);
+  tg.MainButton.show();
+  tg.MainButton.enable();
+  const handler = () => btn.click();
+  overlay._mainHandler = handler;
+  tg.MainButton.onClick(handler);
 }
 
 function openExpenseModal(existing) {
@@ -424,17 +677,15 @@ function openExpenseModal(existing) {
         <input type="number" id="f-amount" min="0" step="0.01" value="${existing ? existing.amount : ""}">
       </div>
     </div>
-    <div class="field-row">
-      <div class="field">
-        <label>Категория</label>
-        <select id="f-category">
-          ${state.categories.map((c) => `<option value="${escapeHtml(c)}" ${existing && existing.category === c ? "selected" : ""}>${categoryIcon(c)} ${escapeHtml(c)}</option>`).join("")}
-        </select>
-      </div>
-      <div class="field">
-        <label>Дата</label>
-        <input type="date" id="f-date" value="${existing ? existing.expense_date : todayISO()}">
-      </div>
+    <div class="field">
+      <label>Категория</label>
+      <select id="f-category">
+        ${state.categories.map((c) => `<option value="${escapeHtml(c)}" ${existing && existing.category === c ? "selected" : ""}>${categoryIcon(c)} ${escapeHtml(c)}</option>`).join("")}
+      </select>
+    </div>
+    <div class="field">
+      <label>Дата</label>
+      <input type="date" id="f-date" value="${existing ? existing.expense_date : todayISO()}">
     </div>
     <div class="field">
       <label>Как делить</label>
@@ -472,6 +723,16 @@ function openExpenseModal(existing) {
     return Number(overlay.querySelector("#f-amount").value || 0);
   }
 
+  /* Payer-select строится один раз при открытии формы (см. ниже). Если новый участник
+     добавлен прямо отсюда, его тоже нужно туда подмешать — иначе только что добавленного
+     человека (например, "Мама заплатила за продукты") нельзя будет тут же выбрать
+     плательщиком, только участником. */
+  function refreshPayerOptions() {
+    const select = overlay.querySelector("#f-payer");
+    const current = select.value;
+    select.innerHTML = state.members.map((m) => `<option value="${m.id}" ${String(m.id) === current ? "selected" : ""}>${escapeHtml(m.full_name)}</option>`).join("");
+  }
+
   function renderParticipants() {
     const block = overlay.querySelector("#participants-block");
     if (splitType === "equal") {
@@ -479,13 +740,23 @@ function openExpenseModal(existing) {
         <label>Участники (делим поровну)</label>
         <div class="chip-row">
           ${state.members.map((m) => `<div class="chip ${selectedIds.has(m.id) ? "selected" : ""}" data-id="${m.id}">${avatarHtml(m)}${escapeHtml(m.full_name)}</div>`).join("")}
+          <div class="chip add-chip" id="add-participant-chip">+ Добавить</div>
         </div>`;
       loadAvatarsIn(block);
-      block.querySelectorAll(".chip").forEach((chip) => {
+      block.querySelectorAll(".chip[data-id]").forEach((chip) => {
         chip.addEventListener("click", () => {
+          haptic("selection");
           const id = Number(chip.dataset.id);
           if (selectedIds.has(id)) selectedIds.delete(id); else selectedIds.add(id);
           chip.classList.toggle("selected");
+        });
+      });
+      block.querySelector("#add-participant-chip").addEventListener("click", () => {
+        haptic("impact", "light");
+        openAddMemberModal((member) => {
+          selectedIds.add(member.id);
+          refreshPayerOptions();
+          renderParticipants();
         });
       });
     } else {
@@ -498,13 +769,22 @@ function openExpenseModal(existing) {
             <div class="name">${avatarHtml(m)}${escapeHtml(m.full_name)}</div>
             <input type="number" min="0" step="0.01" data-id="${m.id}" class="custom-amount" value="${customAmounts[m.id] || ""}">
           </div>`).join("")}
-        <div class="hint-text" id="sum-hint">Указано: ${sum.toFixed(2)} из ${amount.toFixed(2)} ${state.chat.currency}</div>`;
+        <div class="hint-text" id="sum-hint">Указано: ${sum.toFixed(2)} из ${amount.toFixed(2)} ${state.chat.currency}</div>
+        <button type="button" class="btn secondary small" id="add-participant-btn" style="margin-top:8px;">+ Добавить участника</button>`;
       loadAvatarsIn(block);
       block.querySelectorAll(".custom-amount").forEach((inp) => {
         inp.addEventListener("input", () => {
           customAmounts[Number(inp.dataset.id)] = Number(inp.value || 0);
           const s = state.members.reduce((acc, m) => acc + (customAmounts[m.id] || 0), 0);
           block.querySelector("#sum-hint").textContent = `Указано: ${s.toFixed(2)} из ${currentAmount().toFixed(2)} ${state.chat.currency}`;
+        });
+      });
+      block.querySelector("#add-participant-btn").addEventListener("click", () => {
+        haptic("impact", "light");
+        openAddMemberModal((member) => {
+          customAmounts[member.id] = 0;
+          refreshPayerOptions();
+          renderParticipants();
         });
       });
     }
@@ -517,6 +797,7 @@ function openExpenseModal(existing) {
 
   overlay.querySelectorAll(".split-toggle div").forEach((el) => {
     el.addEventListener("click", () => {
+      haptic("selection");
       splitType = el.dataset.v;
       overlay.querySelectorAll(".split-toggle div").forEach((x) => x.classList.toggle("active", x === el));
       renderParticipants();
@@ -562,18 +843,23 @@ function openExpenseModal(existing) {
     const photoFile = photoInput.files[0];
     if (photoFile) form.append("photo", photoFile);
 
+    if (tg && tg.MainButton) tg.MainButton.showProgress(false);
     try {
       if (isEdit) {
         await api(`/chats/${state.chatId}/expenses/${existing.id}`, { method: "PATCH", body: form, isForm: true });
       } else {
         await api(`/chats/${state.chatId}/expenses`, { method: "POST", body: form, isForm: true });
       }
-      overlay.remove();
+      haptic("notification", "success");
+      closeSheet(overlay);
       await renderExpensesTab();
     } catch (e) {
       showFormError(errorEl, e.message);
+    } finally {
+      if (tg && tg.MainButton) tg.MainButton.hideProgress();
     }
   });
+  useMainButtonFor(overlay, overlay.querySelector("#f-submit"), isEdit ? "Сохранить" : "Добавить трату");
 
   const deleteBtn = overlay.querySelector("#f-delete");
   if (deleteBtn) {
@@ -582,7 +868,8 @@ function openExpenseModal(existing) {
       if (!ok) return;
       try {
         await api(`/chats/${state.chatId}/expenses/${existing.id}`, { method: "DELETE" });
-        overlay.remove();
+        haptic("notification", "success");
+        closeSheet(overlay);
         await renderExpensesTab();
       } catch (e) {
         toast(e.message);
@@ -592,8 +879,165 @@ function openExpenseModal(existing) {
 }
 
 function showFormError(el, message) {
+  haptic("notification", "error");
   el.textContent = message;
   el.style.display = "block";
+}
+
+/* Общий "спросить одну строку текста" — шторка поверх чего угодно, вплоть до уже открытой
+   шторки траты/повтора (используется и оттуда — при добавлении участника прямо из выбора
+   участников). Намеренно НЕ использует openSheet()/useMainButtonFor(): те завязаны на
+   единственный нативный tg.MainButton/tg.BackButton, а эта форма может открыться ПОВЕРХ уже
+   открытой шторки, у которой этот нативный MainButton уже занят своей кнопкой сохранения —
+   переключение его туда-обратно было бы хрупким (два набора обработчиков на одну кнопку).
+   Поэтому здесь — обычная кнопка внутри собственной шторки, без претензии на нативную
+   нижнюю кнопку Telegram. onSubmit(value) должен либо бросить исключение с человекочитаемым
+   .message (тогда оно покажется как ошибка формы и шторка останется открытой), либо
+   успешно завершиться — тогда шторка закрывается сама. */
+function openTextPromptModal({ title, hint, label, initialValue, placeholder, submitLabel, onSubmit }) {
+  const overlay = document.createElement("div");
+  overlay.className = "sheet-overlay";
+  overlay.innerHTML = `
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-title">${escapeHtml(title)}</div>
+      ${hint ? `<div class="hint-text" style="margin: 0 0 12px;">${escapeHtml(hint)}</div>` : ""}
+      <div class="field">
+        <label>${escapeHtml(label)}</label>
+        <input type="text" id="tp-value" value="${escapeHtml(initialValue || "")}" placeholder="${escapeHtml(placeholder || "")}" maxlength="255">
+      </div>
+      <div class="error-text" id="tp-error" style="display:none;"></div>
+      <button class="btn" id="tp-submit">${escapeHtml(submitLabel)}</button>
+    </div>`;
+  overlay.addEventListener("click", (ev) => {
+    if (ev.target === overlay) overlay.remove();
+  });
+  document.body.appendChild(overlay);
+
+  const input = overlay.querySelector("#tp-value");
+  input.focus();
+  input.select();
+
+  overlay.querySelector("#tp-submit").addEventListener("click", async () => {
+    const errorEl = overlay.querySelector("#tp-error");
+    const submitBtn = overlay.querySelector("#tp-submit");
+    const value = input.value.trim();
+    if (!value) { showFormError(errorEl, "Введите имя"); return; }
+    submitBtn.disabled = true;
+    try {
+      await onSubmit(value);
+      haptic("notification", "success");
+      overlay.remove();
+    } catch (e) {
+      showFormError(errorEl, e.message);
+      submitBtn.disabled = false;
+    }
+  });
+  return overlay;
+}
+
+/* Добавление участника без Telegram-аккаунта (например, ребёнка или родственника без
+   своего профиля) — открывается прямо из выбора участников в форме траты/повтора, а также
+   с вкладки «Баланс» (управление участниками). Такой участник появляется в общем списке
+   (state.members) сразу и виден во всех формах чата, но сам открыть мини-апп не сможет — за
+   него отмечает кто-то другой из чата. onAdded(member) вызывается один раз при успехе. */
+function openAddMemberModal(onAdded) {
+  openTextPromptModal({
+    title: "Добавить участника",
+    hint: "Для тех, у кого нет Telegram — например, ребёнка или родственника. Он появится в списке участников и трат, но не сможет открыть приложение сам — вносить траты за него будет кто-то другой из чата.",
+    label: "Имя",
+    placeholder: "Например, Мама",
+    submitLabel: "Добавить",
+    onSubmit: async (fullName) => {
+      const member = await api(`/chats/${state.chatId}/members`, {
+        method: "POST",
+        body: { full_name: fullName },
+      });
+      state.members.push(member);
+      state.members.sort((a, b) => a.full_name.localeCompare(b.full_name, "ru"));
+      if (onAdded) onAdded(member);
+    },
+  });
+}
+
+/* Переименование участника без Telegram-аккаунта (опечатка в имени и т.п.) — только для
+   таких участников, у Telegram-участников full_name синхронизируется из профиля и бэкенд
+   отклонит попытку. onRenamed(member) вызывается один раз при успехе. */
+function openRenameMemberModal(member, onRenamed) {
+  openTextPromptModal({
+    title: "Переименовать участника",
+    label: "Имя",
+    initialValue: member.full_name,
+    submitLabel: "Сохранить",
+    onSubmit: async (fullName) => {
+      const updated = await api(`/chats/${state.chatId}/members/${member.id}`, {
+        method: "PATCH",
+        body: { full_name: fullName },
+      });
+      const idx = state.members.findIndex((m) => m.id === member.id);
+      if (idx !== -1) state.members[idx] = updated;
+      state.members.sort((a, b) => a.full_name.localeCompare(b.full_name, "ru"));
+      if (onRenamed) onRenamed(updated);
+    },
+  });
+}
+
+/* Список всех участников чата с управлением ручными (без Telegram-аккаунта): переименовать
+   или удалить (если за ними ещё не числится ни одной траты — иначе бэкенд откажет явным
+   сообщением). Настоящие Telegram-участники показаны только для справки, без действий —
+   их имя и активность синхронизируются из профиля/событий чата автоматически. */
+function openManageMembersModal() {
+  const overlay = openSheet(`
+    <div class="sheet-title">Участники</div>
+    <div id="manage-members-list"></div>
+    <button type="button" class="btn secondary" id="manage-add-btn" style="margin-top:12px;">+ Добавить участника без Telegram</button>
+  `);
+
+  function renderList() {
+    const list = overlay.querySelector("#manage-members-list");
+    const sorted = [...state.members].sort((a, b) => a.full_name.localeCompare(b.full_name, "ru"));
+    list.innerHTML = sorted.map((m) => `
+      <div class="member-manage-row" data-id="${m.id}">
+        <div class="who">${avatarHtml(m)}<span>${escapeHtml(m.full_name)}</span>${m.is_manual ? '<span class="manual-tag">без Telegram</span>' : ""}</div>
+        ${m.is_manual ? `
+          <div class="member-manage-actions">
+            <button type="button" class="icon-btn rename-btn" title="Переименовать">✎</button>
+            <button type="button" class="icon-btn delete-btn" title="Удалить">🗑</button>
+          </div>` : ""}
+      </div>`).join("");
+    loadAvatarsIn(list);
+
+    list.querySelectorAll(".rename-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = Number(btn.closest(".member-manage-row").dataset.id);
+        const member = state.members.find((x) => x.id === id);
+        haptic("impact", "light");
+        openRenameMemberModal(member, () => renderList());
+      });
+    });
+    list.querySelectorAll(".delete-btn").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const id = Number(btn.closest(".member-manage-row").dataset.id);
+        const member = state.members.find((x) => x.id === id);
+        const ok = await confirmAction(`Удалить участника «${member.full_name}»?`);
+        if (!ok) return;
+        try {
+          await api(`/chats/${state.chatId}/members/${id}`, { method: "DELETE" });
+          state.members = state.members.filter((x) => x.id !== id);
+          haptic("notification", "success");
+          renderList();
+        } catch (e) {
+          toast(e.message);
+        }
+      });
+    });
+  }
+  renderList();
+
+  overlay.querySelector("#manage-add-btn").addEventListener("click", () => {
+    haptic("impact", "light");
+    openAddMemberModal(() => renderList());
+  });
 }
 
 /* ---------------- Вкладка «Баланс» ---------------- */
@@ -615,7 +1059,7 @@ async function renderBalanceTab() {
       ? '<div class="card empty-state" style="padding:20px;">Все в расчёте 🎉</div>'
       : debts.map((d, i) => `
         <div class="card debt-row" data-idx="${i}">
-          <div class="who">${escapeHtml(memberLabel(d.from_member_id))} → ${escapeHtml(memberLabel(d.to_member_id))}</div>
+          <div class="who">${memberInlineHtml(d.from_member_id)} → ${memberInlineHtml(d.to_member_id)}</div>
           <div style="display:flex; align-items:center; gap:10px;">
             <b>${fmtMoney(d.amount)}</b>
             <button class="btn small settle-btn" data-idx="${i}">Погасить</button>
@@ -626,25 +1070,34 @@ async function renderBalanceTab() {
     <div class="card">
       ${state.balances.balances.map((b) => `
         <div class="balance-row">
-          <span>${escapeHtml(memberLabel(b.member_id))}</span>
+          ${memberInlineHtml(b.member_id)}
           <span class="${Number(b.net) >= 0 ? "positive" : "negative"}">${Number(b.net) >= 0 ? "+" : ""}${fmtMoney(b.net)}</span>
         </div>`).join("")}
     </div>
+    <button type="button" class="btn secondary small" id="manage-members-btn" style="margin-top:8px;">Участники чата</button>
 
     ${state.settlements.length > 0 ? `
       <div class="section-title">Последние платежи</div>
       <div class="card">
         ${state.settlements.slice(0, 10).map((s) => `
           <div class="balance-row">
-            <span>${escapeHtml(memberLabel(s.from_member_id))} → ${escapeHtml(memberLabel(s.to_member_id))}</span>
+            <span>${memberInlineHtml(s.from_member_id)} → ${memberInlineHtml(s.to_member_id)}</span>
             <span>${fmtMoney(s.amount)}</span>
           </div>`).join("")}
       </div>` : ""}
   `;
 
   content.querySelectorAll(".settle-btn").forEach((btn) => {
-    btn.addEventListener("click", () => openSettleModal(debts[Number(btn.dataset.idx)]));
+    btn.addEventListener("click", () => {
+      haptic("impact", "light");
+      openSettleModal(debts[Number(btn.dataset.idx)]);
+    });
   });
+  content.querySelector("#manage-members-btn").addEventListener("click", () => {
+    haptic("impact", "light");
+    openManageMembersModal();
+  });
+  loadAvatarsIn(content);
 }
 
 function openSettleModal(debt) {
@@ -669,6 +1122,7 @@ function openSettleModal(debt) {
     const errorEl = overlay.querySelector("#s-error");
     const amount = Number(overlay.querySelector("#s-amount").value || 0);
     if (!amount || amount <= 0) { showFormError(errorEl, "Укажите сумму больше нуля"); return; }
+    if (tg && tg.MainButton) tg.MainButton.showProgress(false);
     try {
       await api(`/chats/${state.chatId}/settlements`, {
         method: "POST",
@@ -679,12 +1133,16 @@ function openSettleModal(debt) {
           note: overlay.querySelector("#s-note").value || null,
         },
       });
-      overlay.remove();
+      haptic("notification", "success");
+      closeSheet(overlay);
       await renderBalanceTab();
     } catch (e) {
       showFormError(errorEl, e.message);
+    } finally {
+      if (tg && tg.MainButton) tg.MainButton.hideProgress();
     }
   });
+  useMainButtonFor(overlay, overlay.querySelector("#s-submit"), "Подтвердить");
 }
 
 /* ---------------- Вкладка «Статистика» ---------------- */
@@ -721,6 +1179,7 @@ async function renderStatsTab() {
 
   content.querySelectorAll(".month-picker button").forEach((b) => {
     b.addEventListener("click", async () => {
+      haptic("selection");
       state.month = shiftMonth(state.month, Number(b.dataset.dir));
       await renderStatsTab();
     });
@@ -834,6 +1293,12 @@ function openRecurringModal(existing) {
 
   function currentAmount() { return Number(overlay.querySelector("#r-amount").value || 0); }
 
+  function refreshPayerOptions() {
+    const select = overlay.querySelector("#r-payer");
+    const current = select.value;
+    select.innerHTML = state.members.map((m) => `<option value="${m.id}" ${String(m.id) === current ? "selected" : ""}>${escapeHtml(m.full_name)}</option>`).join("");
+  }
+
   function renderParticipants() {
     const block = overlay.querySelector("#r-participants-block");
     if (splitType === "equal") {
@@ -841,12 +1306,22 @@ function openRecurringModal(existing) {
         <label>Участники</label>
         <div class="chip-row">
           ${state.members.map((m) => `<div class="chip ${selectedIds.has(m.id) ? "selected" : ""}" data-id="${m.id}">${escapeHtml(m.full_name)}</div>`).join("")}
+          <div class="chip add-chip" id="r-add-participant-chip">+ Добавить</div>
         </div>`;
-      block.querySelectorAll(".chip").forEach((chip) => {
+      block.querySelectorAll(".chip[data-id]").forEach((chip) => {
         chip.addEventListener("click", () => {
+          haptic("selection");
           const id = Number(chip.dataset.id);
           if (selectedIds.has(id)) selectedIds.delete(id); else selectedIds.add(id);
           chip.classList.toggle("selected");
+        });
+      });
+      block.querySelector("#r-add-participant-chip").addEventListener("click", () => {
+        haptic("impact", "light");
+        openAddMemberModal((member) => {
+          selectedIds.add(member.id);
+          refreshPayerOptions();
+          renderParticipants();
         });
       });
     } else {
@@ -859,12 +1334,21 @@ function openRecurringModal(existing) {
             <div class="name">${escapeHtml(m.full_name)}</div>
             <input type="number" min="0" step="0.01" data-id="${m.id}" class="r-custom-amount" value="${customAmounts[m.id] || ""}">
           </div>`).join("")}
-        <div class="hint-text" id="r-sum-hint">Указано: ${sum.toFixed(2)} из ${amount.toFixed(2)} ${state.chat.currency}</div>`;
+        <div class="hint-text" id="r-sum-hint">Указано: ${sum.toFixed(2)} из ${amount.toFixed(2)} ${state.chat.currency}</div>
+        <button type="button" class="btn secondary small" id="r-add-participant-btn" style="margin-top:8px;">+ Добавить участника</button>`;
       block.querySelectorAll(".r-custom-amount").forEach((inp) => {
         inp.addEventListener("input", () => {
           customAmounts[Number(inp.dataset.id)] = Number(inp.value || 0);
           const s = state.members.reduce((acc, m) => acc + (customAmounts[m.id] || 0), 0);
           block.querySelector("#r-sum-hint").textContent = `Указано: ${s.toFixed(2)} из ${currentAmount().toFixed(2)} ${state.chat.currency}`;
+        });
+      });
+      block.querySelector("#r-add-participant-btn").addEventListener("click", () => {
+        haptic("impact", "light");
+        openAddMemberModal((member) => {
+          customAmounts[member.id] = 0;
+          refreshPayerOptions();
+          renderParticipants();
         });
       });
     }
@@ -874,6 +1358,7 @@ function openRecurringModal(existing) {
   overlay.querySelector("#r-amount").addEventListener("input", () => { if (splitType === "custom") renderParticipants(); });
   overlay.querySelectorAll(".split-toggle div").forEach((el) => {
     el.addEventListener("click", () => {
+      haptic("selection");
       splitType = el.dataset.v;
       overlay.querySelectorAll(".split-toggle div").forEach((x) => x.classList.toggle("active", x === el));
       renderParticipants();
@@ -915,18 +1400,23 @@ function openRecurringModal(existing) {
     };
     if (isEdit) payload.is_active = overlay.querySelector("#r-active").checked;
 
+    if (tg && tg.MainButton) tg.MainButton.showProgress(false);
     try {
       if (isEdit) {
         await api(`/chats/${state.chatId}/recurring/${existing.id}`, { method: "PATCH", body: payload });
       } else {
         await api(`/chats/${state.chatId}/recurring`, { method: "POST", body: payload });
       }
-      overlay.remove();
+      haptic("notification", "success");
+      closeSheet(overlay);
       await renderRecurringTab();
     } catch (e) {
       showFormError(errorEl, e.message);
+    } finally {
+      if (tg && tg.MainButton) tg.MainButton.hideProgress();
     }
   });
+  useMainButtonFor(overlay, overlay.querySelector("#r-submit"), isEdit ? "Сохранить" : "Добавить");
 
   const deleteBtn = overlay.querySelector("#r-delete");
   if (deleteBtn) {
@@ -935,7 +1425,8 @@ function openRecurringModal(existing) {
       if (!ok) return;
       try {
         await api(`/chats/${state.chatId}/recurring/${existing.id}`, { method: "DELETE" });
-        overlay.remove();
+        haptic("notification", "success");
+        closeSheet(overlay);
         await renderRecurringTab();
       } catch (e) {
         toast(e.message);

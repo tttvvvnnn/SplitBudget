@@ -45,13 +45,17 @@ class Member(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     chat_id: Mapped[int] = mapped_column(ForeignKey("chats.id", ondelete="CASCADE"))
-    tg_user_id: Mapped[int] = mapped_column(BigInteger)
+    # NULL — участник добавлен вручную, без Telegram-аккаунта (см. is_manual). Уникальность
+    # (chat_id, tg_user_id) не страдает: несколько NULL в одном чате не считаются дубликатами
+    # ни в SQLite, ни в Postgres.
+    tg_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     username: Mapped[str | None] = mapped_column(String(255), nullable=True)
     full_name: Mapped[str] = mapped_column(String(255), default="")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)  # False, если покинул группу
     # Имя файла аватарки участника (фото профиля Telegram на момент последней синхронизации),
     # лежит в том же PHOTOS_DIR, что и фото чеков — см. app/bot/avatars.py. NULL, пока не
-    # синхронизировано, или если у пользователя нет фото профиля.
+    # синхронизировано, или если у пользователя нет фото профиля (в т.ч. всегда NULL у
+    # ручных участников — синхронизировать нечего).
     avatar_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
     added_at: Mapped[dt.datetime] = mapped_column(DateTime, default=dt.datetime.utcnow)
 
@@ -62,6 +66,12 @@ class Member(Base):
         """Относительный путь для GET /chats/{chat_id}/photos/{filename} — тот же эндпоинт,
         что уже отдаёт фото чеков (файл начинается с chat_id, проверка доступа та же)."""
         return f"photos/{self.avatar_path}" if self.avatar_path else None
+
+    @property
+    def is_manual(self) -> bool:
+        """Участник без Telegram-аккаунта: добавлен вручную кем-то из чата (не может открыть
+        мини-апп сам — заходить в неё будет кто-то другой, отмечая его как участника трат)."""
+        return self.tg_user_id is None
 
 
 class Expense(Base):

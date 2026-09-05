@@ -28,6 +28,22 @@ WEBAPP_DIR = Path(__file__).resolve().parent.parent / "webapp"
 # (например "1.2.0"). Вне релизного билда (локальный запуск, dev) остаётся "dev".
 APP_VERSION = os.environ.get("APP_VERSION", "dev")
 
+# Метка времени сборки образа (см. Dockerfile) — на стенде APP_VERSION всегда "dev", поэтому
+# само по себе не показывает, свежая ли сборка. Файл появляется в образе на этапе `docker build`
+# и меняется только тогда, когда реально поменялся код (см. комментарий в Dockerfile рядом с
+# RUN date ...). Используется в /healthz и показывается в мини-аппе.
+_BUILD_INFO_PATH = Path("/srv/build_info.txt")
+
+
+def _read_build_info() -> str:
+    try:
+        return _BUILD_INFO_PATH.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+APP_BUILD_INFO = _read_build_info()
+
 _background_tasks: set[asyncio.Task] = set()
 
 
@@ -67,13 +83,33 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def no_cache_webapp_static(request, call_next):
+    """Mini app (HTML/JS/CSS) отдаём с обязательной ревалидацией на каждый запрос.
+
+    По умолчанию StaticFiles не ставит Cache-Control вообще, и тогда браузеры/WebView сами
+    решают, сколько кешировать (эвристика). Мобильный WebView внутри Telegram особенно
+    агрессивен: после передеплоя интерфейс мог не обновляться даже после очистки кеша
+    Telegram и перезапуска приложения. ETag/Last-Modified у StaticFiles уже есть, так что
+    ревалидация дешёвая — почти всегда 304 Not Modified, а не полная перекачка файла.
+    """
+    response = await call_next(request)
+    if not request.url.path.startswith("/api"):
+        # /healthz тоже не кешируем: мини-апп дёргает его, чтобы показать версию/сборку в
+        # шапке, и если ответ закешируется в том же агрессивном мобильном WebView — бейдж
+        # будет врать после передеплоя точно так же, как раньше врал весь интерфейс.
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 for router in (chats.router, expenses.router, balances.router, recurring.router, stats.router, export.router):
     app.include_router(router, prefix="/api")
 
 
 @app.get("/healthz")
 async def healthz():
-    return {"status": "ok", "version": APP_VERSION}
+    return {"status": "ok", "version": APP_VERSION, "build": APP_BUILD_INFO}
 
 
 if WEBAPP_DIR.is_dir():
