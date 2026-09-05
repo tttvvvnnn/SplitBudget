@@ -668,6 +668,67 @@ html, body {
   letter-spacing: 0.4px;
 }
 
+/* Список участников в шторке «Участники» (openManageMembersModal) — см. app.js */
+.member-manage-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.member-manage-row:last-child {
+  border-bottom: none;
+}
+
+.member-manage-row .who {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14.5px;
+  min-width: 0;
+}
+
+.member-manage-row .who span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.manual-tag {
+  flex-shrink: 0;
+  font-size: 10.5px;
+  color: var(--hint);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 1px 7px;
+}
+
+.member-manage-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.icon-btn {
+  border: none;
+  background: transparent;
+  font-size: 16px;
+  padding: 4px 8px;
+  cursor: pointer;
+  border-radius: 8px;
+  color: var(--hint);
+}
+
+.icon-btn:active {
+  background: var(--secondary-bg);
+}
+
+.icon-btn.delete-btn:active {
+  color: var(--danger);
+}
+
 .top-actions {
   display: flex;
   justify-content: flex-end;

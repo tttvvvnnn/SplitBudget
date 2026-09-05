@@ -874,66 +874,159 @@ function showFormError(el, message) {
   el.style.display = "block";
 }
 
-/* Добавление участника без Telegram-аккаунта (например, ребёнка или родственника без
-   своего профиля) — открывается прямо из выбора участников в форме траты/повтора, поверх
-   уже открытой шторки, чтобы не заставлять уходить со страницы за этим на середине
-   заполнения формы. Такой участник появляется в общем списке (state.members) сразу и виден
-   во всех формах чата, но сам открыть мини-апп не сможет — за него отмечает кто-то другой
-   из чата. onAdded(member) вызывается один раз при успешном добавлении.
-
-   Намеренно НЕ использует openSheet()/useMainButtonFor(): те завязаны на единственный
-   нативный tg.MainButton/tg.BackButton, а эта форма открывается ПОВЕРХ уже открытой шторки
-   траты/повтора, у которой этот нативный MainButton уже занят своей кнопкой сохранения —
-   переключение его на "Добавить" здесь и обратно после закрытия было бы хрупким (два набора
-   обработчиков на одну кнопку). Поэтому здесь — обычная кнопка внутри самой шторки, без
-   претензии на нативную нижнюю кнопку Telegram. */
-function openAddMemberModal(onAdded) {
+/* Общий "спросить одну строку текста" — шторка поверх чего угодно, вплоть до уже открытой
+   шторки траты/повтора (используется и оттуда — при добавлении участника прямо из выбора
+   участников). Намеренно НЕ использует openSheet()/useMainButtonFor(): те завязаны на
+   единственный нативный tg.MainButton/tg.BackButton, а эта форма может открыться ПОВЕРХ уже
+   открытой шторки, у которой этот нативный MainButton уже занят своей кнопкой сохранения —
+   переключение его туда-обратно было бы хрупким (два набора обработчиков на одну кнопку).
+   Поэтому здесь — обычная кнопка внутри собственной шторки, без претензии на нативную
+   нижнюю кнопку Telegram. onSubmit(value) должен либо бросить исключение с человекочитаемым
+   .message (тогда оно покажется как ошибка формы и шторка останется открытой), либо
+   успешно завершиться — тогда шторка закрывается сама. */
+function openTextPromptModal({ title, hint, label, initialValue, placeholder, submitLabel, onSubmit }) {
   const overlay = document.createElement("div");
   overlay.className = "sheet-overlay";
   overlay.innerHTML = `
     <div class="sheet">
       <div class="sheet-handle"></div>
-      <div class="sheet-title">Добавить участника</div>
-      <div class="hint-text" style="margin: 0 0 12px;">
-        Для тех, у кого нет Telegram — например, ребёнка или родственника. Он появится в
-        списке участников и трат, но не сможет открыть приложение сам — вносить траты за
-        него будет кто-то другой из чата.
-      </div>
+      <div class="sheet-title">${escapeHtml(title)}</div>
+      ${hint ? `<div class="hint-text" style="margin: 0 0 12px;">${escapeHtml(hint)}</div>` : ""}
       <div class="field">
-        <label>Имя</label>
-        <input type="text" id="am-name" placeholder="Например, Мама" maxlength="255">
+        <label>${escapeHtml(label)}</label>
+        <input type="text" id="tp-value" value="${escapeHtml(initialValue || "")}" placeholder="${escapeHtml(placeholder || "")}" maxlength="255">
       </div>
-      <div class="error-text" id="am-error" style="display:none;"></div>
-      <button class="btn" id="am-submit">Добавить</button>
+      <div class="error-text" id="tp-error" style="display:none;"></div>
+      <button class="btn" id="tp-submit">${escapeHtml(submitLabel)}</button>
     </div>`;
   overlay.addEventListener("click", (ev) => {
     if (ev.target === overlay) overlay.remove();
   });
   document.body.appendChild(overlay);
 
-  const nameInput = overlay.querySelector("#am-name");
-  nameInput.focus();
+  const input = overlay.querySelector("#tp-value");
+  input.focus();
+  input.select();
 
-  overlay.querySelector("#am-submit").addEventListener("click", async () => {
-    const errorEl = overlay.querySelector("#am-error");
-    const submitBtn = overlay.querySelector("#am-submit");
-    const fullName = nameInput.value.trim();
-    if (!fullName) { showFormError(errorEl, "Введите имя"); return; }
+  overlay.querySelector("#tp-submit").addEventListener("click", async () => {
+    const errorEl = overlay.querySelector("#tp-error");
+    const submitBtn = overlay.querySelector("#tp-submit");
+    const value = input.value.trim();
+    if (!value) { showFormError(errorEl, "Введите имя"); return; }
     submitBtn.disabled = true;
     try {
+      await onSubmit(value);
+      haptic("notification", "success");
+      overlay.remove();
+    } catch (e) {
+      showFormError(errorEl, e.message);
+      submitBtn.disabled = false;
+    }
+  });
+  return overlay;
+}
+
+/* Добавление участника без Telegram-аккаунта (например, ребёнка или родственника без
+   своего профиля) — открывается прямо из выбора участников в форме траты/повтора, а также
+   с вкладки «Баланс» (управление участниками). Такой участник появляется в общем списке
+   (state.members) сразу и виден во всех формах чата, но сам открыть мини-апп не сможет — за
+   него отмечает кто-то другой из чата. onAdded(member) вызывается один раз при успехе. */
+function openAddMemberModal(onAdded) {
+  openTextPromptModal({
+    title: "Добавить участника",
+    hint: "Для тех, у кого нет Telegram — например, ребёнка или родственника. Он появится в списке участников и трат, но не сможет открыть приложение сам — вносить траты за него будет кто-то другой из чата.",
+    label: "Имя",
+    placeholder: "Например, Мама",
+    submitLabel: "Добавить",
+    onSubmit: async (fullName) => {
       const member = await api(`/chats/${state.chatId}/members`, {
         method: "POST",
         body: { full_name: fullName },
       });
       state.members.push(member);
       state.members.sort((a, b) => a.full_name.localeCompare(b.full_name, "ru"));
-      haptic("notification", "success");
-      overlay.remove();
       if (onAdded) onAdded(member);
-    } catch (e) {
-      showFormError(errorEl, e.message);
-      submitBtn.disabled = false;
-    }
+    },
+  });
+}
+
+/* Переименование участника без Telegram-аккаунта (опечатка в имени и т.п.) — только для
+   таких участников, у Telegram-участников full_name синхронизируется из профиля и бэкенд
+   отклонит попытку. onRenamed(member) вызывается один раз при успехе. */
+function openRenameMemberModal(member, onRenamed) {
+  openTextPromptModal({
+    title: "Переименовать участника",
+    label: "Имя",
+    initialValue: member.full_name,
+    submitLabel: "Сохранить",
+    onSubmit: async (fullName) => {
+      const updated = await api(`/chats/${state.chatId}/members/${member.id}`, {
+        method: "PATCH",
+        body: { full_name: fullName },
+      });
+      const idx = state.members.findIndex((m) => m.id === member.id);
+      if (idx !== -1) state.members[idx] = updated;
+      state.members.sort((a, b) => a.full_name.localeCompare(b.full_name, "ru"));
+      if (onRenamed) onRenamed(updated);
+    },
+  });
+}
+
+/* Список всех участников чата с управлением ручными (без Telegram-аккаунта): переименовать
+   или удалить (если за ними ещё не числится ни одной траты — иначе бэкенд откажет явным
+   сообщением). Настоящие Telegram-участники показаны только для справки, без действий —
+   их имя и активность синхронизируются из профиля/событий чата автоматически. */
+function openManageMembersModal() {
+  const overlay = openSheet(`
+    <div class="sheet-title">Участники</div>
+    <div id="manage-members-list"></div>
+    <button type="button" class="btn secondary" id="manage-add-btn" style="margin-top:12px;">+ Добавить участника без Telegram</button>
+  `);
+
+  function renderList() {
+    const list = overlay.querySelector("#manage-members-list");
+    const sorted = [...state.members].sort((a, b) => a.full_name.localeCompare(b.full_name, "ru"));
+    list.innerHTML = sorted.map((m) => `
+      <div class="member-manage-row" data-id="${m.id}">
+        <div class="who">${avatarHtml(m)}<span>${escapeHtml(m.full_name)}</span>${m.is_manual ? '<span class="manual-tag">без Telegram</span>' : ""}</div>
+        ${m.is_manual ? `
+          <div class="member-manage-actions">
+            <button type="button" class="icon-btn rename-btn" title="Переименовать">✎</button>
+            <button type="button" class="icon-btn delete-btn" title="Удалить">🗑</button>
+          </div>` : ""}
+      </div>`).join("");
+    loadAvatarsIn(list);
+
+    list.querySelectorAll(".rename-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = Number(btn.closest(".member-manage-row").dataset.id);
+        const member = state.members.find((x) => x.id === id);
+        haptic("impact", "light");
+        openRenameMemberModal(member, () => renderList());
+      });
+    });
+    list.querySelectorAll(".delete-btn").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const id = Number(btn.closest(".member-manage-row").dataset.id);
+        const member = state.members.find((x) => x.id === id);
+        const ok = await confirmAction(`Удалить участника «${member.full_name}»?`);
+        if (!ok) return;
+        try {
+          await api(`/chats/${state.chatId}/members/${id}`, { method: "DELETE" });
+          state.members = state.members.filter((x) => x.id !== id);
+          haptic("notification", "success");
+          renderList();
+        } catch (e) {
+          toast(e.message);
+        }
+      });
+    });
+  }
+  renderList();
+
+  overlay.querySelector("#manage-add-btn").addEventListener("click", () => {
+    haptic("impact", "light");
+    openAddMemberModal(() => renderList());
   });
 }
 
@@ -971,6 +1064,7 @@ async function renderBalanceTab() {
           <span class="${Number(b.net) >= 0 ? "positive" : "negative"}">${Number(b.net) >= 0 ? "+" : ""}${fmtMoney(b.net)}</span>
         </div>`).join("")}
     </div>
+    <button type="button" class="btn secondary small" id="manage-members-btn" style="margin-top:8px;">Участники чата</button>
 
     ${state.settlements.length > 0 ? `
       <div class="section-title">Последние платежи</div>
@@ -988,6 +1082,10 @@ async function renderBalanceTab() {
       haptic("impact", "light");
       openSettleModal(debts[Number(btn.dataset.idx)]);
     });
+  });
+  content.querySelector("#manage-members-btn").addEventListener("click", () => {
+    haptic("impact", "light");
+    openManageMembersModal();
   });
   loadAvatarsIn(content);
 }

@@ -26,6 +26,13 @@ class MemberCreate(BaseModel):
     full_name: str = Field(min_length=1, max_length=255)
 
 
+class MemberUpdate(BaseModel):
+    """Переименование ручного участника (см. MemberCreate) — только для него: у
+    Telegram-участников full_name синхронизируется из их профиля."""
+
+    full_name: str = Field(min_length=1, max_length=255)
+
+
 class ChatOut(BaseModel):
     id: int
     title: str

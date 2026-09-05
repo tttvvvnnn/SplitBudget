@@ -82,3 +82,92 @@ def test_manual_member_can_be_used_in_expense(client, seeded_chat, auth_header):
     net = {b["member_id"]: float(b["net"]) for b in r.json()["balances"]}
     assert net[guest_id] == -450.0
     assert net[seeded_chat.alice_member_id] == 450.0
+
+
+def test_rename_manual_member(client, seeded_chat, auth_header):
+    r = client.post(
+        f"/api/chats/{seeded_chat.chat_id}/members",
+        headers=auth_header(seeded_chat.alice_init_data),
+        json={"full_name": "Бабуля"},
+    )
+    member_id = r.json()["id"]
+
+    r = client.patch(
+        f"/api/chats/{seeded_chat.chat_id}/members/{member_id}",
+        headers=auth_header(seeded_chat.alice_init_data),
+        json={"full_name": "Бабушка Валя"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["full_name"] == "Бабушка Валя"
+
+    r = client.get(f"/api/chats/{seeded_chat.chat_id}/members", headers=auth_header(seeded_chat.alice_init_data))
+    renamed = [m for m in r.json() if m["id"] == member_id][0]
+    assert renamed["full_name"] == "Бабушка Валя"
+
+
+def test_cannot_rename_telegram_member(client, seeded_chat, auth_header):
+    r = client.patch(
+        f"/api/chats/{seeded_chat.chat_id}/members/{seeded_chat.alice_member_id}",
+        headers=auth_header(seeded_chat.alice_init_data),
+        json={"full_name": "Кто-то другой"},
+    )
+    assert r.status_code == 400
+
+
+def test_delete_unused_manual_member(client, seeded_chat, auth_header):
+    r = client.post(
+        f"/api/chats/{seeded_chat.chat_id}/members",
+        headers=auth_header(seeded_chat.alice_init_data),
+        json={"full_name": "Лишний"},
+    )
+    member_id = r.json()["id"]
+
+    r = client.delete(
+        f"/api/chats/{seeded_chat.chat_id}/members/{member_id}",
+        headers=auth_header(seeded_chat.alice_init_data),
+    )
+    assert r.status_code == 204, r.text
+
+    r = client.get(f"/api/chats/{seeded_chat.chat_id}/members", headers=auth_header(seeded_chat.alice_init_data))
+    assert member_id not in {m["id"] for m in r.json()}
+
+
+def test_cannot_delete_manual_member_with_expenses(client, seeded_chat, auth_header):
+    r = client.post(
+        f"/api/chats/{seeded_chat.chat_id}/members",
+        headers=auth_header(seeded_chat.alice_init_data),
+        json={"full_name": "Гость2"},
+    )
+    guest_id = r.json()["id"]
+
+    r = client.post(
+        f"/api/chats/{seeded_chat.chat_id}/expenses",
+        headers=auth_header(seeded_chat.alice_init_data),
+        data={
+            "title": "Такси",
+            "amount": "300",
+            "category": "Транспорт",
+            "expense_date": "2026-09-04",
+            "payer_member_id": str(seeded_chat.alice_member_id),
+            "split_type": "equal",
+            "participant_ids": json.dumps([seeded_chat.alice_member_id, guest_id]),
+        },
+    )
+    assert r.status_code == 201, r.text
+
+    r = client.delete(
+        f"/api/chats/{seeded_chat.chat_id}/members/{guest_id}",
+        headers=auth_header(seeded_chat.alice_init_data),
+    )
+    assert r.status_code == 400
+
+    r = client.get(f"/api/chats/{seeded_chat.chat_id}/members", headers=auth_header(seeded_chat.alice_init_data))
+    assert guest_id in {m["id"] for m in r.json()}
+
+
+def test_cannot_delete_telegram_member(client, seeded_chat, auth_header):
+    r = client.delete(
+        f"/api/chats/{seeded_chat.chat_id}/members/{seeded_chat.bob_member_id}",
+        headers=auth_header(seeded_chat.alice_init_data),
+    )
+    assert r.status_code == 400
