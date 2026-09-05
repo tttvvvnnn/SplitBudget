@@ -713,6 +713,16 @@ function openExpenseModal(existing) {
     return Number(overlay.querySelector("#f-amount").value || 0);
   }
 
+  /* Payer-select строится один раз при открытии формы (см. ниже). Если новый участник
+     добавлен прямо отсюда, его тоже нужно туда подмешать — иначе только что добавленного
+     человека (например, "Мама заплатила за продукты") нельзя будет тут же выбрать
+     плательщиком, только участником. */
+  function refreshPayerOptions() {
+    const select = overlay.querySelector("#f-payer");
+    const current = select.value;
+    select.innerHTML = state.members.map((m) => `<option value="${m.id}" ${String(m.id) === current ? "selected" : ""}>${escapeHtml(m.full_name)}</option>`).join("");
+  }
+
   function renderParticipants() {
     const block = overlay.querySelector("#participants-block");
     if (splitType === "equal") {
@@ -720,14 +730,23 @@ function openExpenseModal(existing) {
         <label>Участники (делим поровну)</label>
         <div class="chip-row">
           ${state.members.map((m) => `<div class="chip ${selectedIds.has(m.id) ? "selected" : ""}" data-id="${m.id}">${avatarHtml(m)}${escapeHtml(m.full_name)}</div>`).join("")}
+          <div class="chip add-chip" id="add-participant-chip">+ Добавить</div>
         </div>`;
       loadAvatarsIn(block);
-      block.querySelectorAll(".chip").forEach((chip) => {
+      block.querySelectorAll(".chip[data-id]").forEach((chip) => {
         chip.addEventListener("click", () => {
           haptic("selection");
           const id = Number(chip.dataset.id);
           if (selectedIds.has(id)) selectedIds.delete(id); else selectedIds.add(id);
           chip.classList.toggle("selected");
+        });
+      });
+      block.querySelector("#add-participant-chip").addEventListener("click", () => {
+        haptic("impact", "light");
+        openAddMemberModal((member) => {
+          selectedIds.add(member.id);
+          refreshPayerOptions();
+          renderParticipants();
         });
       });
     } else {
@@ -740,13 +759,22 @@ function openExpenseModal(existing) {
             <div class="name">${avatarHtml(m)}${escapeHtml(m.full_name)}</div>
             <input type="number" min="0" step="0.01" data-id="${m.id}" class="custom-amount" value="${customAmounts[m.id] || ""}">
           </div>`).join("")}
-        <div class="hint-text" id="sum-hint">Указано: ${sum.toFixed(2)} из ${amount.toFixed(2)} ${state.chat.currency}</div>`;
+        <div class="hint-text" id="sum-hint">Указано: ${sum.toFixed(2)} из ${amount.toFixed(2)} ${state.chat.currency}</div>
+        <button type="button" class="btn secondary small" id="add-participant-btn" style="margin-top:8px;">+ Добавить участника</button>`;
       loadAvatarsIn(block);
       block.querySelectorAll(".custom-amount").forEach((inp) => {
         inp.addEventListener("input", () => {
           customAmounts[Number(inp.dataset.id)] = Number(inp.value || 0);
           const s = state.members.reduce((acc, m) => acc + (customAmounts[m.id] || 0), 0);
           block.querySelector("#sum-hint").textContent = `Указано: ${s.toFixed(2)} из ${currentAmount().toFixed(2)} ${state.chat.currency}`;
+        });
+      });
+      block.querySelector("#add-participant-btn").addEventListener("click", () => {
+        haptic("impact", "light");
+        openAddMemberModal((member) => {
+          customAmounts[member.id] = 0;
+          refreshPayerOptions();
+          renderParticipants();
         });
       });
     }
@@ -844,6 +872,69 @@ function showFormError(el, message) {
   haptic("notification", "error");
   el.textContent = message;
   el.style.display = "block";
+}
+
+/* Добавление участника без Telegram-аккаунта (например, ребёнка или родственника без
+   своего профиля) — открывается прямо из выбора участников в форме траты/повтора, поверх
+   уже открытой шторки, чтобы не заставлять уходить со страницы за этим на середине
+   заполнения формы. Такой участник появляется в общем списке (state.members) сразу и виден
+   во всех формах чата, но сам открыть мини-апп не сможет — за него отмечает кто-то другой
+   из чата. onAdded(member) вызывается один раз при успешном добавлении.
+
+   Намеренно НЕ использует openSheet()/useMainButtonFor(): те завязаны на единственный
+   нативный tg.MainButton/tg.BackButton, а эта форма открывается ПОВЕРХ уже открытой шторки
+   траты/повтора, у которой этот нативный MainButton уже занят своей кнопкой сохранения —
+   переключение его на "Добавить" здесь и обратно после закрытия было бы хрупким (два набора
+   обработчиков на одну кнопку). Поэтому здесь — обычная кнопка внутри самой шторки, без
+   претензии на нативную нижнюю кнопку Telegram. */
+function openAddMemberModal(onAdded) {
+  const overlay = document.createElement("div");
+  overlay.className = "sheet-overlay";
+  overlay.innerHTML = `
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-title">Добавить участника</div>
+      <div class="hint-text" style="margin: 0 0 12px;">
+        Для тех, у кого нет Telegram — например, ребёнка или родственника. Он появится в
+        списке участников и трат, но не сможет открыть приложение сам — вносить траты за
+        него будет кто-то другой из чата.
+      </div>
+      <div class="field">
+        <label>Имя</label>
+        <input type="text" id="am-name" placeholder="Например, Мама" maxlength="255">
+      </div>
+      <div class="error-text" id="am-error" style="display:none;"></div>
+      <button class="btn" id="am-submit">Добавить</button>
+    </div>`;
+  overlay.addEventListener("click", (ev) => {
+    if (ev.target === overlay) overlay.remove();
+  });
+  document.body.appendChild(overlay);
+
+  const nameInput = overlay.querySelector("#am-name");
+  nameInput.focus();
+
+  overlay.querySelector("#am-submit").addEventListener("click", async () => {
+    const errorEl = overlay.querySelector("#am-error");
+    const submitBtn = overlay.querySelector("#am-submit");
+    const fullName = nameInput.value.trim();
+    if (!fullName) { showFormError(errorEl, "Введите имя"); return; }
+    submitBtn.disabled = true;
+    try {
+      const member = await api(`/chats/${state.chatId}/members`, {
+        method: "POST",
+        body: { full_name: fullName },
+      });
+      state.members.push(member);
+      state.members.sort((a, b) => a.full_name.localeCompare(b.full_name, "ru"));
+      haptic("notification", "success");
+      overlay.remove();
+      if (onAdded) onAdded(member);
+    } catch (e) {
+      showFormError(errorEl, e.message);
+      submitBtn.disabled = false;
+    }
+  });
 }
 
 /* ---------------- Вкладка «Баланс» ---------------- */
@@ -1094,6 +1185,12 @@ function openRecurringModal(existing) {
 
   function currentAmount() { return Number(overlay.querySelector("#r-amount").value || 0); }
 
+  function refreshPayerOptions() {
+    const select = overlay.querySelector("#r-payer");
+    const current = select.value;
+    select.innerHTML = state.members.map((m) => `<option value="${m.id}" ${String(m.id) === current ? "selected" : ""}>${escapeHtml(m.full_name)}</option>`).join("");
+  }
+
   function renderParticipants() {
     const block = overlay.querySelector("#r-participants-block");
     if (splitType === "equal") {
@@ -1101,13 +1198,22 @@ function openRecurringModal(existing) {
         <label>Участники</label>
         <div class="chip-row">
           ${state.members.map((m) => `<div class="chip ${selectedIds.has(m.id) ? "selected" : ""}" data-id="${m.id}">${escapeHtml(m.full_name)}</div>`).join("")}
+          <div class="chip add-chip" id="r-add-participant-chip">+ Добавить</div>
         </div>`;
-      block.querySelectorAll(".chip").forEach((chip) => {
+      block.querySelectorAll(".chip[data-id]").forEach((chip) => {
         chip.addEventListener("click", () => {
           haptic("selection");
           const id = Number(chip.dataset.id);
           if (selectedIds.has(id)) selectedIds.delete(id); else selectedIds.add(id);
           chip.classList.toggle("selected");
+        });
+      });
+      block.querySelector("#r-add-participant-chip").addEventListener("click", () => {
+        haptic("impact", "light");
+        openAddMemberModal((member) => {
+          selectedIds.add(member.id);
+          refreshPayerOptions();
+          renderParticipants();
         });
       });
     } else {
@@ -1120,12 +1226,21 @@ function openRecurringModal(existing) {
             <div class="name">${escapeHtml(m.full_name)}</div>
             <input type="number" min="0" step="0.01" data-id="${m.id}" class="r-custom-amount" value="${customAmounts[m.id] || ""}">
           </div>`).join("")}
-        <div class="hint-text" id="r-sum-hint">Указано: ${sum.toFixed(2)} из ${amount.toFixed(2)} ${state.chat.currency}</div>`;
+        <div class="hint-text" id="r-sum-hint">Указано: ${sum.toFixed(2)} из ${amount.toFixed(2)} ${state.chat.currency}</div>
+        <button type="button" class="btn secondary small" id="r-add-participant-btn" style="margin-top:8px;">+ Добавить участника</button>`;
       block.querySelectorAll(".r-custom-amount").forEach((inp) => {
         inp.addEventListener("input", () => {
           customAmounts[Number(inp.dataset.id)] = Number(inp.value || 0);
           const s = state.members.reduce((acc, m) => acc + (customAmounts[m.id] || 0), 0);
           block.querySelector("#r-sum-hint").textContent = `Указано: ${s.toFixed(2)} из ${currentAmount().toFixed(2)} ${state.chat.currency}`;
+        });
+      });
+      block.querySelector("#r-add-participant-btn").addEventListener("click", () => {
+        haptic("impact", "light");
+        openAddMemberModal((member) => {
+          customAmounts[member.id] = 0;
+          refreshPayerOptions();
+          renderParticipants();
         });
       });
     }

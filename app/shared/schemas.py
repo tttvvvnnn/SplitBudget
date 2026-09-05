@@ -9,13 +9,21 @@ from pydantic import BaseModel, Field, field_validator
 
 class MemberOut(BaseModel):
     id: int
-    tg_user_id: int
+    tg_user_id: int | None
     username: str | None
     full_name: str
     is_active: bool
     avatar_url: str | None
+    is_manual: bool
 
     model_config = {"from_attributes": True}
+
+
+class MemberCreate(BaseModel):
+    """Участник без Telegram-аккаунта — добавляется вручную кем-то из чата (например,
+    ребёнок или родственник без своего Telegram)."""
+
+    full_name: str = Field(min_length=1, max_length=255)
 
 
 class ChatOut(BaseModel):

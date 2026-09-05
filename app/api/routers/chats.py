@@ -10,7 +10,7 @@ from app.api.dependencies import ChatContext, get_chat_context
 from app.shared.config import settings
 from app.shared.database import get_session
 from app.shared.models import Chat, Member
-from app.shared.schemas import ChatOut, MeOut, MemberOut
+from app.shared.schemas import ChatOut, MeOut, MemberCreate, MemberOut
 
 router = APIRouter(tags=["chats"])
 
@@ -52,3 +52,23 @@ async def list_members(ctx: ChatContext = Depends(get_chat_context)) -> list[Mem
         select(Member).where(ctx.chat.id == Member.chat_id).order_by(Member.full_name)
     )
     return list(result.scalars().all())
+
+
+@router.post("/chats/{chat_id}/members", response_model=MemberOut, status_code=201)
+async def add_manual_member(
+    payload: MemberCreate, ctx: ChatContext = Depends(get_chat_context)
+) -> Member:
+    """Добавляет в чат участника без Telegram-аккаунта (например, ребёнка или родственника
+    без своего профиля) — его может добавить любой уже известный боту участник этого чата.
+    У такого участника нет tg_user_id: сам он мини-апп открыть не сможет, но может быть
+    выбран как «кто оплатил» или как участник трат — кто-то другой отмечает это за него."""
+    member = Member(
+        chat_id=ctx.chat.id,
+        tg_user_id=None,
+        username=None,
+        full_name=payload.full_name.strip(),
+        is_active=True,
+    )
+    ctx.session.add(member)
+    await ctx.session.commit()
+    return member
