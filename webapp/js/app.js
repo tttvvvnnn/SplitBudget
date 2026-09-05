@@ -562,6 +562,12 @@ function expenseCardHtml(e) {
   const thumb = e.photo_url
     ? `<img class="expense-thumb" data-photo="${escapeHtml(e.photo_url)}">`
     : `<div class="expense-thumb placeholder">${categoryIcon(e.category)}</div>`;
+  const payer = memberById(e.payer_member_id);
+  // Кто должен скинуться на эту трату — участники из shares (обычно включая самого
+  // плательщика, если он тоже участвует своей долей). Только аватарки, без имён — иначе
+  // строка мета не помещалась бы уже при 3-4 участниках; полный список — во всплывающей
+  // подсказке (title) и при открытии самой траты.
+  const participants = e.shares.map((s) => memberById(s.member_id));
   return `
     <div class="card expense-card" data-id="${e.id}">
       ${thumb}
@@ -569,7 +575,11 @@ function expenseCardHtml(e) {
         <div class="expense-title">${escapeHtml(e.title)}</div>
         <div class="expense-meta">
           <span class="badge">${categoryIcon(e.category)} ${escapeHtml(e.category)}</span>
-          ${memberInlineHtml(e.payer_member_id)}
+          <span class="payer-avatar" title="Оплатил(а): ${escapeHtml(payer ? payer.full_name : "—")}">${avatarHtml(payer)}</span>
+          ${participants.length > 0 ? `
+            <span class="split-avatars" title="Делят: ${escapeHtml(participants.map((m) => (m ? m.full_name : "—")).join(", "))}">
+              ${participants.map((m) => avatarHtml(m)).join("")}
+            </span>` : ""}
           ${e.is_recurring ? '<span title="Повторяющаяся">🔁</span>' : ""}
         </div>
       </div>

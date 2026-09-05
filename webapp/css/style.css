@@ -220,6 +220,41 @@ html, body {
   font-size: 8px;
 }
 
+/* Строка "кто платил / кто скидывается" в карточке траты — только аватарки, без имён (имя
+   доступно по долгому наведению/тапу через title и при открытии самой траты). */
+.payer-avatar {
+  display: inline-flex;
+  align-items: center;
+}
+
+.payer-avatar .avatar,
+.payer-avatar .avatar-fallback {
+  width: 18px;
+  height: 18px;
+  font-size: 8.5px;
+}
+
+.split-avatars {
+  display: inline-flex;
+  align-items: center;
+}
+
+.split-avatars .avatar,
+.split-avatars .avatar-fallback {
+  width: 16px;
+  height: 16px;
+  font-size: 7.5px;
+  /* Рамка цвета фона карточки — иначе перекрывающиеся кружки визуально сливаются в одно
+     пятно вместо читаемой "стопки" аватарок */
+  border: 1.5px solid var(--secondary-bg);
+  margin-left: -6px;
+}
+
+.split-avatars .avatar:first-child,
+.split-avatars .avatar-fallback:first-child {
+  margin-left: 0;
+}
+
 /* Заголовок группы трат за один день в списке — «Сегодня» / «Вчера» / «пн, 3 сен» */
 .day-header {
   font-size: 12.5px;
