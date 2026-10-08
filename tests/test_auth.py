@@ -32,6 +32,15 @@ def test_static_webapp_served(client):
     assert "Семейные траты" in r.text
 
 
+def test_webapp_js_modules_served_as_javascript(client):
+    # mini app грузится как нативные ES-модули (<script type="module">), а браузер отказывается
+    # выполнять модуль, если сервер отдал его не с JavaScript-типом
+    for path in ("/js/app.js", "/js/tabs/expenses.js"):
+        r = client.get(path)
+        assert r.status_code == 200
+        assert "javascript" in r.headers["content-type"]
+
+
 def test_healthz_reports_version(client):
     r = client.get("/healthz")
     assert r.status_code == 200
