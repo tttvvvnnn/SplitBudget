@@ -1,10 +1,11 @@
-import { state, isPersonal } from "./state.js";
+import { state, ALL_SPACE, isAll, isPersonal } from "./state.js";
 import { haptic } from "./telegram.js";
 import { escapeHtml } from "./format.js";
 import { memberLabel } from "./members.js";
 import { renderExpensesTab, openExpenseModal } from "./tabs/expenses.js";
 import { renderBalanceTab } from "./tabs/balance.js";
 import { renderStatsTab } from "./tabs/stats.js";
+import { renderAllExpensesTab } from "./tabs/all.js";
 import { renderRecurringTab, openRecurringModal } from "./tabs/recurring.js";
 
 /* Версия/сборка в правом верхнем углу шапки — чтобы после пересборки контейнера на стенде
@@ -45,9 +46,10 @@ const TABS = [
   { id: "recurring", icon: "🔁", label: "Повторы" },
 ];
 
-/* Переключатель «👤 Мои финансы | 🏠 семейные чаты» под заголовком. */
+/* Переключатель «📋 Все траты | 👤 Мои финансы | 🏠 семейные чаты» под заголовком. */
 function spaceSwitcherHtml() {
   const spaces = [
+    { id: ALL_SPACE, label: "📋 Все траты" },
     { id: state.personalChatId, label: "👤 Мои финансы" },
     ...state.familyChats.map((c) => ({ id: c.id, label: `🏠 ${c.title || c.id}` })),
   ].filter((s) => s.id !== null);
@@ -60,10 +62,13 @@ function spaceSwitcherHtml() {
 
 function renderShell({ onSwitchSpace } = {}) {
   const app = document.getElementById("app");
-  const tabs = isPersonal() ? TABS.filter((t) => t.id !== "balance") : TABS;
-  const sub = isPersonal()
-    ? `Видно только вам · Валюта: ${escapeHtml(state.chat.currency)}`
-    : `Валюта: ${escapeHtml(state.chat.currency)} · Вы: ${escapeHtml(memberLabel(state.member.id))}`;
+  let tabs = TABS;
+  if (isAll()) tabs = TABS.filter((t) => t.id === "expenses" || t.id === "stats");
+  else if (isPersonal()) tabs = TABS.filter((t) => t.id !== "balance");
+  let sub;
+  if (isAll()) sub = "Личные + ваша доля в семейных · видно только вам";
+  else if (isPersonal()) sub = `Видно только вам · Валюта: ${escapeHtml(state.chat.currency)}`;
+  else sub = `Валюта: ${escapeHtml(state.chat.currency)} · Вы: ${escapeHtml(memberLabel(state.member.id))}`;
   app.innerHTML = `
     <div class="header">
       <h1>${escapeHtml(state.chat.title || "Семейные траты")}</h1>
@@ -90,6 +95,7 @@ function renderShell({ onSwitchSpace } = {}) {
     btn.addEventListener("click", () => switchTab(btn.dataset.tab));
   });
 
+  updateFab();
   document.getElementById("fab-add").addEventListener("click", () => {
     haptic("impact", "light");
     if (state.tab === "recurring") openRecurringModal(null);
@@ -104,14 +110,21 @@ async function switchTab(tabId) {
   haptic("selection");
   state.tab = tabId;
   document.querySelectorAll(".tabbar button").forEach((b) => b.classList.toggle("active", b.dataset.tab === tabId));
-  document.getElementById("fab-add").style.display = tabId === "stats" ? "none" : "flex";
+  updateFab();
   await renderTab();
+}
+
+/* «+» не нужен на статистике и в сводке «Все траты» (непонятно, в какой чат добавлять —
+   траты добавляются в своём пространстве). */
+function updateFab() {
+  document.getElementById("fab-add").style.display = state.tab === "stats" || isAll() ? "none" : "flex";
 }
 
 async function renderTab() {
   const content = document.getElementById("content");
   content.innerHTML = `<div class="loading">Загрузка…</div>`;
-  if (state.tab === "expenses") await renderExpensesTab();
+  if (state.tab === "expenses" && isAll()) await renderAllExpensesTab();
+  else if (state.tab === "expenses") await renderExpensesTab();
   else if (state.tab === "balance") await renderBalanceTab();
   else if (state.tab === "stats") await renderStatsTab();
   else if (state.tab === "recurring") await renderRecurringTab();

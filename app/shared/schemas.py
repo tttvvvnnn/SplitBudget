@@ -105,6 +105,24 @@ class ExpenseOut(BaseModel):
     is_recurring: bool
 
 
+class AllExpenseOut(BaseModel):
+    """Трата в сводке «Все траты»: из какого пространства и какая в ней доля пользователя."""
+
+    id: int
+    chat_id: int
+    chat_title: str
+    is_personal: bool
+    title: str
+    amount: Decimal
+    my_share: Decimal
+    category: str
+    photo_url: str | None
+    expense_date: dt.date
+    payer_name: str
+    i_paid: bool
+    is_recurring: bool
+
+
 class BalanceEntry(BaseModel):
     member_id: int
     net: Decimal  # положительное — ему должны, отрицательное — он должен

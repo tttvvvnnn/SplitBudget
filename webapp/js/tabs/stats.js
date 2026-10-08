@@ -1,4 +1,4 @@
-import { state } from "../state.js";
+import { state, isAll } from "../state.js";
 import { api } from "../api.js";
 import { haptic } from "../telegram.js";
 import { categoryIcon, monthLabel, shiftMonth, fmtMoney, escapeHtml } from "../format.js";
@@ -11,7 +11,9 @@ async function renderStatsTab() {
   const content = document.getElementById("content");
   let stats;
   try {
-    stats = await api(`/chats/${state.chatId}/stats?month=${state.month}`);
+    // В сводке «Все траты» — статистика по доле пользователя во всех пространствах.
+    const path = isAll() ? "/all/stats" : `/chats/${state.chatId}/stats`;
+    stats = await api(`${path}?month=${state.month}`);
   } catch (e) {
     content.innerHTML = `<div class="empty-state">${escapeHtml(e.message)}</div>`;
     return;
