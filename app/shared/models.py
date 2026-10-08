@@ -22,6 +22,12 @@ from app.shared.database import Base
 MoneyType = Numeric(12, 2)
 
 
+def _utcnow() -> dt.datetime:
+    """Текущее время в UTC без tzinfo — колонки DateTime хранят naive-время.
+    Замена устаревшему dt.datetime.utcnow()."""
+    return dt.datetime.now(dt.UTC).replace(tzinfo=None)
+
+
 class Chat(Base):
     """Семейный чат в Telegram, в который добавлен бот."""
 
@@ -30,7 +36,7 @@ class Chat(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)  # telegram chat_id
     title: Mapped[str] = mapped_column(String(255), default="")
     currency: Mapped[str] = mapped_column(String(8), default="RUB")
-    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=dt.datetime.utcnow)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
 
     members: Mapped[list["Member"]] = relationship(back_populates="chat", cascade="all, delete-orphan")
     expenses: Mapped[list["Expense"]] = relationship(back_populates="chat", cascade="all, delete-orphan")
@@ -57,7 +63,7 @@ class Member(Base):
     # синхронизировано, или если у пользователя нет фото профиля (в т.ч. всегда NULL у
     # ручных участников — синхронизировать нечего).
     avatar_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    added_at: Mapped[dt.datetime] = mapped_column(DateTime, default=dt.datetime.utcnow)
+    added_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
 
     chat: Mapped["Chat"] = relationship(back_populates="members")
 
@@ -92,9 +98,9 @@ class Expense(Base):
     recurring_id: Mapped[int | None] = mapped_column(
         ForeignKey("recurring_expenses.id", ondelete="SET NULL"), nullable=True
     )
-    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=dt.datetime.utcnow)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[dt.datetime] = mapped_column(
-        DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow
+        DateTime, default=_utcnow, onupdate=_utcnow
     )
 
     chat: Mapped["Chat"] = relationship(back_populates="expenses")
@@ -130,7 +136,7 @@ class Settlement(Base):
     amount: Mapped[Decimal] = mapped_column(MoneyType)
     note: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_by_member_id: Mapped[int] = mapped_column(ForeignKey("members.id", ondelete="CASCADE"))
-    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=dt.datetime.utcnow)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
 
     from_member: Mapped["Member"] = relationship(foreign_keys=[from_member_id])
     to_member: Mapped["Member"] = relationship(foreign_keys=[to_member_id])
@@ -153,7 +159,7 @@ class RecurringExpense(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     last_generated_month: Mapped[str | None] = mapped_column(String(7), nullable=True)  # 'YYYY-MM'
     created_by_member_id: Mapped[int] = mapped_column(ForeignKey("members.id", ondelete="CASCADE"))
-    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=dt.datetime.utcnow)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
 
     payer: Mapped["Member"] = relationship(foreign_keys=[payer_member_id])
     participants: Mapped[list["RecurringParticipant"]] = relationship(
