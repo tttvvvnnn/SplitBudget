@@ -6,6 +6,9 @@ import { avatarHtml, loadAvatarsIn, memberById } from "../members.js";
 import { openSheet, closeSheet, useMainButtonFor, showFormError } from "../sheet.js";
 import { openAddMemberModal } from "../member-modals.js";
 import { switchTab } from "../shell.js";
+import {
+  categoryFieldsHtml, bindCategoryFields, setCategory, showCategoryHint, readCategoryFields, categoryBadgeHtml,
+} from "../category-fields.js";
 
 /* Компактная сводка личного баланса вверху вкладки «Траты» — чтобы не нужно было заходить
    на вкладку «Баланс» просто ради того, чтобы понять, кто кому сейчас должен. Тап по ней
@@ -229,7 +232,7 @@ function expenseCardHtml(e) {
       <div class="expense-main">
         <div class="expense-title">${escapeHtml(e.title)}</div>
         <div class="expense-meta">
-          <span class="badge">${categoryIcon(e.category)} ${escapeHtml(e.category)}</span>${familyMeta}
+          ${categoryBadgeHtml(e.category, e.subcategory)}${familyMeta}
           ${e.is_recurring ? '<span title="Повторяющаяся">🔁</span>' : ""}
         </div>
       </div>
@@ -274,12 +277,7 @@ function openExpenseModal(existing) {
         <input type="number" id="f-amount" min="0" step="0.01" value="${existing ? existing.amount : ""}">
       </div>
     </div>
-    <div class="field">
-      <label>Категория</label>
-      <select id="f-category">
-        ${state.categories.map((c) => `<option value="${escapeHtml(c)}" ${existing && existing.category === c ? "selected" : ""}>${categoryIcon(c)} ${escapeHtml(c)}</option>`).join("")}
-      </select>
-    </div>
+    ${categoryFieldsHtml("f", existing && existing.category, existing && existing.subcategory)}
     <div class="field">
       <label>Дата</label>
       <input type="date" id="f-date" value="${existing ? existing.expense_date : todayISO()}">
@@ -300,6 +298,7 @@ function openExpenseModal(existing) {
   // В личном пространстве плательщик и участник — всегда сам пользователь (он же единственный
   // участник, поэтому selectedIds по умолчанию уже {он}), выбирать нечего.
   hideFamilyOnly(overlay);
+  bindAutoCategory(overlay, isEdit);
 
   const photoInput = overlay.querySelector("#f-photo");
   const photoPreview = overlay.querySelector("#f-photo-preview");
@@ -410,7 +409,7 @@ function openExpenseModal(existing) {
     errorEl.style.display = "none";
     const title = overlay.querySelector("#f-title").value.trim();
     const amount = currentAmount();
-    const category = overlay.querySelector("#f-category").value;
+    const { category, subcategory } = readCategoryFields(overlay, "f");
     const date = overlay.querySelector("#f-date").value;
     const payerId = Number(overlay.querySelector("#f-payer").value);
 
@@ -421,6 +420,7 @@ function openExpenseModal(existing) {
     form.append("title", title);
     form.append("amount", String(amount));
     form.append("category", category);
+    form.append("subcategory", subcategory);
     form.append("expense_date", date);
     form.append("payer_member_id", String(payerId));
     form.append("split_type", splitType);
@@ -477,6 +477,37 @@ function openExpenseModal(existing) {
       }
     });
   }
+}
+
+/* Автоподбор категории по названию (GET .../category-suggestion): пока пользователь печатает
+   название новой траты, подставляем категорию — выученную по прошлым тратам этого чата или
+   из словаря магазинов. Как только категорию выбрали руками — больше не трогаем. При
+   редактировании существующей траты не подбираем: категория у неё уже есть. */
+function bindAutoCategory(overlay, isEdit) {
+  let touched = isEdit;
+  bindCategoryFields(overlay, "f", () => { touched = true; });
+  if (isEdit) return;
+
+  const titleInput = overlay.querySelector("#f-title");
+  let timer = null;
+  let lastQuery = "";
+  titleInput.addEventListener("input", () => {
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      const title = titleInput.value.trim();
+      if (touched || !title || title === lastQuery) return;
+      lastQuery = title;
+      try {
+        const s = await api(`/chats/${state.chatId}/category-suggestion?title=${encodeURIComponent(title)}`);
+        if (touched || titleInput.value.trim() !== title) return; // пока ждали ответ, всё поменялось
+        if (!s) { showCategoryHint(overlay, "f", ""); return; }
+        setCategory(overlay, "f", s.category, s.subcategory || "");
+        showCategoryHint(overlay, "f", s.source === "learned" ? "🪄 Как в прошлый раз" : "🪄 Подобрано по названию");
+      } catch (e) {
+        // подсказка необязательна — без неё форма работает как обычно
+      }
+    }, 350);
+  });
 }
 
 export { renderExpensesTab, openExpenseModal, dayHeaderLabel };

@@ -12,11 +12,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import ChatContext, get_chat_context
-from app.bot.notify import notify_expense_deleted, notify_new_expense
+from app.bot.notify import notify_budget_alerts, notify_expense_deleted, notify_new_expense
+from app.shared.autocategory import learn_category, suggest_category
+from app.shared.budgets import alerts_after_expense
 from app.shared.config import settings
 from app.shared.crud import build_custom_shares, build_equal_shares
 from app.shared.models import Expense, ExpenseShare, Member
-from app.shared.schemas import ExpenseOut, ShareOut
+from app.shared.schemas import CategorySuggestionOut, ExpenseOut, ShareOut
 
 router = APIRouter(tags=["expenses"])
 
@@ -68,6 +70,7 @@ def _to_out(expense: Expense, shares: list[ExpenseShare]) -> ExpenseOut:
         title=expense.title,
         amount=expense.amount,
         category=expense.category,
+        subcategory=expense.subcategory,
         photo_url=(f"photos/{expense.photo_path}" if expense.photo_path else None),
         expense_date=expense.expense_date,
         payer_member_id=expense.payer_member_id,
@@ -121,6 +124,7 @@ async def create_expense(
     title: str = Form(...),
     amount: str = Form(...),
     category: str = Form("Другое"),
+    subcategory: str | None = Form(None),
     expense_date: str = Form(...),
     payer_member_id: int = Form(...),
     split_type: str = Form("equal"),
@@ -168,6 +172,7 @@ async def create_expense(
         title=title.strip()[:255],
         amount=amount_dec,
         category=category or "Другое",
+        subcategory=(subcategory or None),
         photo_path=photo_filename,
         expense_date=expense_date_val,
         payer_member_id=payer_member_id,
@@ -180,6 +185,7 @@ async def create_expense(
     for member_id, share_amount in shares:
         ctx.session.add(ExpenseShare(expense_id=expense.id, member_id=member_id, amount=share_amount))
 
+    await learn_category(ctx.session, ctx.chat.id, expense.title, expense.category, expense.subcategory)
     await ctx.session.commit()
 
     members_result = await ctx.session.execute(
@@ -190,12 +196,34 @@ async def create_expense(
     labels = [
         (f"@{m.username}" if m.username else m.full_name) for m in members_by_id.values()
     ]
+    category_label = expense.category + (f" › {expense.subcategory}" if expense.subcategory else "")
     await notify_new_expense(
-        ctx.chat, payer, ctx.member, expense.title, expense.amount, expense.category, labels
+        ctx.chat, payer, ctx.member, expense.title, expense.amount, category_label, labels
     )
+    await _check_budgets(ctx, expense.id)
 
     result_shares = [ExpenseShare(expense_id=expense.id, member_id=m, amount=a) for m, a in shares]
     return _to_out(expense, result_shares)
+
+
+async def _check_budgets(ctx: ChatContext, expense_id: int) -> None:
+    """Проверить лимиты после сохранения траты и разослать новые уведомления (80% / 100%)."""
+    alerts = await alerts_after_expense(ctx.session, expense_id)
+    if alerts:
+        await ctx.session.commit()  # отметки BudgetAlert — чтобы не повторяться
+        await notify_budget_alerts(alerts)
+
+
+@router.get("/chats/{chat_id}/category-suggestion", response_model=CategorySuggestionOut | None)
+async def category_suggestion(title: str, ctx: ChatContext = Depends(get_chat_context)):
+    """Подсказка категории по названию траты — мини-апп подставляет её в форму, пока
+    пользователь печатает название. null — угадать не получилось."""
+    suggestion = await suggest_category(ctx.session, ctx.chat.id, title)
+    if suggestion is None:
+        return None
+    return CategorySuggestionOut(
+        category=suggestion.category, subcategory=suggestion.subcategory, source=suggestion.source
+    )
 
 
 @router.get("/chats/{chat_id}/photos/{filename}")
@@ -214,6 +242,7 @@ async def update_expense(
     title: str | None = Form(None),
     amount: str | None = Form(None),
     category: str | None = Form(None),
+    subcategory: str | None = Form(None),  # "" — убрать подкатегорию
     expense_date: str | None = Form(None),
     payer_member_id: int | None = Form(None),
     split_type: str | None = Form(None),
@@ -227,8 +256,11 @@ async def update_expense(
 
     if title is not None:
         expense.title = title.strip()[:255]
-    if category is not None:
+    if category is not None and category != expense.category:
         expense.category = category
+        expense.subcategory = None  # подкатегория старой категории к новой не подходит
+    if subcategory is not None:
+        expense.subcategory = subcategory or None
     if expense_date is not None:
         try:
             expense.expense_date = dt.date.fromisoformat(expense_date)
@@ -285,11 +317,15 @@ async def update_expense(
     if photo is not None and photo.filename:
         expense.photo_path = await _save_photo(ctx.chat.id, photo)
 
+    if title is not None or category is not None or subcategory is not None:
+        await learn_category(ctx.session, ctx.chat.id, expense.title, expense.category, expense.subcategory)
     await ctx.session.commit()
 
     result = await ctx.session.execute(select(ExpenseShare).where(ExpenseShare.expense_id == expense.id))
     final_shares = list(result.scalars().all())
-    return _to_out(expense, final_shares)
+    out = _to_out(expense, final_shares)
+    await _check_budgets(ctx, expense.id)
+    return out
 
 
 @router.delete("/chats/{chat_id}/expenses/{expense_id}", status_code=204)

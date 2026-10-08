@@ -14,22 +14,11 @@ function todayISO() {
   return local.toISOString().slice(0, 10);
 }
 
-/* Иконки категорий — только для отображения, на сервер и в БД не уходят (категория
-   как была строкой, так и осталась). Список категорий настраивается в
-   app/shared/config.py — если добавите новую, впишите и сюда, иначе будет 🏷️. */
-const CATEGORY_ICONS = {
-  "Еда": "🍔",
-  "Транспорт": "🚗",
-  "ЖКХ": "🏠",
-  "Развлечения": "🎬",
-  "Здоровье": "💊",
-  "Одежда": "👕",
-  "Подписки": "📱",
-  "Другое": "📦",
-};
-
+/* Иконка категории — из дерева категорий с сервера (state.categoryTree, см.
+   app/shared/categories.py). Для категорий не из дерева — 🏷️. */
 function categoryIcon(category) {
-  return CATEGORY_ICONS[category] || "🏷️";
+  const node = state.categoryTree.find((c) => c.name === category);
+  return node ? node.icon : "🏷️";
 }
 
 function monthLabel(ym) {

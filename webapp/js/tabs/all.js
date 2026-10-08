@@ -3,6 +3,7 @@ import { api, loadAuthedImage } from "../api.js";
 import { haptic } from "../telegram.js";
 import { categoryIcon, monthLabel, shiftMonth, fmtMoney, escapeHtml } from "../format.js";
 import { openExpenseModal, dayHeaderLabel } from "./expenses.js";
+import { categoryBadgeHtml } from "../category-fields.js";
 
 /* ---------------- Вкладка «Траты» в сводке «Все траты» ----------------
    Личные траты и траты семейных чатов, в которых у пользователя есть доля, одним списком.
@@ -118,7 +119,7 @@ function cardHtml(e) {
       <div class="expense-main">
         <div class="expense-title">${escapeHtml(e.title)}</div>
         <div class="expense-meta">
-          <span class="badge">${categoryIcon(e.category)} ${escapeHtml(e.category)}</span>
+          ${categoryBadgeHtml(e.category, e.subcategory)}
           <span>${escapeHtml(spaceLabel(e))}${payer}</span>
           ${e.is_recurring ? '<span title="Повторяющаяся">🔁</span>' : ""}
         </div>

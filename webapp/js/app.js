@@ -44,7 +44,8 @@ async function init() {
   // chat_id (кнопка меню бота) открываем сводку «Все траты», по кнопке «Мои финансы» в
   // личке (?space=personal) — личное пространство.
   try {
-    const [personal, chats] = await Promise.all([api("/personal"), api("/my-chats")]);
+    const [personal, chats, tree] = await Promise.all([api("/personal"), api("/my-chats"), api("/categories")]);
+    state.categoryTree = tree;
     state.personalChatId = personal.id;
     state.personalCurrency = personal.currency;
     state.familyChats = chats;
@@ -82,7 +83,7 @@ async function loadMeAndRender() {
     state.chat = { id: ALL_SPACE, title: "Все траты", currency: state.personalCurrency, is_personal: false };
     state.member = null;
     state.members = [];
-    if (state.tab !== "stats") state.tab = "expenses";
+    if (!["stats", "budgets"].includes(state.tab)) state.tab = "expenses";
     renderShell({ onSwitchSpace: switchSpace });
     loadVersionBadge();
     await renderTab();

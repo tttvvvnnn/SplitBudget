@@ -29,13 +29,20 @@ async function renderStatsTab() {
     ${stats.by_category.length === 0 ? '<div class="empty-state">Нет трат за этот месяц.</div>' : `
       <div class="chart-wrap"><canvas id="stats-chart" height="220"></canvas></div>
       <div class="card">
-        ${stats.by_category.map((c) => `
-          <div class="balance-row">
-            <span>${categoryIcon(c.category)} ${escapeHtml(c.category)} <span class="hint-text">(${c.count})</span></span>
-            <span>${fmtMoney(c.total)}</span>
-          </div>`).join("")}
+        ${stats.by_category.map((c, i) => categoryRowHtml(c, i)).join("")}
       </div>`}
   `;
+
+  // Тап по категории раскрывает её подкатегории (если они есть)
+  content.querySelectorAll(".stats-cat[data-expandable]").forEach((row) => {
+    row.addEventListener("click", () => {
+      haptic("selection");
+      const subs = content.querySelector(`.stats-subs[data-for="${row.dataset.idx}"]`);
+      const open = subs.style.display !== "none";
+      subs.style.display = open ? "none" : "block";
+      row.classList.toggle("open", !open);
+    });
+  });
 
   content.querySelectorAll(".month-picker button").forEach((b) => {
     b.addEventListener("click", async () => {
@@ -64,6 +71,25 @@ async function renderStatsTab() {
       },
     });
   }
+}
+
+/* Строка категории + (скрытая) разбивка по подкатегориям. Разбивку показываем, только
+   если в категории есть хоть одна подкатегория — иначе раскрывать нечего. */
+function categoryRowHtml(c, idx) {
+  const expandable = c.subcategories.some((s) => s.subcategory);
+  return `
+    <div class="balance-row stats-cat" data-idx="${idx}" ${expandable ? "data-expandable" : ""}>
+      <span>${expandable ? '<span class="chevron">›</span>' : ""}${categoryIcon(c.category)} ${escapeHtml(c.category)} <span class="hint-text">(${c.count})</span></span>
+      <span>${fmtMoney(c.total)}</span>
+    </div>
+    ${expandable ? `
+      <div class="stats-subs" data-for="${idx}" style="display:none;">
+        ${c.subcategories.map((s) => `
+          <div class="balance-row stats-sub">
+            <span>${escapeHtml(s.subcategory || "Без подкатегории")} <span class="hint-text">(${s.count})</span></span>
+            <span>${fmtMoney(s.total)}</span>
+          </div>`).join("")}
+      </div>` : ""}`;
 }
 
 export { renderStatsTab };

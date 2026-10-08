@@ -842,3 +842,67 @@ html, body {
   font-weight: 700;
   margin: 6px 0 14px;
 }
+
+/* Статистика: раскрытие категории по подкатегориям (см. categoryRowHtml в tabs/stats.js) */
+.stats-cat[data-expandable] {
+  cursor: pointer;
+}
+
+.stats-cat .chevron {
+  display: inline-block;
+  width: 14px;
+  color: var(--hint);
+  transition: transform 0.15s;
+}
+
+.stats-cat.open .chevron {
+  transform: rotate(90deg);
+}
+
+.stats-sub {
+  padding-left: 22px;
+  font-size: 14px;
+  color: var(--hint);
+}
+
+/* Вкладка «Лимиты» (tabs/budgets.js): карточка с полоской прогресса */
+.budget-card {
+  cursor: pointer;
+  padding: 12px 14px;
+}
+
+.budget-head,
+.budget-sub {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.budget-head {
+  font-weight: 600;
+}
+
+.budget-sub {
+  font-size: 13px;
+  margin-top: 6px;
+}
+
+.budget-bar {
+  height: 8px;
+  margin-top: 8px;
+  border-radius: 4px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.budget-fill {
+  height: 100%;
+  border-radius: 4px;
+}
+
+.budget-fill.ok { background: var(--success); }
+.budget-fill.warn { background: #ff9500; }
+.budget-fill.over { background: var(--danger); }
+.budget-pct.warn { color: #ff9500; }
+.budget-pct.over { color: var(--danger); }

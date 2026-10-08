@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.api.routers import balances, chats, expenses, overview, recurring, stats
+from app.api.routers import balances, budgets, chats, expenses, overview, recurring, stats
 from app.bot.bot_instance import bot
 from app.bot.runner import start_polling
 from app.bot.scheduler import setup_scheduler
@@ -104,7 +104,8 @@ async def no_cache_webapp_static(request, call_next):
 
 
 for router in (
-    chats.router, expenses.router, balances.router, recurring.router, stats.router, overview.router
+    chats.router, expenses.router, balances.router, recurring.router, stats.router, overview.router,
+    budgets.router,
 ):
     app.include_router(router, prefix="/api")
 

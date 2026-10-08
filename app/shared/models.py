@@ -95,6 +95,8 @@ class Expense(Base):
     title: Mapped[str] = mapped_column(String(255))
     amount: Mapped[Decimal] = mapped_column(MoneyType)
     category: Mapped[str] = mapped_column(String(64), default="Другое")
+    # Подкатегория внутри category (например, «Продукты» → «Алкоголь»), см. app/shared/categories.py.
+    subcategory: Mapped[str | None] = mapped_column(String(64), nullable=True)
     photo_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
     expense_date: Mapped[dt.date] = mapped_column(Date, default=dt.date.today)
     payer_member_id: Mapped[int] = mapped_column(ForeignKey("members.id", ondelete="CASCADE"))
@@ -158,6 +160,7 @@ class RecurringExpense(Base):
     title: Mapped[str] = mapped_column(String(255))
     amount: Mapped[Decimal] = mapped_column(MoneyType)
     category: Mapped[str] = mapped_column(String(64), default="Другое")
+    subcategory: Mapped[str | None] = mapped_column(String(64), nullable=True)
     payer_member_id: Mapped[int] = mapped_column(ForeignKey("members.id", ondelete="CASCADE"))
     split_type: Mapped[str] = mapped_column(String(16), default="equal")
     day_of_month: Mapped[int] = mapped_column(default=1)  # 1..28
@@ -185,3 +188,51 @@ class RecurringParticipant(Base):
 
     recurring: Mapped["RecurringExpense"] = relationship(back_populates="participants")
     member: Mapped["Member"] = relationship()
+
+
+class CategoryRule(Base):
+    """Выученное соответствие «название траты → категория» в конкретном чате (см.
+    app/shared/autocategory.py). Обновляется при каждом сохранении траты."""
+
+    __tablename__ = "category_rules"
+    __table_args__ = (UniqueConstraint("chat_id", "keyword", name="uq_category_rule_chat_keyword"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[int] = mapped_column(ForeignKey("chats.id", ondelete="CASCADE"))
+    keyword: Mapped[str] = mapped_column(String(255))  # нормализованное название траты
+    category: Mapped[str] = mapped_column(String(64))
+    subcategory: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class Budget(Base):
+    """Месячный лимит трат в пространстве (семейном чате или «Моих финансах»).
+
+    category="" — общий лимит на месяц; subcategory=None — лимит на всю категорию. В семейном
+    чате считаются полные суммы трат чата, в личном пространстве — доля владельца во всех его
+    тратах (личных и семейных), как в «Все траты». См. app/shared/budgets.py."""
+
+    __tablename__ = "budgets"
+    __table_args__ = (
+        UniqueConstraint("chat_id", "category", "subcategory", name="uq_budget_chat_category"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[int] = mapped_column(ForeignKey("chats.id", ondelete="CASCADE"))
+    category: Mapped[str] = mapped_column(String(64), default="")
+    subcategory: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    amount: Mapped[Decimal] = mapped_column(MoneyType)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class BudgetAlert(Base):
+    """Отправленное уведомление о лимите (80% или 100%) — чтобы не слать его повторно в том же месяце."""
+
+    __tablename__ = "budget_alerts"
+    __table_args__ = (UniqueConstraint("budget_id", "month", "level", name="uq_budget_alert"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    budget_id: Mapped[int] = mapped_column(ForeignKey("budgets.id", ondelete="CASCADE"))
+    month: Mapped[str] = mapped_column(String(7))  # 'YYYY-MM'
+    level: Mapped[int] = mapped_column()  # 80 | 100
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)

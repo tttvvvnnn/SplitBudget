@@ -42,6 +42,7 @@ def _to_out(r: RecurringExpense, participants: list[RecurringParticipant]) -> Re
         title=r.title,
         amount=r.amount,
         category=r.category,
+        subcategory=r.subcategory,
         payer_member_id=r.payer_member_id,
         split_type=r.split_type,
         day_of_month=r.day_of_month,
@@ -82,6 +83,7 @@ async def create_recurring(payload: RecurringCreate, ctx: ChatContext = Depends(
         title=payload.title.strip()[:255],
         amount=payload.amount,
         category=payload.category or "Другое",
+        subcategory=payload.subcategory or None,
         payer_member_id=payload.payer_member_id,
         split_type=payload.split_type,
         day_of_month=payload.day_of_month,
@@ -115,8 +117,11 @@ async def update_recurring(
         recurring.title = payload.title.strip()[:255]
     if payload.amount is not None:
         recurring.amount = payload.amount
-    if payload.category is not None:
+    if payload.category is not None and payload.category != recurring.category:
         recurring.category = payload.category
+        recurring.subcategory = None
+    if payload.subcategory is not None:
+        recurring.subcategory = payload.subcategory or None
     if payload.payer_member_id is not None:
         recurring.payer_member_id = payload.payer_member_id
     if payload.split_type is not None:

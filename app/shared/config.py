@@ -17,17 +17,7 @@ class Settings(BaseSettings):
     SCHEDULER_TIMEZONE: str = "Europe/Moscow"
     API_PORT: int = 8000
 
-    # Список категорий трат по умолчанию, предлагаемых в mini app.
-    DEFAULT_CATEGORIES: list[str] = [
-        "Еда",
-        "Транспорт",
-        "ЖКХ",
-        "Развлечения",
-        "Здоровье",
-        "Одежда",
-        "Подписки",
-        "Другое",
-    ]
+    # Категории и подкатегории трат — в app/shared/categories.py.
 
     @property
     def database_url(self) -> str:

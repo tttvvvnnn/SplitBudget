@@ -1,10 +1,11 @@
 import { state, isPersonal, hideFamilyOnly } from "../state.js";
 import { api } from "../api.js";
 import { tg, haptic, toast, confirmAction } from "../telegram.js";
-import { categoryIcon, fmtMoney, escapeHtml } from "../format.js";
+import { fmtMoney, escapeHtml } from "../format.js";
 import { memberLabel } from "../members.js";
 import { openSheet, closeSheet, useMainButtonFor, showFormError } from "../sheet.js";
 import { openAddMemberModal } from "../member-modals.js";
+import { categoryFieldsHtml, bindCategoryFields, readCategoryFields, categoryBadgeHtml } from "../category-fields.js";
 
 /* ---------------- Вкладка «Повторяющиеся траты» ---------------- */
 
@@ -27,7 +28,7 @@ async function renderRecurringTab() {
         <div class="expense-main">
           <div class="expense-title">${escapeHtml(r.title)}</div>
           <div class="expense-meta">
-            <span class="badge">${categoryIcon(r.category)} ${escapeHtml(r.category)}</span>
+            ${categoryBadgeHtml(r.category, r.subcategory)}
             каждое ${r.day_of_month} число${isPersonal() ? "" : ` · ${escapeHtml(memberLabel(r.payer_member_id))}`}
             ${r.is_active ? "" : " · остановлено"}
           </div>
@@ -61,12 +62,7 @@ function openRecurringModal(existing) {
       <label>Сумма (${escapeHtml(state.chat.currency)})</label>
       <input type="number" id="r-amount" min="0" step="0.01" value="${existing ? existing.amount : ""}">
     </div>
-    <div class="field">
-      <label>Категория</label>
-      <select id="r-category">
-        ${state.categories.map((c) => `<option value="${escapeHtml(c)}" ${existing && existing.category === c ? "selected" : ""}>${categoryIcon(c)} ${escapeHtml(c)}</option>`).join("")}
-      </select>
-    </div>
+    ${categoryFieldsHtml("r", existing && existing.category, existing && existing.subcategory)}
     <div class="field">
       <label>День месяца (1–28)</label>
       <input type="number" id="r-day" min="1" max="28" value="${existing ? existing.day_of_month : 1}">
@@ -92,6 +88,7 @@ function openRecurringModal(existing) {
   `);
 
   hideFamilyOnly(overlay);
+  bindCategoryFields(overlay, "r");
 
   function currentAmount() { return Number(overlay.querySelector("#r-amount").value || 0); }
 
@@ -172,7 +169,7 @@ function openRecurringModal(existing) {
     errorEl.style.display = "none";
     const title = overlay.querySelector("#r-title").value.trim();
     const amount = currentAmount();
-    const category = overlay.querySelector("#r-category").value;
+    const { category, subcategory } = readCategoryFields(overlay, "r");
     const day = Number(overlay.querySelector("#r-day").value);
     const payerId = Number(overlay.querySelector("#r-payer").value);
 
@@ -197,7 +194,7 @@ function openRecurringModal(existing) {
     }
 
     const payload = {
-      title, amount, category, payer_member_id: payerId,
+      title, amount, category, subcategory, payer_member_id: payerId,
       split_type: splitType, day_of_month: day, participants,
     };
     if (isEdit) payload.is_active = overlay.querySelector("#r-active").checked;

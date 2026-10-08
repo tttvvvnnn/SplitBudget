@@ -13,7 +13,8 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy import or_, select
 
-from app.bot.notify import notify_recurring_generated
+from app.bot.notify import notify_budget_alerts, notify_recurring_generated
+from app.shared.budgets import alerts_after_expense
 from app.shared.config import settings
 from app.shared.crud import build_custom_shares, build_equal_shares, load_recurring_participants
 from app.shared.database import async_session_maker
@@ -64,6 +65,7 @@ async def generate_due_recurring_expenses() -> None:
                 title=template.title,
                 amount=template.amount,
                 category=template.category,
+                subcategory=template.subcategory,
                 expense_date=today,
                 payer_member_id=template.payer_member_id,
                 split_type=template.split_type,
@@ -85,6 +87,11 @@ async def generate_due_recurring_expenses() -> None:
 
             if chat and payer:
                 await notify_recurring_generated(chat, template.title, template.amount, payer)
+
+            alerts = await alerts_after_expense(session, expense.id)
+            if alerts:
+                await session.commit()
+                await notify_budget_alerts(alerts)
 
         await session.commit()
 

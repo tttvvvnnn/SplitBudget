@@ -42,6 +42,33 @@ class ChatOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class CategoryNode(BaseModel):
+    name: str
+    icon: str
+    subcategories: list[str]
+
+
+class BudgetIn(BaseModel):
+    category: str = Field(default="", max_length=64)  # "" — общий лимит на месяц
+    subcategory: str | None = Field(default=None, max_length=64)
+    amount: Decimal = Field(gt=0)
+
+
+class BudgetOut(BaseModel):
+    id: int
+    category: str
+    subcategory: str | None
+    amount: Decimal
+    spent: Decimal
+    label: str
+
+
+class CategorySuggestionOut(BaseModel):
+    category: str
+    subcategory: str | None
+    source: str  # 'learned' — выучено по тратам этого чата, 'dictionary' — словарь магазинов
+
+
 class MeOut(BaseModel):
     chat: ChatOut
     member: MemberOut
@@ -95,6 +122,7 @@ class ExpenseOut(BaseModel):
     title: str
     amount: Decimal
     category: str
+    subcategory: str | None
     photo_url: str | None
     expense_date: dt.date
     payer_member_id: int
@@ -116,6 +144,7 @@ class AllExpenseOut(BaseModel):
     amount: Decimal
     my_share: Decimal
     category: str
+    subcategory: str | None
     photo_url: str | None
     expense_date: dt.date
     payer_name: str
@@ -166,6 +195,7 @@ class RecurringCreate(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     amount: Decimal = Field(gt=0)
     category: str = "Другое"
+    subcategory: str | None = None
     payer_member_id: int
     split_type: str = "equal"
     day_of_month: int = Field(default=1, ge=1, le=28)
@@ -176,6 +206,7 @@ class RecurringUpdate(BaseModel):
     title: str | None = None
     amount: Decimal | None = Field(default=None, gt=0)
     category: str | None = None
+    subcategory: str | None = None  # "" — убрать подкатегорию
     payer_member_id: int | None = None
     split_type: str | None = None
     day_of_month: int | None = Field(default=None, ge=1, le=28)
@@ -188,6 +219,7 @@ class RecurringOut(BaseModel):
     title: str
     amount: Decimal
     category: str
+    subcategory: str | None
     payer_member_id: int
     split_type: str
     day_of_month: int
@@ -195,10 +227,17 @@ class RecurringOut(BaseModel):
     participants: list[RecurringParticipantIn]
 
 
+class SubcategoryStat(BaseModel):
+    subcategory: str  # "" — трата без подкатегории
+    total: Decimal
+    count: int
+
+
 class CategoryStat(BaseModel):
     category: str
     total: Decimal
     count: int
+    subcategories: list[SubcategoryStat] = Field(default_factory=list)
 
 
 class StatsOut(BaseModel):
