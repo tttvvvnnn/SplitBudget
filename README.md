@@ -162,7 +162,7 @@ app/
   shared/               # общие модели SQLAlchemy, схемы Pydantic, расчёт баланса, миграции
 migrations/            # схема БД версионируется через Alembic (alembic upgrade head при старте)
 tests/                 # pytest — бизнес-логика поверх HTTP API
-webapp/                # mini app: index.html + css/js, без сборки
+webapp/                # mini app: index.html + css + js (нативные ES-модули), без сборки
 data/                  # база SQLite и фото чеков (volume, не коммитить)
 nginx/                 # пример конфига реверс-прокси
 .github/workflows/     # CI (тесты) + Release (сборка образа, релиз на GitHub, деплой по SSH)
