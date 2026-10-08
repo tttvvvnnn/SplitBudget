@@ -188,3 +188,18 @@ class RecurringParticipant(Base):
 
     recurring: Mapped["RecurringExpense"] = relationship(back_populates="participants")
     member: Mapped["Member"] = relationship()
+
+
+class CategoryRule(Base):
+    """Выученное соответствие «название траты → категория» в конкретном чате (см.
+    app/shared/autocategory.py). Обновляется при каждом сохранении траты."""
+
+    __tablename__ = "category_rules"
+    __table_args__ = (UniqueConstraint("chat_id", "keyword", name="uq_category_rule_chat_keyword"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[int] = mapped_column(ForeignKey("chats.id", ondelete="CASCADE"))
+    keyword: Mapped[str] = mapped_column(String(255))  # нормализованное название траты
+    category: Mapped[str] = mapped_column(String(64))
+    subcategory: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)

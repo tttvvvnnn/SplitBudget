@@ -6,7 +6,9 @@ import { avatarHtml, loadAvatarsIn, memberById } from "../members.js";
 import { openSheet, closeSheet, useMainButtonFor, showFormError } from "../sheet.js";
 import { openAddMemberModal } from "../member-modals.js";
 import { switchTab } from "../shell.js";
-import { categoryFieldsHtml, bindCategoryFields, readCategoryFields, categoryBadgeHtml } from "../category-fields.js";
+import {
+  categoryFieldsHtml, bindCategoryFields, setCategory, showCategoryHint, readCategoryFields, categoryBadgeHtml,
+} from "../category-fields.js";
 
 /* Компактная сводка личного баланса вверху вкладки «Траты» — чтобы не нужно было заходить
    на вкладку «Баланс» просто ради того, чтобы понять, кто кому сейчас должен. Тап по ней
@@ -296,7 +298,7 @@ function openExpenseModal(existing) {
   // В личном пространстве плательщик и участник — всегда сам пользователь (он же единственный
   // участник, поэтому selectedIds по умолчанию уже {он}), выбирать нечего.
   hideFamilyOnly(overlay);
-  bindCategoryFields(overlay, "f");
+  bindAutoCategory(overlay, isEdit);
 
   const photoInput = overlay.querySelector("#f-photo");
   const photoPreview = overlay.querySelector("#f-photo-preview");
@@ -475,6 +477,37 @@ function openExpenseModal(existing) {
       }
     });
   }
+}
+
+/* Автоподбор категории по названию (GET .../category-suggestion): пока пользователь печатает
+   название новой траты, подставляем категорию — выученную по прошлым тратам этого чата или
+   из словаря магазинов. Как только категорию выбрали руками — больше не трогаем. При
+   редактировании существующей траты не подбираем: категория у неё уже есть. */
+function bindAutoCategory(overlay, isEdit) {
+  let touched = isEdit;
+  bindCategoryFields(overlay, "f", () => { touched = true; });
+  if (isEdit) return;
+
+  const titleInput = overlay.querySelector("#f-title");
+  let timer = null;
+  let lastQuery = "";
+  titleInput.addEventListener("input", () => {
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      const title = titleInput.value.trim();
+      if (touched || !title || title === lastQuery) return;
+      lastQuery = title;
+      try {
+        const s = await api(`/chats/${state.chatId}/category-suggestion?title=${encodeURIComponent(title)}`);
+        if (touched || titleInput.value.trim() !== title) return; // пока ждали ответ, всё поменялось
+        if (!s) { showCategoryHint(overlay, "f", ""); return; }
+        setCategory(overlay, "f", s.category, s.subcategory || "");
+        showCategoryHint(overlay, "f", s.source === "learned" ? "🪄 Как в прошлый раз" : "🪄 Подобрано по названию");
+      } catch (e) {
+        // подсказка необязательна — без неё форма работает как обычно
+      }
+    }, 350);
+  });
 }
 
 export { renderExpensesTab, openExpenseModal, dayHeaderLabel };

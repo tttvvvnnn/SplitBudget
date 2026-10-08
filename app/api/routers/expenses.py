@@ -13,10 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import ChatContext, get_chat_context
 from app.bot.notify import notify_expense_deleted, notify_new_expense
+from app.shared.autocategory import learn_category, suggest_category
 from app.shared.config import settings
 from app.shared.crud import build_custom_shares, build_equal_shares
 from app.shared.models import Expense, ExpenseShare, Member
-from app.shared.schemas import ExpenseOut, ShareOut
+from app.shared.schemas import CategorySuggestionOut, ExpenseOut, ShareOut
 
 router = APIRouter(tags=["expenses"])
 
@@ -183,6 +184,7 @@ async def create_expense(
     for member_id, share_amount in shares:
         ctx.session.add(ExpenseShare(expense_id=expense.id, member_id=member_id, amount=share_amount))
 
+    await learn_category(ctx.session, ctx.chat.id, expense.title, expense.category, expense.subcategory)
     await ctx.session.commit()
 
     members_result = await ctx.session.execute(
@@ -200,6 +202,18 @@ async def create_expense(
 
     result_shares = [ExpenseShare(expense_id=expense.id, member_id=m, amount=a) for m, a in shares]
     return _to_out(expense, result_shares)
+
+
+@router.get("/chats/{chat_id}/category-suggestion", response_model=CategorySuggestionOut | None)
+async def category_suggestion(title: str, ctx: ChatContext = Depends(get_chat_context)):
+    """Подсказка категории по названию траты — мини-апп подставляет её в форму, пока
+    пользователь печатает название. null — угадать не получилось."""
+    suggestion = await suggest_category(ctx.session, ctx.chat.id, title)
+    if suggestion is None:
+        return None
+    return CategorySuggestionOut(
+        category=suggestion.category, subcategory=suggestion.subcategory, source=suggestion.source
+    )
 
 
 @router.get("/chats/{chat_id}/photos/{filename}")
@@ -293,6 +307,8 @@ async def update_expense(
     if photo is not None and photo.filename:
         expense.photo_path = await _save_photo(ctx.chat.id, photo)
 
+    if title is not None or category is not None or subcategory is not None:
+        await learn_category(ctx.session, ctx.chat.id, expense.title, expense.category, expense.subcategory)
     await ctx.session.commit()
 
     result = await ctx.session.execute(select(ExpenseShare).where(ExpenseShare.expense_id == expense.id))

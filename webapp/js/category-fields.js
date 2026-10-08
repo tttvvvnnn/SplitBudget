@@ -34,12 +34,29 @@ function categoryFieldsHtml(prefix, category, subcategory) {
         <label>Подкатегория</label>
         <select id="${prefix}-subcategory">${subcategoryOptionsHtml(current, subcategory)}</select>
       </div>
-    </div>`;
+    </div>
+    <div class="hint-text" id="${prefix}-category-hint" style="display:none; margin: -6px 0 10px;"></div>`;
 }
 
-function bindCategoryFields(root, prefix) {
+/* onUserChange — вызывается, когда пользователь сам меняет категорию или подкатегорию
+   (после этого автоподбор по названию её больше не трогает). */
+function bindCategoryFields(root, prefix, onUserChange) {
   const catSelect = root.querySelector(`#${prefix}-category`);
-  catSelect.addEventListener("change", () => setCategory(root, prefix, catSelect.value, ""));
+  catSelect.addEventListener("change", () => {
+    setCategory(root, prefix, catSelect.value, "");
+    showCategoryHint(root, prefix, "");
+    if (onUserChange) onUserChange();
+  });
+  root.querySelector(`#${prefix}-subcategory`).addEventListener("change", () => {
+    showCategoryHint(root, prefix, "");
+    if (onUserChange) onUserChange();
+  });
+}
+
+function showCategoryHint(root, prefix, text) {
+  const hint = root.querySelector(`#${prefix}-category-hint`);
+  hint.textContent = text;
+  hint.style.display = text ? "block" : "none";
 }
 
 /* Программно выставить категорию/подкатегорию (например, когда её угадали по названию). */
@@ -63,4 +80,4 @@ function categoryBadgeHtml(category, subcategory) {
   return `<span class="badge" title="${escapeHtml(full)}">${categoryIcon(category)} ${escapeHtml(subcategory || category)}</span>`;
 }
 
-export { categoryFieldsHtml, bindCategoryFields, setCategory, readCategoryFields, categoryBadgeHtml };
+export { categoryFieldsHtml, bindCategoryFields, setCategory, showCategoryHint, readCategoryFields, categoryBadgeHtml };
