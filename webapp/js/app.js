@@ -44,7 +44,8 @@ async function init() {
   // chat_id (кнопка меню бота) открываем сводку «Все траты», по кнопке «Мои финансы» в
   // личке (?space=personal) — личное пространство.
   try {
-    const [personal, chats] = await Promise.all([api("/personal"), api("/my-chats")]);
+    const [personal, chats, tree] = await Promise.all([api("/personal"), api("/my-chats"), api("/categories")]);
+    state.categoryTree = tree;
     state.personalChatId = personal.id;
     state.personalCurrency = personal.currency;
     state.familyChats = chats;

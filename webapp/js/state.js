@@ -13,6 +13,7 @@ const state = {
   member: null,
   members: [],
   categories: [],
+  categoryTree: [], // [{name, icon, subcategories}] — GET /categories
   tab: "expenses",
   month: todayMonth(),
   expenses: [],

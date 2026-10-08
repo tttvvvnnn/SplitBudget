@@ -6,6 +6,7 @@ import { avatarHtml, loadAvatarsIn, memberById } from "../members.js";
 import { openSheet, closeSheet, useMainButtonFor, showFormError } from "../sheet.js";
 import { openAddMemberModal } from "../member-modals.js";
 import { switchTab } from "../shell.js";
+import { categoryFieldsHtml, bindCategoryFields, readCategoryFields, categoryBadgeHtml } from "../category-fields.js";
 
 /* Компактная сводка личного баланса вверху вкладки «Траты» — чтобы не нужно было заходить
    на вкладку «Баланс» просто ради того, чтобы понять, кто кому сейчас должен. Тап по ней
@@ -229,7 +230,7 @@ function expenseCardHtml(e) {
       <div class="expense-main">
         <div class="expense-title">${escapeHtml(e.title)}</div>
         <div class="expense-meta">
-          <span class="badge">${categoryIcon(e.category)} ${escapeHtml(e.category)}</span>${familyMeta}
+          ${categoryBadgeHtml(e.category, e.subcategory)}${familyMeta}
           ${e.is_recurring ? '<span title="Повторяющаяся">🔁</span>' : ""}
         </div>
       </div>
@@ -274,12 +275,7 @@ function openExpenseModal(existing) {
         <input type="number" id="f-amount" min="0" step="0.01" value="${existing ? existing.amount : ""}">
       </div>
     </div>
-    <div class="field">
-      <label>Категория</label>
-      <select id="f-category">
-        ${state.categories.map((c) => `<option value="${escapeHtml(c)}" ${existing && existing.category === c ? "selected" : ""}>${categoryIcon(c)} ${escapeHtml(c)}</option>`).join("")}
-      </select>
-    </div>
+    ${categoryFieldsHtml("f", existing && existing.category, existing && existing.subcategory)}
     <div class="field">
       <label>Дата</label>
       <input type="date" id="f-date" value="${existing ? existing.expense_date : todayISO()}">
@@ -300,6 +296,7 @@ function openExpenseModal(existing) {
   // В личном пространстве плательщик и участник — всегда сам пользователь (он же единственный
   // участник, поэтому selectedIds по умолчанию уже {он}), выбирать нечего.
   hideFamilyOnly(overlay);
+  bindCategoryFields(overlay, "f");
 
   const photoInput = overlay.querySelector("#f-photo");
   const photoPreview = overlay.querySelector("#f-photo-preview");
@@ -410,7 +407,7 @@ function openExpenseModal(existing) {
     errorEl.style.display = "none";
     const title = overlay.querySelector("#f-title").value.trim();
     const amount = currentAmount();
-    const category = overlay.querySelector("#f-category").value;
+    const { category, subcategory } = readCategoryFields(overlay, "f");
     const date = overlay.querySelector("#f-date").value;
     const payerId = Number(overlay.querySelector("#f-payer").value);
 
@@ -421,6 +418,7 @@ function openExpenseModal(existing) {
     form.append("title", title);
     form.append("amount", String(amount));
     form.append("category", category);
+    form.append("subcategory", subcategory);
     form.append("expense_date", date);
     form.append("payer_member_id", String(payerId));
     form.append("split_type", splitType);

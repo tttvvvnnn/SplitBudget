@@ -5,16 +5,16 @@
 from __future__ import annotations
 
 import datetime as dt
-from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
+from app.shared.categories import summarize_by_category
 from app.shared.database import get_session
 from app.shared.models import Chat, Expense, ExpenseShare, Member
-from app.shared.schemas import AllExpenseOut, CategoryStat, StatsOut
+from app.shared.schemas import AllExpenseOut, StatsOut
 
 router = APIRouter(tags=["overview"])
 
@@ -72,6 +72,7 @@ async def all_expenses(
                 amount=expense.amount,
                 my_share=share.amount,
                 category=expense.category,
+                subcategory=expense.subcategory,
                 photo_url=(f"photos/{expense.photo_path}" if expense.photo_path else None),
                 expense_date=expense.expense_date,
                 payer_name=payer.full_name if payer else "",
@@ -89,14 +90,7 @@ async def all_stats(
     session: AsyncSession = Depends(get_session),
 ) -> StatsOut:
     rows = await _my_shares(session, int(user["id"]), month)
-    totals: dict[str, Decimal] = {}
-    counts: dict[str, int] = {}
-    for expense, share, _ in rows:
-        totals[expense.category] = totals.get(expense.category, Decimal("0")) + share.amount
-        counts[expense.category] = counts.get(expense.category, 0) + 1
-    by_category = sorted(
-        (CategoryStat(category=c, total=t, count=counts[c]) for c, t in totals.items()),
-        key=lambda s: s.total,
-        reverse=True,
+    total, by_category = summarize_by_category(
+        (expense.category, expense.subcategory, share.amount) for expense, share, _ in rows
     )
-    return StatsOut(period=month, total=sum(totals.values(), Decimal("0")), by_category=by_category)
+    return StatsOut(period=month, total=total, by_category=by_category)

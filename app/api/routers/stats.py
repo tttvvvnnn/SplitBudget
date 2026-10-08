@@ -2,14 +2,14 @@
 from __future__ import annotations
 
 import datetime as dt
-from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from app.api.dependencies import ChatContext, get_chat_context
+from app.shared.categories import summarize_by_category
 from app.shared.models import Expense
-from app.shared.schemas import CategoryStat, StatsOut
+from app.shared.schemas import StatsOut
 
 router = APIRouter(tags=["stats"])
 
@@ -24,15 +24,9 @@ async def get_stats(month: str, ctx: ChatContext = Depends(get_chat_context)) ->
         raise HTTPException(status_code=400, detail="month должен быть в формате YYYY-MM") from exc
 
     result = await ctx.session.execute(
-        select(Expense.category, func.sum(Expense.amount), func.count(Expense.id))
-        .where(Expense.chat_id == ctx.chat.id, Expense.expense_date >= start, Expense.expense_date < end)
-        .group_by(Expense.category)
-        .order_by(func.sum(Expense.amount).desc())
+        select(Expense.category, Expense.subcategory, Expense.amount).where(
+            Expense.chat_id == ctx.chat.id, Expense.expense_date >= start, Expense.expense_date < end
+        )
     )
-    rows = result.all()
-    total = sum((row[1] for row in rows), Decimal("0"))
-    return StatsOut(
-        period=month,
-        total=total,
-        by_category=[CategoryStat(category=r[0], total=r[1], count=r[2]) for r in rows],
-    )
+    total, by_category = summarize_by_category(result.all())
+    return StatsOut(period=month, total=total, by_category=by_category)

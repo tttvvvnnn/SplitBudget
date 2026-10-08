@@ -95,6 +95,8 @@ class Expense(Base):
     title: Mapped[str] = mapped_column(String(255))
     amount: Mapped[Decimal] = mapped_column(MoneyType)
     category: Mapped[str] = mapped_column(String(64), default="Другое")
+    # Подкатегория внутри category (например, «Продукты» → «Алкоголь»), см. app/shared/categories.py.
+    subcategory: Mapped[str | None] = mapped_column(String(64), nullable=True)
     photo_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
     expense_date: Mapped[dt.date] = mapped_column(Date, default=dt.date.today)
     payer_member_id: Mapped[int] = mapped_column(ForeignKey("members.id", ondelete="CASCADE"))
@@ -158,6 +160,7 @@ class RecurringExpense(Base):
     title: Mapped[str] = mapped_column(String(255))
     amount: Mapped[Decimal] = mapped_column(MoneyType)
     category: Mapped[str] = mapped_column(String(64), default="Другое")
+    subcategory: Mapped[str | None] = mapped_column(String(64), nullable=True)
     payer_member_id: Mapped[int] = mapped_column(ForeignKey("members.id", ondelete="CASCADE"))
     split_type: Mapped[str] = mapped_column(String(16), default="equal")
     day_of_month: Mapped[int] = mapped_column(default=1)  # 1..28

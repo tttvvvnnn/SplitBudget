@@ -64,6 +64,7 @@ async def generate_due_recurring_expenses() -> None:
                 title=template.title,
                 amount=template.amount,
                 category=template.category,
+                subcategory=template.subcategory,
                 expense_date=today,
                 payer_member_id=template.payer_member_id,
                 split_type=template.split_type,

@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
 from app.api.dependencies import ChatContext, get_chat_context
-from app.shared.config import settings
+from app.shared.categories import CATEGORY_NAMES, category_tree_out
 from app.shared.crud import get_or_create_personal_space
 from app.shared.database import get_session
 from app.shared.models import (
@@ -19,7 +19,7 @@ from app.shared.models import (
     RecurringParticipant,
     Settlement,
 )
-from app.shared.schemas import ChatOut, MeOut, MemberCreate, MemberOut, MemberUpdate
+from app.shared.schemas import CategoryNode, ChatOut, MeOut, MemberCreate, MemberOut, MemberUpdate
 
 router = APIRouter(tags=["chats"])
 
@@ -59,6 +59,12 @@ async def personal_space(
     return chat
 
 
+@router.get("/categories", response_model=list[CategoryNode])
+async def categories(user: dict = Depends(get_current_user)) -> list[dict]:  # noqa: ARG001
+    """Дерево категорий и подкатегорий (app/shared/categories.py) — одно на все пространства."""
+    return category_tree_out()
+
+
 @router.get("/chats/{chat_id}/me", response_model=MeOut)
 async def get_me(ctx: ChatContext = Depends(get_chat_context)) -> MeOut:
     result = await ctx.session.execute(
@@ -69,7 +75,7 @@ async def get_me(ctx: ChatContext = Depends(get_chat_context)) -> MeOut:
         chat=ChatOut.model_validate(ctx.chat),
         member=MemberOut.model_validate(ctx.member),
         members=[MemberOut.model_validate(m) for m in members],
-        categories=settings.DEFAULT_CATEGORIES,
+        categories=CATEGORY_NAMES,
     )
 
 

@@ -68,6 +68,7 @@ def _to_out(expense: Expense, shares: list[ExpenseShare]) -> ExpenseOut:
         title=expense.title,
         amount=expense.amount,
         category=expense.category,
+        subcategory=expense.subcategory,
         photo_url=(f"photos/{expense.photo_path}" if expense.photo_path else None),
         expense_date=expense.expense_date,
         payer_member_id=expense.payer_member_id,
@@ -121,6 +122,7 @@ async def create_expense(
     title: str = Form(...),
     amount: str = Form(...),
     category: str = Form("Другое"),
+    subcategory: str | None = Form(None),
     expense_date: str = Form(...),
     payer_member_id: int = Form(...),
     split_type: str = Form("equal"),
@@ -168,6 +170,7 @@ async def create_expense(
         title=title.strip()[:255],
         amount=amount_dec,
         category=category or "Другое",
+        subcategory=(subcategory or None),
         photo_path=photo_filename,
         expense_date=expense_date_val,
         payer_member_id=payer_member_id,
@@ -190,8 +193,9 @@ async def create_expense(
     labels = [
         (f"@{m.username}" if m.username else m.full_name) for m in members_by_id.values()
     ]
+    category_label = expense.category + (f" › {expense.subcategory}" if expense.subcategory else "")
     await notify_new_expense(
-        ctx.chat, payer, ctx.member, expense.title, expense.amount, expense.category, labels
+        ctx.chat, payer, ctx.member, expense.title, expense.amount, category_label, labels
     )
 
     result_shares = [ExpenseShare(expense_id=expense.id, member_id=m, amount=a) for m, a in shares]
@@ -214,6 +218,7 @@ async def update_expense(
     title: str | None = Form(None),
     amount: str | None = Form(None),
     category: str | None = Form(None),
+    subcategory: str | None = Form(None),  # "" — убрать подкатегорию
     expense_date: str | None = Form(None),
     payer_member_id: int | None = Form(None),
     split_type: str | None = Form(None),
@@ -227,8 +232,11 @@ async def update_expense(
 
     if title is not None:
         expense.title = title.strip()[:255]
-    if category is not None:
+    if category is not None and category != expense.category:
         expense.category = category
+        expense.subcategory = None  # подкатегория старой категории к новой не подходит
+    if subcategory is not None:
+        expense.subcategory = subcategory or None
     if expense_date is not None:
         try:
             expense.expense_date = dt.date.fromisoformat(expense_date)

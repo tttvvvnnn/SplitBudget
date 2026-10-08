@@ -842,3 +842,25 @@ html, body {
   font-weight: 700;
   margin: 6px 0 14px;
 }
+
+/* Статистика: раскрытие категории по подкатегориям (см. categoryRowHtml в tabs/stats.js) */
+.stats-cat[data-expandable] {
+  cursor: pointer;
+}
+
+.stats-cat .chevron {
+  display: inline-block;
+  width: 14px;
+  color: var(--hint);
+  transition: transform 0.15s;
+}
+
+.stats-cat.open .chevron {
+  transform: rotate(90deg);
+}
+
+.stats-sub {
+  padding-left: 22px;
+  font-size: 14px;
+  color: var(--hint);
+}
