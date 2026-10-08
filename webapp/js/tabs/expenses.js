@@ -1,4 +1,4 @@
-import { state } from "../state.js";
+import { state, isPersonal, hideFamilyOnly } from "../state.js";
 import { api, loadAuthedImage } from "../api.js";
 import { tg, haptic, toast, confirmAction } from "../telegram.js";
 import { todayISO, categoryIcon, monthLabel, shiftMonth, fmtMoney, escapeHtml } from "../format.js";
@@ -35,9 +35,10 @@ function balanceBannerHtml() {
 async function renderExpensesTab() {
   const content = document.getElementById("content");
   try {
+    // В личном пространстве один участник — баланса и долгов там нет.
     const [expenses, balances] = await Promise.all([
       api(`/chats/${state.chatId}/expenses?month=${state.month}`),
-      api(`/chats/${state.chatId}/balances`),
+      isPersonal() ? null : api(`/chats/${state.chatId}/balances`),
     ]);
     state.expenses = expenses;
     state.balances = balances;
@@ -70,7 +71,7 @@ async function renderExpensesTab() {
             ${state.categories.map((c) => `<option value="${escapeHtml(c)}" ${state.filters.category === c ? "selected" : ""}>${categoryIcon(c)} ${escapeHtml(c)}</option>`).join("")}
           </select>
         </div>
-        <div class="field">
+        <div class="field" data-family-only>
           <select id="filter-payer">
             <option value="">Все участники</option>
             ${state.members.map((m) => `<option value="${m.id}" ${String(state.filters.payer) === String(m.id) ? "selected" : ""}>${escapeHtml(m.full_name)}</option>`).join("")}
@@ -79,6 +80,7 @@ async function renderExpensesTab() {
       </div>
     </div>
     <div id="expense-list"></div>`;
+  hideFamilyOnly(content);
 
   const balanceBanner = document.getElementById("balance-banner");
   if (balanceBanner) balanceBanner.addEventListener("click", () => switchTab("balance"));
@@ -215,18 +217,19 @@ function expenseCardHtml(e) {
   // строка мета не помещалась бы уже при 3-4 участниках; полный список — во всплывающей
   // подсказке (title) и при открытии самой траты.
   const participants = e.shares.map((s) => memberById(s.member_id));
+  const familyMeta = isPersonal() ? "" : `
+          <span class="payer-avatar" title="Оплатил(а): ${escapeHtml(payer ? payer.full_name : "—")}">${avatarHtml(payer)}</span>
+          ${participants.length > 0 ? `
+            <span class="split-avatars" title="Делят: ${escapeHtml(participants.map((m) => (m ? m.full_name : "—")).join(", "))}">
+              ${participants.map((m) => avatarHtml(m)).join("")}
+            </span>` : ""}`;
   return `
     <div class="card expense-card" data-id="${e.id}">
       ${thumb}
       <div class="expense-main">
         <div class="expense-title">${escapeHtml(e.title)}</div>
         <div class="expense-meta">
-          <span class="badge">${categoryIcon(e.category)} ${escapeHtml(e.category)}</span>
-          <span class="payer-avatar" title="Оплатил(а): ${escapeHtml(payer ? payer.full_name : "—")}">${avatarHtml(payer)}</span>
-          ${participants.length > 0 ? `
-            <span class="split-avatars" title="Делят: ${escapeHtml(participants.map((m) => (m ? m.full_name : "—")).join(", "))}">
-              ${participants.map((m) => avatarHtml(m)).join("")}
-            </span>` : ""}
+          <span class="badge">${categoryIcon(e.category)} ${escapeHtml(e.category)}</span>${familyMeta}
           ${e.is_recurring ? '<span title="Повторяющаяся">🔁</span>' : ""}
         </div>
       </div>
@@ -260,7 +263,7 @@ function openExpenseModal(existing) {
       </label>
     </div>
     <div class="field-row">
-      <div class="field">
+      <div class="field" data-family-only>
         <label>Кто оплатил</label>
         <select id="f-payer">
           ${state.members.map((m) => `<option value="${m.id}" ${(existing ? existing.payer_member_id : state.member.id) === m.id ? "selected" : ""}>${escapeHtml(m.full_name)}</option>`).join("")}
@@ -281,18 +284,22 @@ function openExpenseModal(existing) {
       <label>Дата</label>
       <input type="date" id="f-date" value="${existing ? existing.expense_date : todayISO()}">
     </div>
-    <div class="field">
+    <div class="field" data-family-only>
       <label>Как делить</label>
       <div class="split-toggle">
         <div data-v="equal" class="${splitType === "equal" ? "active" : ""}">Поровну между выбранными</div>
         <div data-v="custom" class="${splitType === "custom" ? "active" : ""}">Вручную по каждому</div>
       </div>
     </div>
-    <div class="field" id="participants-block"></div>
+    <div class="field" id="participants-block" data-family-only></div>
     <div class="error-text" id="f-error" style="display:none;"></div>
     <button class="btn" id="f-submit">${isEdit ? "Сохранить" : "Добавить трату"}</button>
     ${isEdit ? '<button class="btn danger" id="f-delete" style="margin-top:10px;">Удалить трату</button>' : ""}
   `);
+
+  // В личном пространстве плательщик и участник — всегда сам пользователь (он же единственный
+  // участник, поэтому selectedIds по умолчанию уже {он}), выбирать нечего.
+  hideFamilyOnly(overlay);
 
   const photoInput = overlay.querySelector("#f-photo");
   const photoPreview = overlay.querySelector("#f-photo-preview");

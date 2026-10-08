@@ -14,6 +14,7 @@ from sqlalchemy import (
     Numeric,
     String,
     UniqueConstraint,
+    false,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -36,6 +37,10 @@ class Chat(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)  # telegram chat_id
     title: Mapped[str] = mapped_column(String(255), default="")
     currency: Mapped[str] = mapped_column(String(8), default="RUB")
+    # True — личное пространство пользователя («Мои финансы»), а не семейная группа. Его id
+    # совпадает с tg_user_id владельца (как id личного чата с ботом в Telegram), единственный
+    # участник — сам владелец. Id групп в Telegram всегда отрицательные, так что не пересекаются.
+    is_personal: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
 
     members: Mapped[list["Member"]] = relationship(back_populates="chat", cascade="all, delete-orphan")

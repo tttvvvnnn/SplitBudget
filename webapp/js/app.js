@@ -40,42 +40,29 @@ async function init() {
     return;
   }
 
-  if (!state.chatId) {
-    try {
-      const chats = await api("/my-chats");
-      if (chats.length === 1) {
-        state.chatId = chats[0].id;
-      } else if (chats.length === 0) {
-        renderError(
-          "Вы пока не в одном семейном чате с ботом. Откройте приложение из кнопки в групповом чате."
-        );
-        return;
-      } else {
-        renderChatPicker(chats);
-        return;
-      }
-    } catch (e) {
-      renderError(e.message);
-      return;
-    }
+  // Личное пространство и семейные чаты нужны всегда — для переключателя в шапке. Без
+  // chat_id (кнопка меню бота, «Мои финансы» в личке) открываем личное пространство.
+  try {
+    const [personal, chats] = await Promise.all([api("/personal"), api("/my-chats")]);
+    state.personalChatId = personal.id;
+    state.familyChats = chats;
+  } catch (e) {
+    renderError(e.message);
+    return;
   }
+  if (!state.chatId || params.get("space") === "personal") state.chatId = state.personalChatId;
 
   await loadMeAndRender();
 }
 
-function renderChatPicker(chats) {
-  const app = document.getElementById("app");
-  app.innerHTML = `
-    <div class="header"><h1>Выберите чат</h1><div class="sub">В нескольких чатах есть учёт трат</div></div>
-    <div class="content">
-      ${chats.map((c) => `<div class="card expense-card" data-id="${c.id}"><div class="expense-main"><div class="expense-title">${escapeHtml(c.title || String(c.id))}</div></div></div>`).join("")}
-    </div>`;
-  app.querySelectorAll(".card").forEach((el) => {
-    el.addEventListener("click", () => {
-      state.chatId = el.dataset.id;
-      loadMeAndRender();
-    });
-  });
+/* Переключение между «Мои финансы» и семейными чатами из шапки. */
+async function switchSpace(chatId) {
+  if (String(chatId) === String(state.chatId)) return;
+  state.chatId = chatId;
+  state.filters = { search: "", category: "", payer: "" };
+  state.filtersOpen = false;
+  state.balances = null;
+  await loadMeAndRender();
 }
 
 function renderError(message) {
@@ -92,7 +79,8 @@ async function loadMeAndRender() {
     state.member = me.member;
     state.members = me.members;
     state.categories = me.categories;
-    renderShell();
+    if (state.chat.is_personal && state.tab === "balance") state.tab = "expenses";
+    renderShell({ onSwitchSpace: switchSpace });
     loadVersionBadge(); // не блокирует основной рендер — бейдж в углу подтянется чуть позже
     await renderTab();
   } catch (e) {

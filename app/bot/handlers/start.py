@@ -12,7 +12,7 @@ from aiogram.types import (
 from sqlalchemy import select
 
 from app.bot.avatars import sync_member_avatar
-from app.bot.keyboards import open_app_keyboard, open_app_keyboard_group
+from app.bot.keyboards import open_app_keyboard_group
 from app.shared.config import settings
 from app.shared.crud import deactivate_member, get_or_create_chat, get_or_create_member
 from app.shared.database import async_session_maker
@@ -29,9 +29,15 @@ WELCOME_GROUP = (
     "полный список участников группы боту недоступен."
 )
 
+WELCOME_PRIVATE = (
+    "👋 «Мои финансы» — ваш личный учёт трат, его видите только вы. "
+    "Ниже — семейные чаты с общими тратами."
+)
+
 WELCOME_PRIVATE_NO_CHATS = (
-    "👋 Привет! Чтобы начать, добавьте меня в семейный групповой чат и напишите там /start.\n\n"
-    "После этого здесь появится кнопка для открытия приложения."
+    "👋 Привет! В «Моих финансах» можно вести личный учёт трат — его видите только вы.\n\n"
+    "Для общих трат добавьте меня в семейный групповой чат и напишите там /start — "
+    "тогда здесь появится и кнопка семейного чата."
 )
 
 
@@ -65,36 +71,37 @@ async def open_app_in_group(message: Message, bot: Bot) -> None:
 
 @router.message(CommandStart(), F.chat.type == "private")
 async def start_in_private(message: Message) -> None:
+    """В личке — кнопка «Мои финансы» (личное пространство) и по кнопке на каждый семейный
+    чат, где пользователь уже известен боту."""
     if not message.from_user:
         return
     async with async_session_maker() as session:
         result = await session.execute(
-            select(Member).where(
-                Member.tg_user_id == message.from_user.id, Member.is_active.is_(True)
+            select(Chat)
+            .join(Member, Member.chat_id == Chat.id)
+            .where(
+                Member.tg_user_id == message.from_user.id,
+                Member.is_active.is_(True),
+                Chat.is_personal.is_(False),
             )
         )
-        members = result.scalars().all()
+        family_chats = result.scalars().all()
 
-    if not members:
-        await message.answer(WELCOME_PRIVATE_NO_CHATS)
-        return
-
-    if len(members) == 1:
-        await message.answer(
-            "💸 Открыть учёт трат:", reply_markup=open_app_keyboard(members[0].chat_id)
-        )
-        return
-
-    text = "Вы состоите в нескольких семейных чатах с этим ботом. Выберите, какой открыть:"
-    buttons = []
-    async with async_session_maker() as session:
-        for m in members:
-            chat = await session.get(Chat, m.chat_id)
-            title = chat.title if chat else str(m.chat_id)
-            url = f"{settings.WEBAPP_URL}/?chat_id={m.chat_id}"
-            buttons.append(
-                [InlineKeyboardButton(text=f"💸 {title}", web_app=WebAppInfo(url=url))]
+    buttons = [
+        [
+            InlineKeyboardButton(
+                text="👤 Мои финансы",
+                web_app=WebAppInfo(url=f"{settings.WEBAPP_URL}/?space=personal"),
             )
+        ]
+    ]
+    for chat in family_chats:
+        url = f"{settings.WEBAPP_URL}/?chat_id={chat.id}"
+        buttons.append(
+            [InlineKeyboardButton(text=f"🏠 {chat.title or chat.id}", web_app=WebAppInfo(url=url))]
+        )
+
+    text = WELCOME_PRIVATE if family_chats else WELCOME_PRIVATE_NO_CHATS
     await message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
 
 

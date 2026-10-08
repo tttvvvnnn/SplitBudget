@@ -21,15 +21,19 @@ def _member_label(member: Member) -> str:
     return member.full_name or str(member.tg_user_id)
 
 
-async def _send(chat_id: int, text: str) -> None:
+async def _send(chat: Chat, text: str) -> None:
+    # Личное пространство — не чат в Telegram, а раздел мини-аппа: о своих же тратах писать
+    # владельцу незачем.
+    if chat.is_personal:
+        return
     # Уведомление в чат — это побочный эффект, а не часть основной бизнес-операции
     # (трата уже создана/удалена, долг уже погашен и т.д. к моменту вызова). Поэтому ловим
     # любую ошибку, а не только TelegramAPIError: недоступность Telegram, сетевой сбой или
     # что угодно ещё не должны откатывать или ронять уже выполненное действие пользователя.
     try:
-        await bot.send_message(chat_id, text)
+        await bot.send_message(chat.id, text)
     except Exception:  # noqa: BLE001
-        logger.warning("Не удалось отправить уведомление в чат %s", chat_id, exc_info=True)
+        logger.warning("Не удалось отправить уведомление в чат %s", chat.id, exc_info=True)
 
 
 async def notify_new_expense(
@@ -48,11 +52,11 @@ async def notify_new_expense(
         f"Участвуют: {', '.join(participant_labels)}\n"
         f"Добавил(а): {_member_label(created_by)}"
     )
-    await _send(chat.id, text)
+    await _send(chat, text)
 
 
 async def notify_expense_deleted(chat: Chat, title: str, actor: Member) -> None:
-    await _send(chat.id, f"🗑 {_member_label(actor)} удалил(а) трату «{title}»")
+    await _send(chat, f"🗑 {_member_label(actor)} удалил(а) трату «{title}»")
 
 
 async def notify_settlement(chat: Chat, from_member: Member, to_member: Member, amount: Decimal) -> None:
@@ -60,7 +64,7 @@ async def notify_settlement(chat: Chat, from_member: Member, to_member: Member, 
         f"✅ {_member_label(from_member)} погасил(а) долг перед {_member_label(to_member)} "
         f"на сумму {_fmt(amount, chat.currency)}"
     )
-    await _send(chat.id, text)
+    await _send(chat, text)
 
 
 async def notify_recurring_generated(
@@ -70,4 +74,4 @@ async def notify_recurring_generated(
         f"🔁 Автоматически добавлена повторяющаяся трата «{title}» на сумму "
         f"{_fmt(amount, chat.currency)} (оплатил(а) {_member_label(payer)})"
     )
-    await _send(chat.id, text)
+    await _send(chat, text)
