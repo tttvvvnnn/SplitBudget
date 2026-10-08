@@ -11,7 +11,7 @@
      tabs/*.js        — вкладки «Траты», «Баланс», «Статистика», «Повторы» и их формы */
 
 import { tg } from "./telegram.js";
-import { state } from "./state.js";
+import { state, ALL_SPACE, isAll } from "./state.js";
 import { escapeHtml } from "./format.js";
 import { api } from "./api.js";
 import { loadVersionBadge, renderShell, renderTab } from "./shell.js";
@@ -41,21 +41,25 @@ async function init() {
   }
 
   // Личное пространство и семейные чаты нужны всегда — для переключателя в шапке. Без
-  // chat_id (кнопка меню бота, «Мои финансы» в личке) открываем личное пространство.
+  // chat_id (кнопка меню бота) открываем сводку «Все траты», по кнопке «Мои финансы» в
+  // личке (?space=personal) — личное пространство.
   try {
     const [personal, chats] = await Promise.all([api("/personal"), api("/my-chats")]);
     state.personalChatId = personal.id;
+    state.personalCurrency = personal.currency;
     state.familyChats = chats;
   } catch (e) {
     renderError(e.message);
     return;
   }
-  if (!state.chatId || params.get("space") === "personal") state.chatId = state.personalChatId;
+  if (params.get("space") === "personal") state.chatId = state.personalChatId;
+  else if (!state.chatId) state.chatId = ALL_SPACE;
+  state.switchSpace = switchSpace;
 
   await loadMeAndRender();
 }
 
-/* Переключение между «Мои финансы» и семейными чатами из шапки. */
+/* Переключение между «Все траты», «Мои финансы» и семейными чатами из шапки. */
 async function switchSpace(chatId) {
   if (String(chatId) === String(state.chatId)) return;
   state.chatId = chatId;
@@ -73,6 +77,17 @@ function renderError(message) {
 }
 
 async function loadMeAndRender() {
+  if (isAll()) {
+    // Сводка не привязана к одному чату: участников и плательщиков тут нет, валюта — личная.
+    state.chat = { id: ALL_SPACE, title: "Все траты", currency: state.personalCurrency, is_personal: false };
+    state.member = null;
+    state.members = [];
+    if (state.tab !== "stats") state.tab = "expenses";
+    renderShell({ onSwitchSpace: switchSpace });
+    loadVersionBadge();
+    await renderTab();
+    return;
+  }
   try {
     const me = await api(`/chats/${state.chatId}/me`);
     state.chat = me.chat;

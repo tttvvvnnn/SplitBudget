@@ -479,4 +479,4 @@ function openExpenseModal(existing) {
   }
 }
 
-export { renderExpensesTab, openExpenseModal };
+export { renderExpensesTab, openExpenseModal, dayHeaderLabel };
