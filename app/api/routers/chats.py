@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.auth import get_current_user
 from app.api.dependencies import ChatContext, get_chat_context
 from app.shared.config import settings
+from app.shared.crud import get_or_create_personal_space
 from app.shared.database import get_session
 from app.shared.models import (
     Chat,
@@ -36,8 +37,26 @@ async def my_chats(
     chat_ids = [row[0] for row in result.all()]
     if not chat_ids:
         return []
-    chats_result = await session.execute(select(Chat).where(Chat.id.in_(chat_ids)))
+    chats_result = await session.execute(
+        select(Chat).where(Chat.id.in_(chat_ids), Chat.is_personal.is_(False))
+    )
     return list(chats_result.scalars().all())
+
+
+@router.get("/personal", response_model=ChatOut)
+async def personal_space(
+    user: dict = Depends(get_current_user), session: AsyncSession = Depends(get_session)
+) -> Chat:
+    """Личное пространство текущего пользователя («Мои финансы») — создаётся при первом
+    обращении. Дальше с ним работают обычные /chats/{chat_id}/... эндпоинты."""
+    full_name = " ".join(
+        part for part in (user.get("first_name"), user.get("last_name")) if part
+    ).strip()
+    chat, _ = await get_or_create_personal_space(
+        session, int(user["id"]), username=user.get("username"), full_name=full_name
+    )
+    await session.commit()
+    return chat
 
 
 @router.get("/chats/{chat_id}/me", response_model=MeOut)
@@ -70,6 +89,8 @@ async def add_manual_member(
     без своего профиля) — его может добавить любой уже известный боту участник этого чата.
     У такого участника нет tg_user_id: сам он мини-апп открыть не сможет, но может быть
     выбран как «кто оплатил» или как участник трат — кто-то другой отмечает это за него."""
+    if ctx.chat.is_personal:
+        raise HTTPException(status_code=400, detail="В личное пространство нельзя добавлять участников")
     member = Member(
         chat_id=ctx.chat.id,
         tg_user_id=None,

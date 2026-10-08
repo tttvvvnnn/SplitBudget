@@ -37,6 +37,7 @@ class ChatOut(BaseModel):
     id: int
     title: str
     currency: str
+    is_personal: bool
 
     model_config = {"from_attributes": True}
 

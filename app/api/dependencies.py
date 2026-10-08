@@ -42,6 +42,13 @@ async def get_chat_context(
     )
     member = result.scalar_one_or_none()
 
+    if chat.is_personal:
+        # Личное пространство видит только владелец — проверять членство через Telegram
+        # тут нечего, участник создаётся вместе с пространством (GET /personal).
+        if member is None or chat.id != tg_user_id:
+            raise HTTPException(status_code=403, detail="Это чужое личное пространство")
+        return ChatContext(chat=chat, member=member, session=session)
+
     if member is None or not member.is_active:
         try:
             chat_member = await bot.get_chat_member(chat_id, tg_user_id)

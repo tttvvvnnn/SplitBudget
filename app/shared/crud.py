@@ -24,6 +24,31 @@ async def get_or_create_chat(session: AsyncSession, chat_id: int, title: str) ->
     return chat
 
 
+PERSONAL_SPACE_TITLE = "Мои финансы"
+
+
+async def get_or_create_personal_space(
+    session: AsyncSession, tg_user_id: int, username: str | None, full_name: str
+) -> tuple[Chat, Member]:
+    """Личное пространство пользователя («Мои финансы»): Chat с is_personal=True и id, равным
+    tg_user_id, плюс единственный участник — сам пользователь. Траты, категории, повторы и
+    статистика в нём работают теми же эндпоинтами, что и в семейных чатах."""
+    chat = await session.get(Chat, tg_user_id)
+    if chat is None:
+        chat = Chat(
+            id=tg_user_id,
+            title=PERSONAL_SPACE_TITLE,
+            currency=settings.DEFAULT_CURRENCY,
+            is_personal=True,
+        )
+        session.add(chat)
+        await session.flush()
+    member = await get_or_create_member(
+        session, chat_id=chat.id, tg_user_id=tg_user_id, username=username, full_name=full_name
+    )
+    return chat, member
+
+
 async def get_or_create_member(
     session: AsyncSession,
     chat_id: int,

@@ -57,6 +57,38 @@ html, body {
   color: var(--hint);
 }
 
+/* Переключатель «👤 Мои финансы | 🏠 семейные чаты» под заголовком — см. spaceSwitcherHtml()
+   в shell.js. Горизонтальная прокрутка, если чатов много. */
+.space-switcher {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.space-switcher::-webkit-scrollbar {
+  display: none;
+}
+
+.space-switcher button {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: var(--secondary-bg);
+  color: var(--text);
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.space-switcher button.active {
+  background: var(--button);
+  color: var(--button-text);
+  border-color: var(--button);
+}
+
 /* Версия/сборка в правом верхнем углу шапки — см. loadVersionBadge() в app.js. Нужна,
    чтобы после docker compose ... --build на стенде можно было на глаз отличить, подтянулась
    ли реально новая сборка, а не просто убедиться, что контейнер перезапустился. */

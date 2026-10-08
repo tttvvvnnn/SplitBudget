@@ -1,4 +1,4 @@
-import { state } from "../state.js";
+import { state, isPersonal, hideFamilyOnly } from "../state.js";
 import { api } from "../api.js";
 import { tg, haptic, toast, confirmAction } from "../telegram.js";
 import { categoryIcon, fmtMoney, escapeHtml } from "../format.js";
@@ -19,7 +19,7 @@ async function renderRecurringTab() {
 
   content.innerHTML = `
     <div class="hint-text" style="margin: 8px 4px 14px;">
-      Раз в месяц, в указанный день, такая трата добавляется автоматически, и в чат приходит уведомление.
+      Раз в месяц, в указанный день, такая трата добавляется автоматически${isPersonal() ? "." : ", и в чат приходит уведомление."}
     </div>
     ${state.recurring.length === 0 ? '<div class="empty-state">Повторяющихся трат пока нет.<br>Нажмите «+», чтобы добавить (например, аренду).</div>' : state.recurring.map((r) => `
       <div class="card expense-card" data-id="${r.id}">
@@ -28,7 +28,7 @@ async function renderRecurringTab() {
           <div class="expense-title">${escapeHtml(r.title)}</div>
           <div class="expense-meta">
             <span class="badge">${categoryIcon(r.category)} ${escapeHtml(r.category)}</span>
-            каждое ${r.day_of_month} число · ${escapeHtml(memberLabel(r.payer_member_id))}
+            каждое ${r.day_of_month} число${isPersonal() ? "" : ` · ${escapeHtml(memberLabel(r.payer_member_id))}`}
             ${r.is_active ? "" : " · остановлено"}
           </div>
         </div>
@@ -71,25 +71,27 @@ function openRecurringModal(existing) {
       <label>День месяца (1–28)</label>
       <input type="number" id="r-day" min="1" max="28" value="${existing ? existing.day_of_month : 1}">
     </div>
-    <div class="field">
+    <div class="field" data-family-only>
       <label>Кто платит</label>
       <select id="r-payer">
         ${state.members.map((m) => `<option value="${m.id}" ${(existing ? existing.payer_member_id : state.member.id) === m.id ? "selected" : ""}>${escapeHtml(m.full_name)}</option>`).join("")}
       </select>
     </div>
-    <div class="field">
+    <div class="field" data-family-only>
       <label>Как делить</label>
       <div class="split-toggle">
         <div data-v="equal" class="${splitType === "equal" ? "active" : ""}">Поровну</div>
         <div data-v="custom" class="${splitType === "custom" ? "active" : ""}">Вручную</div>
       </div>
     </div>
-    <div class="field" id="r-participants-block"></div>
+    <div class="field" id="r-participants-block" data-family-only></div>
     ${isEdit ? `<div class="field"><label><input type="checkbox" id="r-active" ${existing.is_active ? "checked" : ""}> Активна</label></div>` : ""}
     <div class="error-text" id="r-error" style="display:none;"></div>
     <button class="btn" id="r-submit">${isEdit ? "Сохранить" : "Добавить"}</button>
     ${isEdit ? '<button class="btn danger" id="r-delete" style="margin-top:10px;">Удалить шаблон</button>' : ""}
   `);
+
+  hideFamilyOnly(overlay);
 
   function currentAmount() { return Number(overlay.querySelector("#r-amount").value || 0); }
 

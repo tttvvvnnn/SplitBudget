@@ -1,4 +1,4 @@
-import { state } from "./state.js";
+import { state, isPersonal } from "./state.js";
 import { haptic } from "./telegram.js";
 import { escapeHtml } from "./format.js";
 import { memberLabel } from "./members.js";
@@ -45,21 +45,46 @@ const TABS = [
   { id: "recurring", icon: "🔁", label: "Повторы" },
 ];
 
-function renderShell() {
+/* Переключатель «👤 Мои финансы | 🏠 семейные чаты» под заголовком. */
+function spaceSwitcherHtml() {
+  const spaces = [
+    { id: state.personalChatId, label: "👤 Мои финансы" },
+    ...state.familyChats.map((c) => ({ id: c.id, label: `🏠 ${c.title || c.id}` })),
+  ].filter((s) => s.id !== null);
+  if (spaces.length < 2) return "";
+  return `
+    <div class="space-switcher">
+      ${spaces.map((s) => `<button data-space="${s.id}" class="${String(s.id) === String(state.chatId) ? "active" : ""}">${escapeHtml(s.label)}</button>`).join("")}
+    </div>`;
+}
+
+function renderShell({ onSwitchSpace } = {}) {
   const app = document.getElementById("app");
+  const tabs = isPersonal() ? TABS.filter((t) => t.id !== "balance") : TABS;
+  const sub = isPersonal()
+    ? `Видно только вам · Валюта: ${escapeHtml(state.chat.currency)}`
+    : `Валюта: ${escapeHtml(state.chat.currency)} · Вы: ${escapeHtml(memberLabel(state.member.id))}`;
   app.innerHTML = `
     <div class="header">
       <h1>${escapeHtml(state.chat.title || "Семейные траты")}</h1>
-      <div class="sub">Валюта: ${escapeHtml(state.chat.currency)} · Вы: ${escapeHtml(memberLabel(state.member.id))}</div>
+      <div class="sub">${sub}</div>
+      ${spaceSwitcherHtml()}
     </div>
     <div id="content" class="content"></div>
     <button class="fab" id="fab-add" title="Добавить">+</button>
     <div class="tabbar">
-      ${TABS.map((t) => `
+      ${tabs.map((t) => `
         <button data-tab="${t.id}" class="${state.tab === t.id ? "active" : ""}">
           <span class="icon">${t.icon}</span><span>${t.label}</span>
         </button>`).join("")}
     </div>`;
+
+  app.querySelectorAll(".space-switcher button").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      haptic("selection");
+      if (onSwitchSpace) onSwitchSpace(btn.dataset.space);
+    });
+  });
 
   app.querySelectorAll(".tabbar button").forEach((btn) => {
     btn.addEventListener("click", () => switchTab(btn.dataset.tab));
