@@ -12,8 +12,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import ChatContext, get_chat_context
-from app.bot.notify import notify_expense_deleted, notify_new_expense
+from app.bot.notify import notify_budget_alerts, notify_expense_deleted, notify_new_expense
 from app.shared.autocategory import learn_category, suggest_category
+from app.shared.budgets import alerts_after_expense
 from app.shared.config import settings
 from app.shared.crud import build_custom_shares, build_equal_shares
 from app.shared.models import Expense, ExpenseShare, Member
@@ -199,9 +200,18 @@ async def create_expense(
     await notify_new_expense(
         ctx.chat, payer, ctx.member, expense.title, expense.amount, category_label, labels
     )
+    await _check_budgets(ctx, expense.id)
 
     result_shares = [ExpenseShare(expense_id=expense.id, member_id=m, amount=a) for m, a in shares]
     return _to_out(expense, result_shares)
+
+
+async def _check_budgets(ctx: ChatContext, expense_id: int) -> None:
+    """Проверить лимиты после сохранения траты и разослать новые уведомления (80% / 100%)."""
+    alerts = await alerts_after_expense(ctx.session, expense_id)
+    if alerts:
+        await ctx.session.commit()  # отметки BudgetAlert — чтобы не повторяться
+        await notify_budget_alerts(alerts)
 
 
 @router.get("/chats/{chat_id}/category-suggestion", response_model=CategorySuggestionOut | None)
@@ -313,7 +323,9 @@ async def update_expense(
 
     result = await ctx.session.execute(select(ExpenseShare).where(ExpenseShare.expense_id == expense.id))
     final_shares = list(result.scalars().all())
-    return _to_out(expense, final_shares)
+    out = _to_out(expense, final_shares)
+    await _check_budgets(ctx, expense.id)
+    return out
 
 
 @router.delete("/chats/{chat_id}/expenses/{expense_id}", status_code=204)

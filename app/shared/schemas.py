@@ -48,6 +48,21 @@ class CategoryNode(BaseModel):
     subcategories: list[str]
 
 
+class BudgetIn(BaseModel):
+    category: str = Field(default="", max_length=64)  # "" — общий лимит на месяц
+    subcategory: str | None = Field(default=None, max_length=64)
+    amount: Decimal = Field(gt=0)
+
+
+class BudgetOut(BaseModel):
+    id: int
+    category: str
+    subcategory: str | None
+    amount: Decimal
+    spent: Decimal
+    label: str
+
+
 class CategorySuggestionOut(BaseModel):
     category: str
     subcategory: str | None

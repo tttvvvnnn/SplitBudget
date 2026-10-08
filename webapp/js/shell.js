@@ -6,6 +6,7 @@ import { renderExpensesTab, openExpenseModal } from "./tabs/expenses.js";
 import { renderBalanceTab } from "./tabs/balance.js";
 import { renderStatsTab } from "./tabs/stats.js";
 import { renderAllExpensesTab } from "./tabs/all.js";
+import { renderBudgetsTab, openBudgetModal } from "./tabs/budgets.js";
 import { renderRecurringTab, openRecurringModal } from "./tabs/recurring.js";
 
 /* Версия/сборка в правом верхнем углу шапки — чтобы после пересборки контейнера на стенде
@@ -43,6 +44,7 @@ const TABS = [
   { id: "expenses", icon: "💸", label: "Траты" },
   { id: "balance", icon: "⚖️", label: "Баланс" },
   { id: "stats", icon: "📊", label: "Статистика" },
+  { id: "budgets", icon: "🎯", label: "Лимиты" },
   { id: "recurring", icon: "🔁", label: "Повторы" },
 ];
 
@@ -63,7 +65,7 @@ function spaceSwitcherHtml() {
 function renderShell({ onSwitchSpace } = {}) {
   const app = document.getElementById("app");
   let tabs = TABS;
-  if (isAll()) tabs = TABS.filter((t) => t.id === "expenses" || t.id === "stats");
+  if (isAll()) tabs = TABS.filter((t) => ["expenses", "stats", "budgets"].includes(t.id));
   else if (isPersonal()) tabs = TABS.filter((t) => t.id !== "balance");
   let sub;
   if (isAll()) sub = "Личные + ваша доля в семейных · видно только вам";
@@ -99,6 +101,7 @@ function renderShell({ onSwitchSpace } = {}) {
   document.getElementById("fab-add").addEventListener("click", () => {
     haptic("impact", "light");
     if (state.tab === "recurring") openRecurringModal(null);
+    else if (state.tab === "budgets") openBudgetModal(null);
     else openExpenseModal(null);
   });
 }
@@ -114,10 +117,11 @@ async function switchTab(tabId) {
   await renderTab();
 }
 
-/* «+» не нужен на статистике и в сводке «Все траты» (непонятно, в какой чат добавлять —
-   траты добавляются в своём пространстве). */
+/* «+» не нужен на статистике и на тратах в сводке «Все траты» (непонятно, в какой чат
+   добавлять — траты добавляются в своём пространстве). Лимит из сводки — личный. */
 function updateFab() {
-  document.getElementById("fab-add").style.display = state.tab === "stats" || isAll() ? "none" : "flex";
+  const hidden = state.tab === "stats" || (isAll() && state.tab !== "budgets");
+  document.getElementById("fab-add").style.display = hidden ? "none" : "flex";
 }
 
 async function renderTab() {
@@ -127,6 +131,7 @@ async function renderTab() {
   else if (state.tab === "expenses") await renderExpensesTab();
   else if (state.tab === "balance") await renderBalanceTab();
   else if (state.tab === "stats") await renderStatsTab();
+  else if (state.tab === "budgets") await renderBudgetsTab();
   else if (state.tab === "recurring") await renderRecurringTab();
 }
 

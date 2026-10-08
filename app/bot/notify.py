@@ -67,6 +67,17 @@ async def notify_settlement(chat: Chat, from_member: Member, to_member: Member, 
     await _send(chat, text)
 
 
+async def notify_budget_alerts(alerts: list[tuple[int, str]]) -> None:
+    """Уведомления о лимитах (см. app/shared/budgets.alerts_after_expense). Шлём и в личку
+    владельцу «Моих финансов» — в отличие от _send, личное пространство тут не пропускаем.
+    Бот может написать в личку, только если человек хоть раз нажал у него Start."""
+    for chat_id, text in alerts:
+        try:
+            await bot.send_message(chat_id, text)
+        except Exception:  # noqa: BLE001
+            logger.warning("Не удалось отправить уведомление о лимите в чат %s", chat_id, exc_info=True)
+
+
 async def notify_recurring_generated(
     chat: Chat, title: str, amount: Decimal, payer: Member
 ) -> None:

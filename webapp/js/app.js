@@ -83,7 +83,7 @@ async function loadMeAndRender() {
     state.chat = { id: ALL_SPACE, title: "Все траты", currency: state.personalCurrency, is_personal: false };
     state.member = null;
     state.members = [];
-    if (state.tab !== "stats") state.tab = "expenses";
+    if (!["stats", "budgets"].includes(state.tab)) state.tab = "expenses";
     renderShell({ onSwitchSpace: switchSpace });
     loadVersionBadge();
     await renderTab();

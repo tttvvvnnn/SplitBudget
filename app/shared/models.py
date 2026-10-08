@@ -203,3 +203,36 @@ class CategoryRule(Base):
     category: Mapped[str] = mapped_column(String(64))
     subcategory: Mapped[str | None] = mapped_column(String(64), nullable=True)
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class Budget(Base):
+    """Месячный лимит трат в пространстве (семейном чате или «Моих финансах»).
+
+    category="" — общий лимит на месяц; subcategory=None — лимит на всю категорию. В семейном
+    чате считаются полные суммы трат чата, в личном пространстве — доля владельца во всех его
+    тратах (личных и семейных), как в «Все траты». См. app/shared/budgets.py."""
+
+    __tablename__ = "budgets"
+    __table_args__ = (
+        UniqueConstraint("chat_id", "category", "subcategory", name="uq_budget_chat_category"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[int] = mapped_column(ForeignKey("chats.id", ondelete="CASCADE"))
+    category: Mapped[str] = mapped_column(String(64), default="")
+    subcategory: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    amount: Mapped[Decimal] = mapped_column(MoneyType)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class BudgetAlert(Base):
+    """Отправленное уведомление о лимите (80% или 100%) — чтобы не слать его повторно в том же месяце."""
+
+    __tablename__ = "budget_alerts"
+    __table_args__ = (UniqueConstraint("budget_id", "month", "level", name="uq_budget_alert"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    budget_id: Mapped[int] = mapped_column(ForeignKey("budgets.id", ondelete="CASCADE"))
+    month: Mapped[str] = mapped_column(String(7))  # 'YYYY-MM'
+    level: Mapped[int] = mapped_column()  # 80 | 100
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
