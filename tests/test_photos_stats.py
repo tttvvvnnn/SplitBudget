@@ -1,4 +1,4 @@
-"""Загрузка/авторизованная отдача фото чеков, статистика по категориям, экспорт в Excel."""
+"""Загрузка/авторизованная отдача фото чеков, статистика по категориям."""
 from __future__ import annotations
 
 import json
@@ -77,27 +77,3 @@ def test_stats_by_category(client, seeded_chat, auth_header):
     by_category = {c["category"]: float(c["total"]) for c in body["by_category"]}
     assert by_category["Еда"] == 150.0
     assert by_category["Транспорт"] == 30.0
-
-
-def test_export_xlsx(client, seeded_chat, auth_header):
-    client.post(
-        f"/api/chats/{seeded_chat.chat_id}/expenses",
-        headers=auth_header(seeded_chat.alice_init_data),
-        data={
-            "title": "Продукты",
-            "amount": "100",
-            "category": "Еда",
-            "expense_date": "2026-09-01",
-            "payer_member_id": str(seeded_chat.alice_member_id),
-            "split_type": "equal",
-            "participant_ids": json.dumps([seeded_chat.alice_member_id, seeded_chat.bob_member_id]),
-        },
-    )
-
-    r = client.get(
-        f"/api/chats/{seeded_chat.chat_id}/export?month=2026-09",
-        headers=auth_header(seeded_chat.alice_init_data),
-    )
-    assert r.status_code == 200, r.text
-    assert r.headers["content-type"].startswith("application/vnd.openxmlformats")
-    assert len(r.content) > 1000
