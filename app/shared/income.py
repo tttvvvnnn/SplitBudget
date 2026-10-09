@@ -5,7 +5,7 @@
 пришёл — считается ожидаемым.
 
 Сводка месяца:
-    свободно = получено + ожидается − траты − обязательные платежи впереди
+    свободно = получено + ожидается − траты − обязательные платежи впереди − отложено на цели
 А «до следующего поступления» — сколько можно тратить в день из уже полученных денег,
 с учётом обязательных платежей, которые придётся оплатить раньше него.
 """
@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.shared.autocategory import normalize
 from app.shared.budgets import month_range, spending
+from app.shared.goals import saved_in_month
 from app.shared.models import Chat, Income, IncomeAsk, IncomeSource
 from app.shared.obligations import Notice, fmt_amount, month_of, next_month, obligations
 
@@ -71,6 +72,7 @@ class IncomeSummary:
     expected: Decimal
     spent: Decimal
     obligations_pending: Decimal
+    saved: Decimal  # отложено на цели в этом месяце (app/shared/goals.py)
     free: Decimal
     next_title: str | None = None
     next_date: dt.date | None = None
@@ -98,6 +100,7 @@ async def summary(session: AsyncSession, chat: Chat, month: str, today: dt.date)
     items = await obligations(session, chat, month)
     pending = [o for o in items if o.counts and o.payment.status == "pending"]
     obligations_pending = sum((o.share for o in pending), ZERO)
+    saved = await saved_in_month(session, chat.id, month)
     result = IncomeSummary(
         incomes=incomes,
         sources=statuses,
@@ -105,7 +108,8 @@ async def summary(session: AsyncSession, chat: Chat, month: str, today: dt.date)
         expected=expected,
         spent=spent,
         obligations_pending=obligations_pending,
-        free=received + expected - spent - obligations_pending,
+        saved=saved,
+        free=received + expected - spent - obligations_pending - saved,
     )
     if month != month_of(today):
         return result
@@ -132,7 +136,7 @@ async def summary(session: AsyncSession, chat: Chat, month: str, today: dt.date)
         result.next_amount = source.amount
         result.days_to_next = days
         result.obligations_before_next = before
-        result.per_day = ((received - spent - before) / days).quantize(Decimal("0.01"))
+        result.per_day = ((received - spent - saved - before) / days).quantize(Decimal("0.01"))
     return result
 
 

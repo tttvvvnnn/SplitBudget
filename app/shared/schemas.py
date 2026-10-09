@@ -367,6 +367,7 @@ class IncomeSummaryOut(BaseModel):
     expected: Decimal
     spent: Decimal
     obligations_pending: Decimal
+    saved: Decimal
     free: Decimal
     next_title: str | None
     next_date: dt.date | None
@@ -374,3 +375,43 @@ class IncomeSummaryOut(BaseModel):
     days_to_next: int | None
     obligations_before_next: Decimal
     per_day: Decimal | None
+
+
+class GoalIn(BaseModel):
+    title: str = Field(min_length=1, max_length=255)
+    target: Decimal = Field(gt=0)
+    deadline: dt.date | None = None
+    is_archived: bool = False
+
+
+class GoalDepositIn(BaseModel):
+    amount: Decimal  # отрицательная — сняли с цели
+    deposit_date: dt.date | None = None
+
+    @field_validator("amount")
+    @classmethod
+    def _not_zero(cls, v: Decimal) -> Decimal:
+        if v == 0:
+            raise ValueError("Сумма не может быть нулевой")
+        return v
+
+
+class GoalDepositOut(BaseModel):
+    id: int
+    amount: Decimal
+    deposit_date: dt.date
+
+    model_config = {"from_attributes": True}
+
+
+class GoalOut(BaseModel):
+    id: int
+    title: str
+    target: Decimal
+    deadline: dt.date | None
+    is_archived: bool
+    saved: Decimal
+    saved_this_month: Decimal
+    months_left: int | None
+    monthly_needed: Decimal | None
+    deposits: list[GoalDepositOut]

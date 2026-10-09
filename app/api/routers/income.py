@@ -47,6 +47,7 @@ async def income_summary(month: str, ctx: ChatContext = Depends(get_chat_context
         expected=s.expected,
         spent=s.spent,
         obligations_pending=s.obligations_pending,
+        saved=s.saved,
         free=s.free,
         next_title=s.next_title,
         next_date=s.next_date,

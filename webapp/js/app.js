@@ -14,7 +14,7 @@ import { tg } from "./telegram.js";
 import { state, ALL_SPACE, isAll } from "./state.js";
 import { escapeHtml } from "./format.js";
 import { api } from "./api.js";
-import { loadVersionBadge, renderShell, renderTab, ALL_VIEW_TABS } from "./shell.js";
+import { loadVersionBadge, renderShell, renderTab, ALL_VIEW_TABS, PERSONAL_ONLY_TABS } from "./shell.js";
 
 /* ---------------- Инициализация ---------------- */
 
@@ -105,7 +105,7 @@ async function loadMeAndRender() {
     state.members = me.members;
     state.categories = me.categories;
     if (state.chat.is_personal && state.tab === "balance") state.tab = "expenses";
-    if (!state.chat.is_personal && state.tab === "income") state.tab = "expenses";
+    if (!state.chat.is_personal && PERSONAL_ONLY_TABS.includes(state.tab)) state.tab = "expenses";
     renderShell({ onSwitchSpace: switchSpace });
     loadVersionBadge(); // не блокирует основной рендер — бейдж в углу подтянется чуть позже
     await renderTab();

@@ -60,6 +60,7 @@ async function renderIncomeTab() {
         ${Number(data.expected) > 0 ? `<div><span>Ожидается</span><span>+${fmtMoney(data.expected)}</span></div>` : ""}
         <div><span>Траты</span><span>−${fmtMoney(data.spent)}</span></div>
         ${Number(data.obligations_pending) > 0 ? `<div><span>📌 Платежи впереди</span><span>−${fmtMoney(data.obligations_pending)}</span></div>` : ""}
+        ${Number(data.saved) !== 0 ? `<div><span>🐷 Отложено на цели</span><span>−${fmtMoney(data.saved)}</span></div>` : ""}
       </div>
       ${untilNext}
     </div>

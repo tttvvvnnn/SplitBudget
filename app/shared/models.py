@@ -319,3 +319,30 @@ class MonthlyReport(Base):
     chat_id: Mapped[int] = mapped_column(ForeignKey("chats.id", ondelete="CASCADE"))
     month: Mapped[str] = mapped_column(String(7))
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class Goal(Base):
+    """Цель накоплений в «Моих финансах»: «Отпуск 200 000 к июлю»."""
+
+    __tablename__ = "goals"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[int] = mapped_column(ForeignKey("chats.id", ondelete="CASCADE"))
+    title: Mapped[str] = mapped_column(String(255))
+    target: Mapped[Decimal] = mapped_column(MoneyType)
+    deadline: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    is_archived: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class GoalDeposit(Base):
+    """Сколько отложили на цель (отрицательная сумма — сняли). Отложенное в месяце уменьшает
+    «свободно» в доходах (app/shared/income.py)."""
+
+    __tablename__ = "goal_deposits"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    goal_id: Mapped[int] = mapped_column(ForeignKey("goals.id", ondelete="CASCADE"))
+    amount: Mapped[Decimal] = mapped_column(MoneyType)
+    deposit_date: Mapped[dt.date] = mapped_column(Date, default=dt.date.today)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)

@@ -3,7 +3,7 @@
 
 В отчёте: сколько потрачено и сравнение с прошлым месяцем, топ категорий, что выросло
 сильнее всего, лимиты, обязательные платежи; в личном — доходы и сколько осталось,
-в семейном — кто сколько заплатил.
+в семейном — кто сколько заплатил; в личном — ещё и прогресс целей накоплений.
 """
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.shared.budgets import budget_label, budgets_status, month_range, spending
 from app.shared.categories import CATEGORY_TREE
+from app.shared.goals import goals_status
 from app.shared.models import Chat, Expense, Income, Member, MonthlyReport
 from app.shared.obligations import fmt_amount, month_of, obligations
 
@@ -116,6 +117,18 @@ async def build_report(session: AsyncSession, chat: Chat, month: str, partial: b
         paid = sum((o.share for o in items if o.payment.status == "paid"), ZERO)
         planned = sum((o.share for o in items if o.payment.status != "skipped"), ZERO)
         lines.append(f"📌 Обязательные платежи: оплачено {money(paid)} из {money(planned)}")
+
+    if chat.is_personal:
+        goals = [g for g in await goals_status(session, chat.id, end - dt.timedelta(days=1)) if not g.goal.is_archived]
+        if goals:
+            lines.append("")
+            lines.append("🐷 Цели:")
+            lines.extend(
+                f"• {escape(g.goal.title)} — {money(g.saved)} из {money(g.goal.target)}"
+                f" ({g.saved * 100 / g.goal.target:.0f}%)"
+                + (f", в этом месяце +{money(g.saved_this_month)}" if g.saved_this_month > 0 else "")
+                for g in goals
+            )
 
     if not chat.is_personal:
         result = await session.execute(

@@ -9,6 +9,7 @@ import { renderAllExpensesTab } from "./tabs/all.js";
 import { renderBudgetsTab, openBudgetModal } from "./tabs/budgets.js";
 import { renderRecurringTab, openRecurringModal } from "./tabs/recurring.js";
 import { renderIncomeTab, openIncomeModal } from "./tabs/income.js";
+import { renderGoalsTab, openGoalModal } from "./tabs/goals.js";
 
 /* Версия/сборка в правом верхнем углу шапки — чтобы после пересборки контейнера на стенде
    было видно на глаз, старый код сейчас открыт или уже новый. /healthz отдаётся без
@@ -48,10 +49,13 @@ const TABS = [
   { id: "budgets", icon: "🎯", label: "Лимиты" },
   { id: "recurring", icon: "📌", label: "Платежи" },
   { id: "income", icon: "💰", label: "Доходы" },
+  { id: "goals", icon: "🐷", label: "Цели" },
 ];
 
 /* Вкладки сводки «Все траты» — остальные привязаны к конкретному пространству */
-const ALL_VIEW_TABS = ["expenses", "stats", "budgets", "income"];
+const ALL_VIEW_TABS = ["expenses", "stats", "budgets", "income", "goals"];
+// Только личные вкладки — в семейном чате их нет
+const PERSONAL_ONLY_TABS = ["income", "goals"];
 
 /* Переключатель «📋 Все траты | 👤 Мои финансы | 🏠 семейные чаты» под заголовком. */
 function spaceSwitcherHtml() {
@@ -72,7 +76,7 @@ function renderShell({ onSwitchSpace } = {}) {
   let tabs = TABS;
   if (isAll()) tabs = TABS.filter((t) => ALL_VIEW_TABS.includes(t.id));
   else if (isPersonal()) tabs = TABS.filter((t) => t.id !== "balance");
-  else tabs = TABS.filter((t) => t.id !== "income");
+  else tabs = TABS.filter((t) => !PERSONAL_ONLY_TABS.includes(t.id));
   let sub;
   if (isAll()) sub = "Личные + ваша доля в семейных · видно только вам";
   else if (isPersonal()) sub = `Видно только вам · Валюта: ${escapeHtml(state.chat.currency)}`;
@@ -109,6 +113,7 @@ function renderShell({ onSwitchSpace } = {}) {
     if (state.tab === "recurring") openRecurringModal(null);
     else if (state.tab === "budgets") openBudgetModal(null);
     else if (state.tab === "income") openIncomeModal(null);
+    else if (state.tab === "goals") openGoalModal(null);
     else openExpenseModal(null);
   });
 }
@@ -127,7 +132,7 @@ async function switchTab(tabId) {
 /* «+» не нужен на статистике и на тратах в сводке «Все траты» (непонятно, в какой чат
    добавлять — траты добавляются в своём пространстве). Лимит из сводки — личный. */
 function updateFab() {
-  const hidden = state.tab === "stats" || (isAll() && !["budgets", "income"].includes(state.tab));
+  const hidden = state.tab === "stats" || (isAll() && !["budgets", "income", "goals"].includes(state.tab));
   document.getElementById("fab-add").style.display = hidden ? "none" : "flex";
 }
 
@@ -141,6 +146,7 @@ async function renderTab() {
   else if (state.tab === "budgets") await renderBudgetsTab();
   else if (state.tab === "recurring") await renderRecurringTab();
   else if (state.tab === "income") await renderIncomeTab();
+  else if (state.tab === "goals") await renderGoalsTab();
 }
 
-export { loadVersionBadge, renderShell, switchTab, renderTab, ALL_VIEW_TABS };
+export { loadVersionBadge, renderShell, switchTab, renderTab, ALL_VIEW_TABS, PERSONAL_ONLY_TABS };
