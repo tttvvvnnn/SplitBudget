@@ -337,6 +337,10 @@ class Notice:
     text: str
     ask_payment_id: int | None = None  # прислать кнопки «Оплачено?» для этого платежа
     chat_link_id: int | None = None  # пространство, которое открыть кнопкой «Другая сумма»
+    # Произвольные кнопки: ряды (текст, callback_data) и ссылка «Другая сумма» на мини-апп
+    # с этим startapp-параметром (например, доходы — app/shared/income.py)
+    buttons: list[list[tuple[str, str]]] | None = None
+    app_param: str | None = None
 
 
 async def due_notices(session: AsyncSession, today: dt.date) -> list[Notice]:

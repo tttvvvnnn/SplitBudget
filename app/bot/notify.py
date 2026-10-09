@@ -6,7 +6,7 @@ import logging
 from decimal import Decimal
 
 from app.bot.bot_instance import bot
-from app.bot.keyboards import payment_keyboard
+from app.bot.keyboards import buttons_keyboard, payment_keyboard
 from app.shared.models import Chat, Member
 from app.shared.obligations import Notice
 
@@ -69,6 +69,11 @@ async def notify_settlement(chat: Chat, from_member: Member, to_member: Member, 
     await _send(chat, text)
 
 
+async def send_texts(messages: list[tuple[int, str]]) -> None:
+    """Просто тексты по чатам (итоги месяца и т.п.), включая личку владельцу «Моих финансов»."""
+    await notify_budget_alerts(messages)
+
+
 async def notify_budget_alerts(alerts: list[tuple[int, str]]) -> None:
     """Уведомления о лимитах (см. app/shared/budgets.alerts_after_expense). Шлём и в личку
     владельцу «Моих финансов» — в отличие от _send, личное пространство тут не пропускаем.
@@ -103,6 +108,8 @@ async def notify_obligations(notices: list[Notice]) -> None:
         markup = None
         if notice.ask_payment_id is not None:
             markup = payment_keyboard(me.username, notice.ask_payment_id, notice.chat_link_id or notice.chat_id)
+        elif notice.buttons:
+            markup = buttons_keyboard(me.username, notice.buttons, notice.app_param)
         try:
             await bot.send_message(notice.chat_id, notice.text, reply_markup=markup)
         except Exception:  # noqa: BLE001

@@ -1,17 +1,20 @@
-"""Кнопки «✅ Оплачено» и «⏭ Не в этом месяце» под вопросом об обязательном платеже."""
+"""Кнопки «✅ Оплачено» и «⏭ Не в этом месяце» под вопросом об обязательном платеже и
+«✅ Пришла» / «⏳ Ещё нет» под вопросом о регулярном доходе."""
 from __future__ import annotations
 
+import datetime as dt
 import logging
 
 from aiogram import F, Router
 from aiogram.types import CallbackQuery
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from app.bot.notify import notify_budget_alerts
 from app.shared import obligations as ob
-from app.shared.budgets import alerts_after_expense
+from app.shared.budgets import alerts_after_expense, month_range
 from app.shared.database import async_session_maker
-from app.shared.models import Chat, Member, RecurringExpense, RecurringPayment
+from app.shared.income import record_income, source_date
+from app.shared.models import Chat, Income, IncomeAsk, IncomeSource, Member, RecurringExpense, RecurringPayment
 
 logger = logging.getLogger(__name__)
 router = Router(name="payments")
@@ -78,3 +81,46 @@ async def on_payment_button(callback: CallbackQuery) -> None:
             if alerts:
                 await session.commit()
                 await notify_budget_alerts(alerts)
+
+
+@router.callback_query(F.data.startswith("inc:"))
+async def on_income_button(callback: CallbackQuery) -> None:
+    try:
+        _, action, raw_id, month = callback.data.split(":")
+        source_id = int(raw_id)
+        month_range(month)
+    except (ValueError, IndexError):
+        await callback.answer()
+        return
+    async with async_session_maker() as session:
+        source = await session.get(IncomeSource, source_id)
+        if source is None or source.chat_id != callback.from_user.id:
+            await callback.answer("Доход не найден", show_alert=True)
+            return
+        chat = await session.get(Chat, source.chat_id)
+        start, end = month_range(month)
+        already = await session.execute(
+            select(Income.id).where(
+                Income.source_id == source.id, Income.income_date >= start, Income.income_date < end
+            )
+        )
+        if action == "yes" and already.first() is not None:
+            text = f"✅ Доход «{source.title}» за этот месяц уже записан"
+        elif action == "yes":
+            today = dt.date.today()
+            # Подтвердили за другой месяц (ответили на вопрос с опозданием) — пишем в тот месяц
+            date = today if ob.month_of(today) == month else source_date(source, month)
+            await record_income(session, chat, source.title, source.amount, date, source.id)
+            text = f"✅ Записал доход «{source.title}» — {ob.fmt_amount(source.amount, chat.currency)}"
+        else:
+            # Спросим ещё раз на следующей ежедневной проверке
+            await session.execute(
+                delete(IncomeAsk).where(IncomeAsk.source_id == source.id, IncomeAsk.month == month)
+            )
+            text = f"⏳ «{source.title}» ещё не пришла — спрошу завтра"
+        await session.commit()
+    try:
+        await callback.message.edit_text(text)
+    except Exception:  # noqa: BLE001
+        logger.warning("Не удалось обновить сообщение о доходе", exc_info=True)
+    await callback.answer()

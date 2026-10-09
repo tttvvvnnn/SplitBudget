@@ -264,3 +264,85 @@ class RecurringPayment(Base):
     reminders_sent: Mapped[str] = mapped_column(String(32), default="")  # например "7,3"
     asked: Mapped[bool] = mapped_column(Boolean, default=False)  # спросили «Оплачено?» в день платежа
     paid_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class IncomeSource(Base):
+    """Регулярный доход в «Моих финансах»: зарплата, аванс и т.п. В его день бот спрашивает
+    «Пришла?», и после подтверждения записывается Income (см. app/shared/income.py)."""
+
+    __tablename__ = "income_sources"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[int] = mapped_column(ForeignKey("chats.id", ondelete="CASCADE"))
+    title: Mapped[str] = mapped_column(String(255))
+    amount: Mapped[Decimal] = mapped_column(MoneyType)
+    day_of_month: Mapped[int] = mapped_column(default=1)  # 1..28
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class Income(Base):
+    """Поступление денег в «Моих финансах»."""
+
+    __tablename__ = "incomes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[int] = mapped_column(ForeignKey("chats.id", ondelete="CASCADE"))
+    title: Mapped[str] = mapped_column(String(255))
+    amount: Mapped[Decimal] = mapped_column(MoneyType)
+    income_date: Mapped[dt.date] = mapped_column(Date, default=dt.date.today)
+    # Какой регулярный доход это закрывает в месяце income_date (для «ожидается»)
+    source_id: Mapped[int | None] = mapped_column(
+        ForeignKey("income_sources.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class IncomeAsk(Base):
+    """Бот уже спросил «Пришла?» про регулярный доход в этом месяце — не спрашиваем повторно."""
+
+    __tablename__ = "income_asks"
+    __table_args__ = (UniqueConstraint("source_id", "month", name="uq_income_ask"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_id: Mapped[int] = mapped_column(ForeignKey("income_sources.id", ondelete="CASCADE"))
+    month: Mapped[str] = mapped_column(String(7))
+
+
+class MonthlyReport(Base):
+    """Итоги месяца уже отправлены в этот чат — второй раз не шлём."""
+
+    __tablename__ = "monthly_reports"
+    __table_args__ = (UniqueConstraint("chat_id", "month", name="uq_monthly_report"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[int] = mapped_column(ForeignKey("chats.id", ondelete="CASCADE"))
+    month: Mapped[str] = mapped_column(String(7))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class Goal(Base):
+    """Цель накоплений в «Моих финансах»: «Отпуск 200 000 к июлю»."""
+
+    __tablename__ = "goals"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[int] = mapped_column(ForeignKey("chats.id", ondelete="CASCADE"))
+    title: Mapped[str] = mapped_column(String(255))
+    target: Mapped[Decimal] = mapped_column(MoneyType)
+    deadline: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    is_archived: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class GoalDeposit(Base):
+    """Сколько отложили на цель (отрицательная сумма — сняли). Отложенное в месяце уменьшает
+    «свободно» в доходах (app/shared/income.py)."""
+
+    __tablename__ = "goal_deposits"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    goal_id: Mapped[int] = mapped_column(ForeignKey("goals.id", ondelete="CASCADE"))
+    amount: Mapped[Decimal] = mapped_column(MoneyType)
+    deposit_date: Mapped[dt.date] = mapped_column(Date, default=dt.date.today)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
