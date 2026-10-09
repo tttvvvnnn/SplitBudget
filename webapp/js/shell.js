@@ -75,10 +75,11 @@ function spaceSwitcherHtml() {
 
 /* «Убрать из списка» — одноразовый чат с друзьями больше не мешает в шапке. Только для
    себя: у остальных участников чат на месте, траты и долги не трогаются. */
-async function hideCurrentChat(onSwitchSpace) {
+async function hideCurrentChat(onSwitchSpace, question) {
   const chat = state.chat;
   const ok = await confirmAction(
-    `Убрать «${chat.title || chat.id}» из списка? Чат пропадёт только у вас, траты и долги останутся. ` +
+    (question || `Убрать «${chat.title || chat.id}» из списка?`) +
+    " Чат пропадёт только у вас, траты и долги останутся. " +
     "Вернуть можно в «🙈 Скрытые» или открыв приложение из этого чата."
   );
   if (!ok) return;
@@ -204,4 +205,4 @@ async function renderTab() {
   else if (state.tab === "goals") await renderGoalsTab();
 }
 
-export { loadVersionBadge, renderShell, switchTab, renderTab, PERSONAL_ONLY_TABS };
+export { loadVersionBadge, renderShell, switchTab, renderTab, hideCurrentChat, PERSONAL_ONLY_TABS };
