@@ -1001,3 +1001,24 @@ html, body {
   cursor: pointer;
   padding: 2px 6px;
 }
+
+/* «Убрать из списка» в подзаголовке шапки и «🙈 Скрытые» в переключателе — см. shell.js */
+.link-btn.inline {
+  font-size: 13px;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.space-switcher button.hidden-chip {
+  background: none;
+  border-style: dashed;
+  color: var(--hint);
+}
+.hidden-chat-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.hidden-chat-row span { flex: 1; }

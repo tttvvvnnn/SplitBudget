@@ -53,11 +53,14 @@ async function init() {
   // chat_id (кнопка меню бота) открываем сводку «Все траты», по кнопке «Мои финансы» в
   // личке (?space=personal) — личное пространство.
   try {
-    const [personal, chats, tree] = await Promise.all([api("/personal"), api("/my-chats"), api("/categories")]);
+    const [personal, chats, hidden, tree] = await Promise.all([
+      api("/personal"), api("/my-chats"), api("/my-chats?hidden=true"), api("/categories"),
+    ]);
     state.categoryTree = tree;
     state.personalChatId = personal.id;
     state.personalCurrency = personal.currency;
     state.familyChats = chats;
+    state.hiddenChats = hidden;
   } catch (e) {
     renderError(e.message);
     return;
@@ -104,6 +107,7 @@ async function loadMeAndRender() {
     state.member = me.member;
     state.members = me.members;
     state.categories = me.categories;
+    await returnHiddenChat();
     if (state.chat.is_personal && state.tab === "balance") state.tab = "expenses";
     if (!state.chat.is_personal && PERSONAL_ONLY_TABS.includes(state.tab)) state.tab = "expenses";
     renderShell({ onSwitchSpace: switchSpace });
@@ -112,6 +116,17 @@ async function loadMeAndRender() {
   } catch (e) {
     renderError(e.message);
   }
+}
+
+/* Открыли скрытый чат по кнопке из самой группы — значит, он снова нужен: возвращаем в шапку. */
+async function returnHiddenChat() {
+  const hidden = state.hiddenChats.find((c) => String(c.id) === String(state.chat.id));
+  if (!hidden) return;
+  try {
+    await api(`/chats/${hidden.id}/unhide`, { method: "POST" });
+    state.hiddenChats = state.hiddenChats.filter((c) => c !== hidden);
+    state.familyChats = [...state.familyChats, hidden];
+  } catch (e) { /* не критично — чат просто останется скрытым */ }
 }
 
 init();

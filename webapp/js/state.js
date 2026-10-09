@@ -8,6 +8,7 @@ const state = {
   personalCurrency: "",
   switchSpace: null, // переключение пространства (задаёт app.js) — для перехода из «Все траты» к трате
   familyChats: [], // семейные чаты пользователя — для переключателя в шапке
+  hiddenChats: [], // чаты, которые пользователь убрал из шапки (GET /my-chats?hidden=true)
   initData: "",
   chat: null,
   member: null,

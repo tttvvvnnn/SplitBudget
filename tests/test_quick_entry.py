@@ -214,3 +214,18 @@ def test_group_split_mine_and_refuse(client, seeded_chat, bot):
     cb, deleted = _group_callback(bot, chat_id, uid, uid, "кофе 250", "no")
     asyncio.run(quick.on_group_choice(cb))
     assert deleted and len(_expenses(chat_id)) == 1
+
+
+def test_hidden_chat_not_offered_and_returns_on_use(client, seeded_chat, bot, auth_header):
+    uid, chat_id = seeded_chat.alice_tg_id, seeded_chat.chat_id
+    headers = auth_header(seeded_chat.alice_init_data)
+    client.post(f"/api/chats/{chat_id}/hide", headers=headers)
+
+    # В личке скрытый чат не предлагается для переноса траты
+    asyncio.run(quick.quick_expense(bot.message(uid, "кофе 250")))
+    assert not any(b.startswith("qe:fam") for b in _buttons(bot.sent[-1][1]))
+
+    # Записал трату поровну прямо в этом чате — чат вернулся в список
+    cb, _ = _group_callback(bot, chat_id, uid, uid, "пицца 1200", "split")
+    asyncio.run(quick.on_group_choice(cb))
+    assert [c["id"] for c in client.get("/api/my-chats", headers=headers).json()] == [chat_id]

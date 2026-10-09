@@ -150,3 +150,20 @@ async def load_recurring_participants(
         select(RecurringParticipant).where(RecurringParticipant.recurring_id == recurring_id)
     )
     return list(result.scalars().all())
+
+
+async def family_chats_of(session: AsyncSession, tg_user_id: int, hidden: bool = False) -> list[Chat]:
+    """Семейные чаты пользователя для списков (шапка приложения, кнопки бота в личке):
+    где он активный участник и которые он не скрыл (hidden=True — наоборот, только скрытые)."""
+    result = await session.execute(
+        select(Chat)
+        .join(Member, Member.chat_id == Chat.id)
+        .where(
+            Member.tg_user_id == tg_user_id,
+            Member.is_active.is_(True),
+            Member.is_hidden.is_(hidden),
+            Chat.is_personal.is_(False),
+        )
+        .order_by(Chat.id)
+    )
+    return list(result.scalars().all())

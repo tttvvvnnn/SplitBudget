@@ -68,6 +68,9 @@ class Member(Base):
     # синхронизировано, или если у пользователя нет фото профиля (в т.ч. всегда NULL у
     # ручных участников — синхронизировать нечего).
     avatar_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Пользователь убрал этот чат из своего списка в приложении (одноразовый чат с друзьями).
+    # Касается только его: у остальных участников чат на месте, траты и долги не трогаются.
+    is_hidden: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     added_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
 
     chat: Mapped["Chat"] = relationship(back_populates="members")
