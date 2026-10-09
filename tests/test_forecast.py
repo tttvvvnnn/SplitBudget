@@ -63,3 +63,16 @@ def test_forecast_and_alert(client, seeded_chat, auth_header):
     assert "250 RUB в день" in alerts[0]  # (8 000 − 3 000) / 20 дней
     # Второй раз за месяц не предупреждаем
     assert asyncio.run(_alerts(today + dt.timedelta(days=1))) == []
+
+
+def test_one_off_not_extrapolated():
+    from decimal import Decimal as D
+
+    from app.shared.forecast import one_off
+
+    rows = [("Продукты", None, D(a)) for a in ("900", "1200", "700", "1500")] + [("Дом", "Аренда", D("30000"))]
+    regular, large = one_off(rows)
+    assert [r[2] for r in large] == [D("30000")]
+    assert len(regular) == 4
+    # Ровные траты — все обычные
+    assert one_off([("Продукты", None, D(a)) for a in ("900", "1200", "4000")])[1] == []

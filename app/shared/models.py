@@ -199,6 +199,20 @@ class RecurringParticipant(Base):
     member: Mapped["Member"] = relationship()
 
 
+class SubscriptionHint(Base):
+    """Найденная по истории трат подписка (app/shared/subscriptions.py): бот уже спросил
+    «Сделать обязательным платежом?» (asked) или человек ответил «Не подписка» (dismissed)."""
+
+    __tablename__ = "subscription_hints"
+    __table_args__ = (UniqueConstraint("chat_id", "keyword", name="uq_subscription_hint_chat_keyword"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[int] = mapped_column(ForeignKey("chats.id", ondelete="CASCADE"))
+    keyword: Mapped[str] = mapped_column(String(255))  # нормализованное название траты
+    status: Mapped[str] = mapped_column(String(16), default="asked")  # asked | dismissed | accepted
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
+
+
 class CategoryRule(Base):
     """Выученное соответствие «название траты → категория» в конкретном чате (см.
     app/shared/autocategory.py). Обновляется при каждом сохранении траты."""

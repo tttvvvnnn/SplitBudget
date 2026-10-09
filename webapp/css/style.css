@@ -1060,3 +1060,13 @@ html, body {
 .forecast-card.over {
   border-color: var(--danger);
 }
+
+/* «Похоже на подписки» во вкладке «Платежи» */
+.sub-hint .sub-hint-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.sub-hint .sub-hint-actions .btn {
+  flex: 1;
+}

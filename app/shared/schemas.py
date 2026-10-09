@@ -425,3 +425,19 @@ class GoalOut(BaseModel):
     months_left: int | None
     monthly_needed: Decimal | None
     deposits: list[GoalDepositOut]
+
+
+class SubscriptionHintOut(BaseModel):
+    """Трата, похожая на подписку (app/shared/subscriptions.py)."""
+
+    keyword: str
+    title: str
+    amount: Decimal
+    category: str
+    subcategory: str | None
+    day_of_month: int
+    months: int
+
+
+class SubscriptionHintAction(BaseModel):
+    keyword: str = Field(min_length=1, max_length=255)

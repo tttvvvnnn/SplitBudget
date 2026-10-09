@@ -1,14 +1,24 @@
 """CRUD шаблонов повторяющихся трат (аренда, подписки)."""
 from __future__ import annotations
 
+import datetime as dt
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 
 from app.api.dependencies import ChatContext, get_chat_context
 from app.shared.crud import build_custom_shares, build_equal_shares
 from app.shared.models import Member, RecurringExpense, RecurringParticipant, RecurringPayment
+from app.shared import subscriptions
 from app.shared.obligations import due_date_for
-from app.shared.schemas import RecurringCreate, RecurringOut, RecurringParticipantIn, RecurringUpdate
+from app.shared.schemas import (
+    RecurringCreate,
+    RecurringOut,
+    RecurringParticipantIn,
+    RecurringUpdate,
+    SubscriptionHintAction,
+    SubscriptionHintOut,
+)
 
 router = APIRouter(tags=["recurring"])
 
@@ -187,3 +197,38 @@ async def delete_recurring(recurring_id: int, ctx: ChatContext = Depends(get_cha
     await ctx.session.delete(recurring)
     await ctx.session.commit()
     return None
+
+
+@router.get("/chats/{chat_id}/subscription-hints", response_model=list[SubscriptionHintOut])
+async def subscription_hints(ctx: ChatContext = Depends(get_chat_context)) -> list[SubscriptionHintOut]:
+    """Траты, похожие на подписки, — для блока «Похоже на подписки» во вкладке «Платежи»."""
+    candidates = await subscriptions.find_candidates(ctx.session, ctx.chat, dt.date.today())
+    return [
+        SubscriptionHintOut(
+            keyword=c.keyword, title=c.title, amount=c.amount, category=c.category,
+            subcategory=c.subcategory, day_of_month=c.day_of_month, months=c.months,
+        )
+        for c in candidates
+    ]
+
+
+@router.post("/chats/{chat_id}/subscription-hints/accept", response_model=RecurringOut, status_code=201)
+async def accept_subscription_hint(payload: SubscriptionHintAction, ctx: ChatContext = Depends(get_chat_context)):
+    candidate = next(
+        (c for c in await subscriptions.find_candidates(ctx.session, ctx.chat, dt.date.today()) if c.keyword == payload.keyword),
+        None,
+    )
+    if candidate is None:
+        raise HTTPException(status_code=404, detail="Не нашёл такие траты")
+    recurring = await subscriptions.accept(ctx.session, ctx.chat, candidate, ctx.member.id)
+    await ctx.session.commit()
+    p_result = await ctx.session.execute(
+        select(RecurringParticipant).where(RecurringParticipant.recurring_id == recurring.id)
+    )
+    return _to_out(recurring, list(p_result.scalars().all()))
+
+
+@router.post("/chats/{chat_id}/subscription-hints/dismiss", status_code=204)
+async def dismiss_subscription_hint(payload: SubscriptionHintAction, ctx: ChatContext = Depends(get_chat_context)):
+    await subscriptions.dismiss(ctx.session, ctx.chat.id, payload.keyword)
+    await ctx.session.commit()

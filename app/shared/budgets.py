@@ -26,12 +26,11 @@ def month_range(month: str) -> tuple[dt.date, dt.date]:
     return dt.date(year, mon, 1), dt.date(year + (mon // 12), (mon % 12) + 1, 1)
 
 
-async def spending(
+async def spending_rows(
     session: AsyncSession, chat: Chat, month: str, exclude_recurring: bool = False
-) -> dict[tuple[str, str | None], Decimal]:
-    """Траты за месяц: {(категория, подкатегория): сумма}, {(категория, None): сумма по
-    категории} и {("", None): всего}. exclude_recurring — без записанных обязательных
-    платежей (для прогноза: их не экстраполируют, см. app/shared/forecast.py)."""
+) -> list[tuple[str, str | None, Decimal]]:
+    """Траты за месяц строками (категория, подкатегория, сумма). В «Моих финансах» — доля
+    владельца. exclude_recurring — без записанных обязательных платежей."""
     start, end = month_range(month)
     if chat.is_personal:
         query = (
@@ -46,15 +45,25 @@ async def spending(
         )
     if exclude_recurring:
         query = query.where(Expense.recurring_id.is_(None))
-    result = await session.execute(query)
+    return [tuple(row) for row in (await session.execute(query)).all()]
+
+
+def sum_by_keys(rows: list[tuple[str, str | None, Decimal]]) -> dict[tuple[str, str | None], Decimal]:
+    """{(категория, подкатегория): сумма}, {(категория, None): сумма по категории} и
+    {("", None): всего}."""
     totals: dict[tuple[str, str | None], Decimal] = {}
-    for category, subcategory, amount in result.all():
+    for category, subcategory, amount in rows:
         keys = [("", None), (category, None)]
         if subcategory:
             keys.append((category, subcategory))
         for key in keys:
             totals[key] = totals.get(key, ZERO) + amount
     return totals
+
+
+async def spending(session: AsyncSession, chat: Chat, month: str) -> dict[tuple[str, str | None], Decimal]:
+    """Траты за месяц по ключам sum_by_keys."""
+    return sum_by_keys(await spending_rows(session, chat, month))
 
 
 @dataclass
