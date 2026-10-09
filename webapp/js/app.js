@@ -14,7 +14,7 @@ import { tg } from "./telegram.js";
 import { state, ALL_SPACE, isAll } from "./state.js";
 import { escapeHtml } from "./format.js";
 import { api } from "./api.js";
-import { loadVersionBadge, renderShell, renderTab } from "./shell.js";
+import { loadVersionBadge, renderShell, renderTab, ALL_VIEW_TABS } from "./shell.js";
 
 /* ---------------- Инициализация ---------------- */
 
@@ -27,11 +27,14 @@ async function init() {
   if (!state.chatId && tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) {
     state.chatId = tg.initDataUnsafe.start_param;
   }
-  // Кнопка «Другая сумма» под вопросом об обязательном платеже: startapp=<chat_id>_pay —
-  // сразу на вкладку «Лимиты», где платежи месяца.
-  if (state.chatId && state.chatId.endsWith("_pay")) {
-    state.chatId = state.chatId.slice(0, -"_pay".length);
-    state.tab = "budgets";
+  // Кнопка «Другая сумма» под вопросом бота: startapp=<chat_id>_pay — сразу на вкладку
+  // «Лимиты» (платежи месяца), <chat_id>_income — на «Доходы».
+  const START_TABS = { _pay: "budgets", _income: "income" };
+  for (const [suffix, tab] of Object.entries(START_TABS)) {
+    if (state.chatId && state.chatId.endsWith(suffix)) {
+      state.chatId = state.chatId.slice(0, -suffix.length);
+      state.tab = tab;
+    }
   }
   state.initData = tg ? tg.initData : "";
 
@@ -89,7 +92,7 @@ async function loadMeAndRender() {
     state.chat = { id: ALL_SPACE, title: "Все траты", currency: state.personalCurrency, is_personal: false };
     state.member = null;
     state.members = [];
-    if (!["stats", "budgets"].includes(state.tab)) state.tab = "expenses";
+    if (!ALL_VIEW_TABS.includes(state.tab)) state.tab = "expenses";
     renderShell({ onSwitchSpace: switchSpace });
     loadVersionBadge();
     await renderTab();
@@ -102,6 +105,7 @@ async function loadMeAndRender() {
     state.members = me.members;
     state.categories = me.categories;
     if (state.chat.is_personal && state.tab === "balance") state.tab = "expenses";
+    if (!state.chat.is_personal && state.tab === "income") state.tab = "expenses";
     renderShell({ onSwitchSpace: switchSpace });
     loadVersionBadge(); // не блокирует основной рендер — бейдж в углу подтянется чуть позже
     await renderTab();

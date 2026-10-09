@@ -1,4 +1,5 @@
 """Быстрый ввод трат текстом в личке с ботом: «кофе 250», «винлаб 1 800», «такси 350 вчера».
+Плюс перед суммой — доход: «+120000 зарплата», «аванс +40к».
 
 Каждая строка сообщения — отдельная трата в «Моих финансах». Категория подбирается так же,
 как в форме (app/shared/autocategory.py): выученное по прошлым тратам или словарь магазинов.
@@ -32,6 +33,7 @@ class ParsedExpense:
     title: str
     amount: Decimal
     date: dt.date
+    is_income: bool = False
 
 
 def parse_line(line: str, today: dt.date) -> ParsedExpense | None:
@@ -54,7 +56,11 @@ def parse_line(line: str, today: dt.date) -> ParsedExpense | None:
     if amount <= 0:
         return None
 
-    rest = (text[: match.start()] + " " + text[match.end():]).strip()
+    before = text[: match.start()].rstrip()
+    is_income = before.endswith("+")
+    if is_income:
+        before = before[:-1]
+    rest = (before + " " + text[match.end():]).strip()
     date = today
     words = []
     for word in rest.split():
@@ -63,8 +69,13 @@ def parse_line(line: str, today: dt.date) -> ParsedExpense | None:
             date = today - dt.timedelta(days=_DAYS_AGO[key])
         else:
             words.append(word)
-    title = " ".join(words).strip(" ,.-—:") or "Трата"
-    return ParsedExpense(title=title[:1].upper() + title[1:255], amount=amount.quantize(Decimal("0.01")), date=date)
+    title = " ".join(words).strip(" ,.-—:+") or ("Доход" if is_income else "Трата")
+    return ParsedExpense(
+        title=title[:1].upper() + title[1:255],
+        amount=amount.quantize(Decimal("0.01")),
+        date=date,
+        is_income=is_income,
+    )
 
 
 def parse_message(text: str, today: dt.date) -> list[ParsedExpense]:

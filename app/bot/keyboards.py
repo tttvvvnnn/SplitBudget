@@ -29,3 +29,16 @@ def payment_keyboard(bot_username: str, payment_id: int, chat_id: int) -> Inline
             [InlineKeyboardButton(text="✏️ Другая сумма", url=url)],
         ]
     )
+
+
+def buttons_keyboard(
+    bot_username: str, rows: list[list[tuple[str, str]]], app_param: str | None = None
+) -> InlineKeyboardMarkup:
+    """Ряды callback-кнопок (текст, callback_data) и, если задан app_param, кнопка
+    «✏️ Другая сумма», открывающая мини-апп с этим startapp-параметром."""
+    keyboard = [[InlineKeyboardButton(text=t, callback_data=d) for t, d in row] for row in rows]
+    if app_param:
+        keyboard.append(
+            [InlineKeyboardButton(text="✏️ Другая сумма", url=f"https://t.me/{bot_username}?startapp={app_param}")]
+        )
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)

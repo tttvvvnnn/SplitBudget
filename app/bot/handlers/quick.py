@@ -18,7 +18,8 @@ from app.shared.budgets import alerts_after_expense
 from app.shared.categories import CATEGORY_TREE
 from app.shared.crud import get_or_create_personal_space
 from app.shared.database import async_session_maker
-from app.shared.models import Chat, Expense, Member
+from app.shared.income import record_income
+from app.shared.models import Chat, Expense, Income, Member
 from app.shared.quick_entry import add_personal_expense, move_to_family, parse_message
 
 logger = logging.getLogger(__name__)
@@ -27,7 +28,8 @@ router = Router(name="quick")
 HELP = (
     "Чтобы записать трату, напишите название и сумму, например:\n"
     "<code>кофе 250</code>\n<code>винлаб 1 800</code>\n<code>такси 350 вчера</code>\n"
-    "Можно несколько трат — каждую с новой строки."
+    "Доход — с плюсом: <code>+120000 зарплата</code>\n"
+    "Можно несколько записей — каждую с новой строки."
 )
 MAX_FAMILY_BUTTONS = 3
 
@@ -98,33 +100,42 @@ async def quick_expense(message: Message) -> None:
     user = message.from_user
     async with async_session_maker() as session:
         chat, member = await get_or_create_personal_space(session, user.id, user.username, user.full_name)
-        expenses = [await add_personal_expense(session, chat, member, p) for p in parsed]
+        expenses = [await add_personal_expense(session, chat, member, p) for p in parsed if not p.is_income]
+        incomes = [
+            await record_income(session, chat, p.title, p.amount, p.date) for p in parsed if p.is_income
+        ]
         await session.commit()
         family = await _family_chats(session, user.id)
 
-        if len(expenses) == 1:
+        if len(expenses) == 1 and not incomes:
             expense = expenses[0]
             await message.answer(
                 f"✅ Записал в «Мои финансы»\n{_line(expense, chat.currency)}",
                 reply_markup=_single_markup(expense.id, family),
             )
         else:
-            total = sum((e.amount for e in expenses), Decimal("0"))
-            lines = "\n".join(_line(e, chat.currency) for e in expenses)
+            parts = []
+            if expenses:
+                total = sum((e.amount for e in expenses), Decimal("0"))
+                parts.append(f"✅ Записал {len(expenses)} трат на {_money(total, chat.currency)}")
+                parts.append("\n".join(_line(e, chat.currency) for e in expenses))
+            if incomes:
+                parts.append("\n".join(
+                    f"💰 Доход: {escape(i.title)} — <b>+{_money(i.amount, chat.currency)}</b>" for i in incomes
+                ))
+            first_e, last_e = (expenses[0].id, expenses[-1].id) if expenses else (0, 0)
+            first_i, last_i = (incomes[0].id, incomes[-1].id) if incomes else (0, 0)
             markup = InlineKeyboardMarkup(
                 inline_keyboard=[
                     [
                         InlineKeyboardButton(
-                            text="↩️ Отменить все",
-                            callback_data=f"qe:undoall:{expenses[0].id}:{expenses[-1].id}",
+                            text="↩️ Отменить" if len(expenses) + len(incomes) == 1 else "↩️ Отменить все",
+                            callback_data=f"qe:undoall:{first_e}:{last_e}:{first_i}:{last_i}",
                         )
                     ]
                 ]
             )
-            await message.answer(
-                f"✅ Записал в «Мои финансы» {len(expenses)} трат на {_money(total, chat.currency)}\n\n{lines}",
-                reply_markup=markup,
-            )
+            await message.answer("\n\n".join(parts), reply_markup=markup)
 
         alerts = []
         for expense in expenses:
@@ -188,17 +199,22 @@ async def on_quick_button(callback: CallbackQuery) -> None:
         personal = await session.get(Chat, callback.from_user.id)
         currency = personal.currency if personal else ""
 
-        if action == "undoall" and len(nums) == 2:
-            result = await session.execute(
-                select(Expense).where(
-                    Expense.chat_id == callback.from_user.id, Expense.id >= nums[0], Expense.id <= nums[1]
+        if action == "undoall" and len(nums) in (2, 4):
+            removed = 0
+            ranges = [(Expense, Expense.id, nums[0], nums[1])]
+            if len(nums) == 4:
+                ranges.append((Income, Income.id, nums[2], nums[3]))
+            for model, column, first, last in ranges:
+                if not first:
+                    continue
+                result = await session.execute(
+                    select(model).where(model.chat_id == callback.from_user.id, column >= first, column <= last)
                 )
-            )
-            removed = result.scalars().all()
-            for expense in removed:
-                await session.delete(expense)
+                for row in result.scalars().all():
+                    await session.delete(row)
+                    removed += 1
             await session.commit()
-            await _edit(callback, f"↩️ Отменил {len(removed)} трат")
+            await _edit(callback, f"↩️ Отменил записей: {removed}")
             await callback.answer()
             return
 

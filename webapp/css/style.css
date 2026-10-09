@@ -954,3 +954,30 @@ html, body {
 .ob-status.paid { color: var(--success); }
 .ob-status.soon { color: #ff9500; }
 .ob-status.overdue { color: var(--danger); }
+
+/* Вкладка «Доходы» (tabs/income.js) */
+.free-card { padding: 14px; margin-bottom: 16px; }
+.free-amount { font-size: 28px; font-weight: 700; margin: 2px 0 10px; }
+.free-amount.negative,
+.free-per-day.negative { color: var(--danger); }
+.free-rows > div {
+  display: flex;
+  justify-content: space-between;
+  font-size: 14px;
+  padding: 3px 0;
+}
+.free-next {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  font-size: 14px;
+}
+.free-per-day { font-size: 18px; font-weight: 600; margin: 4px 0 2px; color: var(--success); }
+.income-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  cursor: pointer;
+}
+.income-plus { color: var(--success); }

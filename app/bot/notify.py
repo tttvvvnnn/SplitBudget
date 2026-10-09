@@ -6,7 +6,7 @@ import logging
 from decimal import Decimal
 
 from app.bot.bot_instance import bot
-from app.bot.keyboards import payment_keyboard
+from app.bot.keyboards import buttons_keyboard, payment_keyboard
 from app.shared.models import Chat, Member
 from app.shared.obligations import Notice
 
@@ -103,6 +103,8 @@ async def notify_obligations(notices: list[Notice]) -> None:
         markup = None
         if notice.ask_payment_id is not None:
             markup = payment_keyboard(me.username, notice.ask_payment_id, notice.chat_link_id or notice.chat_id)
+        elif notice.buttons:
+            markup = buttons_keyboard(me.username, notice.buttons, notice.app_param)
         try:
             await bot.send_message(notice.chat_id, notice.text, reply_markup=markup)
         except Exception:  # noqa: BLE001

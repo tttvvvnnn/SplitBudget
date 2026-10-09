@@ -322,3 +322,55 @@ class StatsOut(BaseModel):
     period: str
     total: Decimal
     by_category: list[CategoryStat]
+
+
+class IncomeIn(BaseModel):
+    title: str = Field(default="Доход", max_length=255)
+    amount: Decimal = Field(gt=0)
+    income_date: dt.date | None = None  # по умолчанию — сегодня
+    source_id: int | None = None
+
+
+class IncomeOut(BaseModel):
+    id: int
+    title: str
+    amount: Decimal
+    income_date: dt.date
+    source_id: int | None
+
+    model_config = {"from_attributes": True}
+
+
+class IncomeSourceIn(BaseModel):
+    title: str = Field(min_length=1, max_length=255)
+    amount: Decimal = Field(gt=0)
+    day_of_month: int = Field(ge=1, le=28)
+    is_active: bool = True
+
+
+class IncomeSourceOut(BaseModel):
+    id: int
+    title: str
+    amount: Decimal
+    day_of_month: int
+    is_active: bool
+    date: dt.date | None = None  # дата в запрошенном месяце
+    received: bool = False
+
+    model_config = {"from_attributes": True}
+
+
+class IncomeSummaryOut(BaseModel):
+    incomes: list[IncomeOut]
+    sources: list[IncomeSourceOut]
+    received: Decimal
+    expected: Decimal
+    spent: Decimal
+    obligations_pending: Decimal
+    free: Decimal
+    next_title: str | None
+    next_date: dt.date | None
+    next_amount: Decimal | None
+    days_to_next: int | None
+    obligations_before_next: Decimal
+    per_day: Decimal | None
