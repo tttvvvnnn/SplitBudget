@@ -23,7 +23,7 @@ from app.bot.notify import notify_budget_alerts, notify_new_expense
 from app.shared.autocategory import learn_category
 from app.shared.budgets import alerts_after_expense
 from app.shared.categories import CATEGORY_TREE
-from app.shared.crud import get_or_create_member, get_or_create_personal_space
+from app.shared.crud import family_chats_of, get_or_create_member, get_or_create_personal_space
 from app.shared.database import async_session_maker
 from app.shared.income import record_income
 from app.shared.models import Chat, Expense, Income, Member
@@ -94,13 +94,7 @@ def _single_markup(expense_id: int, family_chats: list[Chat]) -> InlineKeyboardM
 
 
 async def _family_chats(session, tg_user_id: int) -> list[Chat]:
-    result = await session.execute(
-        select(Chat)
-        .join(Member, Member.chat_id == Chat.id)
-        .where(Member.tg_user_id == tg_user_id, Member.is_active.is_(True), Chat.is_personal.is_(False))
-        .order_by(Chat.id)
-    )
-    return list(result.scalars().all())
+    return await family_chats_of(session, tg_user_id)
 
 
 @router.message(F.chat.type == "private", F.text, ~F.text.startswith("/"))
@@ -392,6 +386,7 @@ async def on_group_choice(callback: CallbackQuery) -> None:
         if action == "split":
             chat = await session.get(Chat, callback.message.chat.id)
             payer = await get_or_create_member(session, chat.id, user.id, user.username, user.full_name)
+            payer.is_hidden = False  # снова пользуется чатом — вернуть его в список
             members = await active_members(session, chat.id) or [payer]
         else:
             chat, payer = await get_or_create_personal_space(session, user.id, user.username, user.full_name)

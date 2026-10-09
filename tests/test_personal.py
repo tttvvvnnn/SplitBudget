@@ -82,3 +82,30 @@ def test_no_manual_members_in_personal_space(client, auth_header):
     chat_id = client.get("/api/personal", headers=headers).json()["id"]
     r = client.post(f"/api/chats/{chat_id}/members", headers=headers, json={"full_name": "Бабушка"})
     assert r.status_code == 400
+
+
+def test_hide_and_unhide_family_chat(client, seeded_chat, auth_header):
+    alice = auth_header(seeded_chat.alice_init_data)
+    bob = auth_header(seeded_chat.bob_init_data)
+    chat_id = seeded_chat.chat_id
+    client.get("/api/personal", headers=alice)
+
+    r = client.post(f"/api/chats/{chat_id}/hide", headers=alice)
+    assert r.status_code == 204, r.text
+    assert client.get("/api/my-chats", headers=alice).json() == []
+    assert [c["id"] for c in client.get("/api/my-chats?hidden=true", headers=alice).json()] == [chat_id]
+    # Только для Алисы: у Боба чат на месте, сам чат по-прежнему открывается
+    assert [c["id"] for c in client.get("/api/my-chats", headers=bob).json()] == [chat_id]
+    assert client.get(f"/api/chats/{chat_id}/me", headers=alice).status_code == 200
+
+    r = client.post(f"/api/chats/{chat_id}/unhide", headers=alice)
+    assert r.status_code == 204, r.text
+    assert [c["id"] for c in client.get("/api/my-chats", headers=alice).json()] == [chat_id]
+    assert client.get("/api/my-chats?hidden=true", headers=alice).json() == []
+
+
+def test_personal_space_cannot_be_hidden(client, auth_header):
+    tg_id = PERSONAL_TG_ID + 4
+    headers = auth_header(_init(tg_id))
+    chat_id = client.get("/api/personal", headers=headers).json()["id"]
+    assert client.post(f"/api/chats/{chat_id}/hide", headers=headers).status_code == 400

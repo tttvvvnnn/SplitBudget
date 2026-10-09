@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.auth import get_current_user
 from app.api.dependencies import ChatContext, get_chat_context
 from app.shared.categories import CATEGORY_NAMES, category_tree_out
-from app.shared.crud import get_or_create_personal_space
+from app.shared.crud import family_chats_of, get_or_create_personal_space
 from app.shared.database import get_session
 from app.shared.models import (
     Chat,
@@ -26,21 +26,26 @@ router = APIRouter(tags=["chats"])
 
 @router.get("/my-chats", response_model=list[ChatOut])
 async def my_chats(
-    user: dict = Depends(get_current_user), session: AsyncSession = Depends(get_session)
+    hidden: bool = False, user: dict = Depends(get_current_user), session: AsyncSession = Depends(get_session)
 ) -> list[Chat]:
-    """Список семейных чатов, где пользователь уже известен боту — используется, когда
-    приложение открыто без явного chat_id (например, через кнопку меню бота в личке)."""
-    tg_user_id = int(user["id"])
-    result = await session.execute(
-        select(Member.chat_id).where(Member.tg_user_id == tg_user_id, Member.is_active.is_(True))
-    )
-    chat_ids = [row[0] for row in result.all()]
-    if not chat_ids:
-        return []
-    chats_result = await session.execute(
-        select(Chat).where(Chat.id.in_(chat_ids), Chat.is_personal.is_(False))
-    )
-    return list(chats_result.scalars().all())
+    """Семейные чаты пользователя для переключателя в шапке (hidden=true — те, что он
+    убрал из списка, для экрана «Скрытые чаты»)."""
+    return await family_chats_of(session, int(user["id"]), hidden=hidden)
+
+
+@router.post("/chats/{chat_id}/hide", status_code=204)
+async def hide_chat(ctx: ChatContext = Depends(get_chat_context)):
+    """Убрать чат из своего списка. Только для себя: чат, траты и долги остаются как есть."""
+    if ctx.chat.is_personal:
+        raise HTTPException(status_code=400, detail="«Мои финансы» убрать нельзя")
+    ctx.member.is_hidden = True
+    await ctx.session.commit()
+
+
+@router.post("/chats/{chat_id}/unhide", status_code=204)
+async def unhide_chat(ctx: ChatContext = Depends(get_chat_context)):
+    ctx.member.is_hidden = False
+    await ctx.session.commit()
 
 
 @router.get("/personal", response_model=ChatOut)

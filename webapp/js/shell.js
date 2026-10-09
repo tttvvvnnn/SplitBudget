@@ -1,5 +1,7 @@
 import { state, ALL_SPACE, isAll, isPersonal } from "./state.js";
-import { haptic } from "./telegram.js";
+import { haptic, toast, confirmAction } from "./telegram.js";
+import { api } from "./api.js";
+import { openSheet, closeSheet } from "./sheet.js";
 import { escapeHtml } from "./format.js";
 import { memberLabel } from "./members.js";
 import { renderExpensesTab, openExpenseModal } from "./tabs/expenses.js";
@@ -64,11 +66,66 @@ function spaceSwitcherHtml() {
     { id: state.personalChatId, label: "👤 Мои финансы" },
     ...state.familyChats.map((c) => ({ id: c.id, label: `🏠 ${c.title || c.id}` })),
   ].filter((s) => s.id !== null);
-  if (spaces.length < 2) return "";
+  const hidden = state.hiddenChats.length
+    ? `<button id="hidden-chats" class="hidden-chip">🙈 Скрытые · ${state.hiddenChats.length}</button>`
+    : "";
+  if (spaces.length < 2 && !hidden) return "";
   return `
     <div class="space-switcher">
       ${spaces.map((s) => `<button data-space="${s.id}" class="${String(s.id) === String(state.chatId) ? "active" : ""}">${escapeHtml(s.label)}</button>`).join("")}
+      ${hidden}
     </div>`;
+}
+
+/* «Убрать из списка» — одноразовый чат с друзьями больше не мешает в шапке. Только для
+   себя: у остальных участников чат на месте, траты и долги не трогаются. */
+async function hideCurrentChat(onSwitchSpace) {
+  const chat = state.chat;
+  const ok = await confirmAction(
+    `Убрать «${chat.title || chat.id}» из списка? Чат пропадёт только у вас, траты и долги останутся. ` +
+    "Вернуть можно в «🙈 Скрытые» или открыв приложение из этого чата."
+  );
+  if (!ok) return;
+  try {
+    await api(`/chats/${chat.id}/hide`, { method: "POST" });
+  } catch (e) {
+    toast(e.message);
+    return;
+  }
+  haptic("notification", "success");
+  state.familyChats = state.familyChats.filter((c) => String(c.id) !== String(chat.id));
+  state.hiddenChats = [...state.hiddenChats, { id: chat.id, title: chat.title, currency: chat.currency, is_personal: false }];
+  if (onSwitchSpace) await onSwitchSpace(ALL_SPACE);
+}
+
+/* Шторка со скрытыми чатами: открыть или вернуть в шапку. */
+function openHiddenChats(onSwitchSpace) {
+  const overlay = openSheet(`
+    <div class="sheet-title">Скрытые чаты</div>
+    <div class="hint-text" style="margin: 0 0 12px;">Их не видно в шапке. Траты и долги в них сохранены.</div>
+    ${state.hiddenChats.map((c) => `
+      <div class="hidden-chat-row">
+        <span>🏠 ${escapeHtml(c.title || String(c.id))}</span>
+        <button class="btn small secondary" data-unhide="${c.id}">Вернуть</button>
+      </div>`).join("")}`);
+  overlay.querySelectorAll("[data-unhide]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = btn.dataset.unhide;
+      btn.disabled = true;
+      try {
+        await api(`/chats/${id}/unhide`, { method: "POST" });
+      } catch (e) {
+        toast(e.message);
+        btn.disabled = false;
+        return;
+      }
+      const chat = state.hiddenChats.find((c) => String(c.id) === id);
+      state.hiddenChats = state.hiddenChats.filter((c) => c !== chat);
+      state.familyChats = [...state.familyChats, chat];
+      closeSheet(overlay);
+      if (onSwitchSpace) await onSwitchSpace(chat.id);
+    });
+  });
 }
 
 function renderShell({ onSwitchSpace } = {}) {
@@ -80,7 +137,8 @@ function renderShell({ onSwitchSpace } = {}) {
   let sub;
   if (isAll()) sub = "Личные + ваша доля в семейных · видно только вам";
   else if (isPersonal()) sub = `Видно только вам · Валюта: ${escapeHtml(state.chat.currency)}`;
-  else sub = `Валюта: ${escapeHtml(state.chat.currency)} · Вы: ${escapeHtml(memberLabel(state.member.id))}`;
+  else sub = `Валюта: ${escapeHtml(state.chat.currency)} · Вы: ${escapeHtml(memberLabel(state.member.id))}`
+    + ` · <button class="link-btn inline" id="hide-chat">Убрать из списка</button>`;
   app.innerHTML = `
     <div class="header">
       <h1>${escapeHtml(state.chat.title || "Семейные траты")}</h1>
@@ -96,12 +154,17 @@ function renderShell({ onSwitchSpace } = {}) {
         </button>`).join("")}
     </div>`;
 
-  app.querySelectorAll(".space-switcher button").forEach((btn) => {
+  app.querySelectorAll(".space-switcher button[data-space]").forEach((btn) => {
     btn.addEventListener("click", () => {
       haptic("selection");
       if (onSwitchSpace) onSwitchSpace(btn.dataset.space);
     });
   });
+
+  const hideBtn = document.getElementById("hide-chat");
+  if (hideBtn) hideBtn.addEventListener("click", () => hideCurrentChat(onSwitchSpace));
+  const hiddenBtn = document.getElementById("hidden-chats");
+  if (hiddenBtn) hiddenBtn.addEventListener("click", () => { haptic("selection"); openHiddenChats(onSwitchSpace); });
 
   app.querySelectorAll(".tabbar button").forEach((btn) => {
     btn.addEventListener("click", () => switchTab(btn.dataset.tab));

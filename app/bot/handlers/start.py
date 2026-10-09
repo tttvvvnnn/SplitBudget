@@ -9,14 +9,12 @@ from aiogram.types import (
     Message,
     WebAppInfo,
 )
-from sqlalchemy import select
 
 from app.bot.avatars import sync_member_avatar
 from app.bot.keyboards import open_app_keyboard_group
 from app.shared.config import settings
-from app.shared.crud import deactivate_member, get_or_create_chat, get_or_create_member
+from app.shared.crud import deactivate_member, family_chats_of, get_or_create_chat, get_or_create_member
 from app.shared.database import async_session_maker
-from app.shared.models import Chat, Member
 
 router = Router(name="start")
 
@@ -84,16 +82,7 @@ async def start_in_private(message: Message) -> None:
     if not message.from_user:
         return
     async with async_session_maker() as session:
-        result = await session.execute(
-            select(Chat)
-            .join(Member, Member.chat_id == Chat.id)
-            .where(
-                Member.tg_user_id == message.from_user.id,
-                Member.is_active.is_(True),
-                Chat.is_personal.is_(False),
-            )
-        )
-        family_chats = result.scalars().all()
+        family_chats = await family_chats_of(session, message.from_user.id)
 
     buttons = [
         [
