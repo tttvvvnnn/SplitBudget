@@ -307,3 +307,15 @@ class IncomeAsk(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     source_id: Mapped[int] = mapped_column(ForeignKey("income_sources.id", ondelete="CASCADE"))
     month: Mapped[str] = mapped_column(String(7))
+
+
+class MonthlyReport(Base):
+    """Итоги месяца уже отправлены в этот чат — второй раз не шлём."""
+
+    __tablename__ = "monthly_reports"
+    __table_args__ = (UniqueConstraint("chat_id", "month", name="uq_monthly_report"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[int] = mapped_column(ForeignKey("chats.id", ondelete="CASCADE"))
+    month: Mapped[str] = mapped_column(String(7))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)

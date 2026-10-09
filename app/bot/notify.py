@@ -69,6 +69,11 @@ async def notify_settlement(chat: Chat, from_member: Member, to_member: Member, 
     await _send(chat, text)
 
 
+async def send_texts(messages: list[tuple[int, str]]) -> None:
+    """Просто тексты по чатам (итоги месяца и т.п.), включая личку владельцу «Моих финансов»."""
+    await notify_budget_alerts(messages)
+
+
 async def notify_budget_alerts(alerts: list[tuple[int, str]]) -> None:
     """Уведомления о лимитах (см. app/shared/budgets.alerts_after_expense). Шлём и в личку
     владельцу «Моих финансов» — в отличие от _send, личное пространство тут не пропускаем.
