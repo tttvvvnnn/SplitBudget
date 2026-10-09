@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 
 from app.bot.bot_instance import bot, dp
-from app.bot.handlers import payments, start
+from app.bot.handlers import payments, quick, start
 from app.bot.middlewares import MemberTrackingMiddleware
 
 logger = logging.getLogger(__name__)
@@ -19,6 +19,8 @@ def configure_dispatcher() -> None:
     dp.update.outer_middleware(MemberTrackingMiddleware())
     dp.include_router(start.router)
     dp.include_router(payments.router)
+    # Последним: ловит любой текст в личке (быстрый ввод трат)
+    dp.include_router(quick.router)
     _configured = True
 
 
