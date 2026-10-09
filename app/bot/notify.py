@@ -1,12 +1,14 @@
-"""Отправка уведомлений в семейный чат: о новой трате, о погашении долга, о сгенерированной
-повторяющейся трате. Вызывается как из бота, так и из API (в одном процессе с ботом)."""
+"""Отправка уведомлений в семейный чат: о новой трате, о погашении долга, о лимитах и
+обязательных платежах. Вызывается как из бота, так и из API (в одном процессе с ботом)."""
 from __future__ import annotations
 
 import logging
 from decimal import Decimal
 
 from app.bot.bot_instance import bot
+from app.bot.keyboards import payment_keyboard
 from app.shared.models import Chat, Member
+from app.shared.obligations import Notice
 
 logger = logging.getLogger(__name__)
 
@@ -78,11 +80,30 @@ async def notify_budget_alerts(alerts: list[tuple[int, str]]) -> None:
             logger.warning("Не удалось отправить уведомление о лимите в чат %s", chat_id, exc_info=True)
 
 
-async def notify_recurring_generated(
-    chat: Chat, title: str, amount: Decimal, payer: Member
+async def notify_payment_marked(
+    chat: Chat, title: str, amount: Decimal | None, actor: Member, paid: bool
 ) -> None:
-    text = (
-        f"🔁 Автоматически добавлена повторяющаяся трата «{title}» на сумму "
-        f"{_fmt(amount, chat.currency)} (оплатил(а) {_member_label(payer)})"
-    )
-    await _send(chat, text)
+    if not paid:
+        return
+    amount_text = f" — {_fmt(amount, chat.currency)}" if amount is not None else ""
+    await _send(chat, f"✅ {_member_label(actor)} отметил(а) оплату «{title}»{amount_text}")
+
+
+async def notify_obligations(notices: list[Notice]) -> None:
+    """Напоминания об обязательных платежах и вопрос «Оплачено?» с кнопками (см.
+    app/shared/obligations.due_notices). Для «Моих финансов» пишем в личку владельцу."""
+    if not notices:
+        return
+    try:
+        me = await bot.get_me()
+    except Exception:  # noqa: BLE001
+        logger.warning("Не удалось получить имя бота", exc_info=True)
+        return
+    for notice in notices:
+        markup = None
+        if notice.ask_payment_id is not None:
+            markup = payment_keyboard(me.username, notice.ask_payment_id, notice.chat_link_id or notice.chat_id)
+        try:
+            await bot.send_message(notice.chat_id, notice.text, reply_markup=markup)
+        except Exception:  # noqa: BLE001
+            logger.warning("Не удалось отправить напоминание о платеже в чат %s", notice.chat_id, exc_info=True)

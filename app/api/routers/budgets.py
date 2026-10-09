@@ -1,11 +1,14 @@
 """Месячные лимиты трат пространства (семейного чата или «Моих финансов»)."""
 from __future__ import annotations
 
+import datetime as dt
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import delete, select
 
 from app.api.dependencies import ChatContext, get_chat_context
 from app.shared.budgets import budget_label, budgets_status, month_range
+from app.shared import obligations as ob
 from app.shared.models import Budget, BudgetAlert
 from app.shared.schemas import BudgetIn, BudgetOut
 
@@ -19,6 +22,11 @@ async def list_budgets(month: str, ctx: ChatContext = Depends(get_chat_context))
     except (ValueError, IndexError) as exc:
         raise HTTPException(status_code=400, detail="month должен быть в формате YYYY-MM") from exc
     statuses = await budgets_status(ctx.session, ctx.chat, month)
+    # Неоплаченные обязательные платежи резервируют деньги в лимитах текущего и будущих месяцев
+    reserved: dict = {}
+    if statuses and month >= dt.date.today().strftime("%Y-%m"):
+        reserved = ob.reserved(await ob.obligations(ctx.session, ctx.chat, month))
+        await ctx.session.commit()
     # Сначала общий лимит месяца, дальше категории по алфавиту, внутри — сама категория раньше подкатегорий
     statuses.sort(key=lambda s: (s.budget.category != "", s.budget.category, s.budget.subcategory or ""))
     return [
@@ -28,6 +36,7 @@ async def list_budgets(month: str, ctx: ChatContext = Depends(get_chat_context))
             subcategory=s.budget.subcategory,
             amount=s.budget.amount,
             spent=s.spent,
+            reserved=reserved.get((s.budget.category, s.budget.subcategory), 0),
             label=budget_label(s.budget),
         )
         for s in statuses
