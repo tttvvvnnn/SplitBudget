@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 
 from app.bot.bot_instance import bot, dp
-from app.bot.handlers import start
+from app.bot.handlers import payments, start
 from app.bot.middlewares import MemberTrackingMiddleware
 
 logger = logging.getLogger(__name__)
@@ -18,6 +18,7 @@ def configure_dispatcher() -> None:
         return
     dp.update.outer_middleware(MemberTrackingMiddleware())
     dp.include_router(start.router)
+    dp.include_router(payments.router)
     _configured = True
 
 

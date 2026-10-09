@@ -523,6 +523,7 @@ html, body {
 .field input[type=text],
 .field input[type=number],
 .field input[type=date],
+.field input[type=month],
 .field select,
 .field textarea {
   width: 100%;
@@ -545,7 +546,8 @@ html, body {
   text-overflow: ellipsis;
 }
 
-.field input[type=date] {
+.field input[type=date],
+.field input[type=month] {
   /* Прошлая попытка (скрыть ::-webkit-clear-button/::-webkit-inner-spin-button) не
      сработала — на iOS date-инпут вообще не рисует эти псевдоэлементы, это чисто
      Chromium/десктопная история, так что она ни на что не влияла. На iOS Safari/WKWebView
@@ -566,6 +568,7 @@ html, body {
 .field input[type=text]:focus,
 .field input[type=number]:focus,
 .field input[type=date]:focus,
+.field input[type=month]:focus,
 .field select:focus,
 .field textarea:focus {
   outline: none;
@@ -884,11 +887,13 @@ html, body {
 }
 
 .budget-sub {
+  flex-wrap: wrap;
   font-size: 13px;
   margin-top: 6px;
 }
 
 .budget-bar {
+  display: flex;
   height: 8px;
   margin-top: 8px;
   border-radius: 4px;
@@ -898,7 +903,12 @@ html, body {
 
 .budget-fill {
   height: 100%;
-  border-radius: 4px;
+}
+
+/* Неоплаченные обязательные платежи — заштрихованная часть полоски */
+.budget-fill.reserved {
+  background: repeating-linear-gradient(-45deg, #8e8e93 0 4px, transparent 4px 8px);
+  opacity: 0.6;
 }
 
 .budget-fill.ok { background: var(--success); }
@@ -906,3 +916,41 @@ html, body {
 .budget-fill.over { background: var(--danger); }
 .budget-pct.warn { color: #ff9500; }
 .budget-pct.over { color: var(--danger); }
+
+/* Обязательные платежи во вкладке «Лимиты» */
+.obligations-card {
+  padding: 12px 14px 4px;
+  margin-bottom: 16px;
+}
+
+.ob-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+}
+
+.obligation-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.obligation-row:last-child { border-bottom: none; }
+.obligation-row.paid .ob-title,
+.obligation-row.skipped .ob-title { opacity: 0.6; }
+
+.ob-icon { font-size: 22px; width: 28px; text-align: center; }
+.ob-main { flex: 1; min-width: 0; }
+.ob-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ob-right { text-align: right; white-space: nowrap; }
+.ob-amount { font-weight: 600; }
+.ob-status { font-size: 12px; color: var(--hint); }
+.ob-status.paid { color: var(--success); }
+.ob-status.soon { color: #ff9500; }
+.ob-status.overdue { color: var(--danger); }

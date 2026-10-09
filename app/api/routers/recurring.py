@@ -6,7 +6,8 @@ from sqlalchemy import select
 
 from app.api.dependencies import ChatContext, get_chat_context
 from app.shared.crud import build_custom_shares, build_equal_shares
-from app.shared.models import Member, RecurringExpense, RecurringParticipant
+from app.shared.models import Member, RecurringExpense, RecurringParticipant, RecurringPayment
+from app.shared.obligations import due_date_for
 from app.shared.schemas import RecurringCreate, RecurringOut, RecurringParticipantIn, RecurringUpdate
 
 router = APIRouter(tags=["recurring"])
@@ -47,6 +48,9 @@ def _to_out(r: RecurringExpense, participants: list[RecurringParticipant]) -> Re
         split_type=r.split_type,
         day_of_month=r.day_of_month,
         is_active=r.is_active,
+        kind=r.kind,
+        end_month=r.end_month,
+        debt=r.debt,
         participants=[
             RecurringParticipantIn(member_id=p.member_id, custom_amount=p.custom_amount)
             for p in participants
@@ -87,6 +91,9 @@ async def create_recurring(payload: RecurringCreate, ctx: ChatContext = Depends(
         payer_member_id=payload.payer_member_id,
         split_type=payload.split_type,
         day_of_month=payload.day_of_month,
+        kind=payload.kind,
+        end_month=payload.end_month,
+        debt=payload.debt if payload.kind == "card" else None,
         created_by_member_id=ctx.member.id,
     )
     ctx.session.add(recurring)
@@ -126,10 +133,28 @@ async def update_recurring(
         recurring.payer_member_id = payload.payer_member_id
     if payload.split_type is not None:
         recurring.split_type = payload.split_type
-    if payload.day_of_month is not None:
+    if payload.day_of_month is not None and payload.day_of_month != recurring.day_of_month:
         recurring.day_of_month = payload.day_of_month
+        # Перенесли день — ещё не оплаченные платежи переезжают на новую дату
+        pending = await ctx.session.execute(
+            select(RecurringPayment).where(
+                RecurringPayment.recurring_id == recurring.id, RecurringPayment.status == "pending"
+            )
+        )
+        for payment in pending.scalars().all():
+            payment.due_date = due_date_for(recurring, payment.month)
+            payment.reminders_sent = ""
+            payment.asked = False
     if payload.is_active is not None:
         recurring.is_active = payload.is_active
+    if payload.kind is not None:
+        recurring.kind = payload.kind
+    if payload.end_month is not None:
+        recurring.end_month = payload.end_month or None
+    if "debt" in payload.model_fields_set:
+        recurring.debt = payload.debt
+    if recurring.kind != "card":
+        recurring.debt = None
 
     if payload.participants is not None:
         ids = {p.member_id for p in payload.participants} | {recurring.payer_member_id}

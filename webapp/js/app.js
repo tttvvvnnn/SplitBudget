@@ -8,7 +8,7 @@
      sheet.js         — шторки (bottom sheet), нативная MainButton, ошибки форм
      member-modals.js — добавление/переименование/список участников
      shell.js         — шапка, таббар, переключение вкладок, бейдж версии
-     tabs/*.js        — вкладки «Траты», «Баланс», «Статистика», «Повторы» и их формы */
+     tabs/*.js        — вкладки «Траты», «Баланс», «Статистика», «Лимиты», «Платежи» и их формы */
 
 import { tg } from "./telegram.js";
 import { state, ALL_SPACE, isAll } from "./state.js";
@@ -26,6 +26,12 @@ async function init() {
   // через query-параметр, а через initDataUnsafe.start_param.
   if (!state.chatId && tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) {
     state.chatId = tg.initDataUnsafe.start_param;
+  }
+  // Кнопка «Другая сумма» под вопросом об обязательном платеже: startapp=<chat_id>_pay —
+  // сразу на вкладку «Лимиты», где платежи месяца.
+  if (state.chatId && state.chatId.endsWith("_pay")) {
+    state.chatId = state.chatId.slice(0, -"_pay".length);
+    state.tab = "budgets";
   }
   state.initData = tg ? tg.initData : "";
 

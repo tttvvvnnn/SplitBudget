@@ -45,7 +45,7 @@ const TABS = [
   { id: "balance", icon: "⚖️", label: "Баланс" },
   { id: "stats", icon: "📊", label: "Статистика" },
   { id: "budgets", icon: "🎯", label: "Лимиты" },
-  { id: "recurring", icon: "🔁", label: "Повторы" },
+  { id: "recurring", icon: "📌", label: "Платежи" },
 ];
 
 /* Переключатель «📋 Все траты | 👤 Мои финансы | 🏠 семейные чаты» под заголовком. */

@@ -164,6 +164,12 @@ class RecurringExpense(Base):
     payer_member_id: Mapped[int] = mapped_column(ForeignKey("members.id", ondelete="CASCADE"))
     split_type: Mapped[str] = mapped_column(String(16), default="equal")
     day_of_month: Mapped[int] = mapped_column(default=1)  # 1..28
+    # Тип обязательного платежа: rent | loan | card | subscription | other. Платёж по
+    # кредитной карте (card) не считается тратой — покупки по карте записываются отдельно,
+    # он только уменьшает долг по карте (debt).
+    kind: Mapped[str] = mapped_column(String(16), default="other")
+    end_month: Mapped[str | None] = mapped_column(String(7), nullable=True)  # последний платёж, 'YYYY-MM'
+    debt: Mapped[Decimal | None] = mapped_column(MoneyType, nullable=True)  # общий долг по карте
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     last_generated_month: Mapped[str | None] = mapped_column(String(7), nullable=True)  # 'YYYY-MM'
     created_by_member_id: Mapped[int] = mapped_column(ForeignKey("members.id", ondelete="CASCADE"))
@@ -236,3 +242,25 @@ class BudgetAlert(Base):
     month: Mapped[str] = mapped_column(String(7))  # 'YYYY-MM'
     level: Mapped[int] = mapped_column()  # 80 | 100
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class RecurringPayment(Base):
+    """Платёж по шаблону RecurringExpense за конкретный месяц: ждёт оплаты (pending),
+    оплачен (paid — для всего, кроме кредитной карты, создана Expense) или пропущен (skipped).
+    Здесь же отмечаются отправленные напоминания, чтобы не слать их повторно."""
+
+    __tablename__ = "recurring_payments"
+    __table_args__ = (UniqueConstraint("recurring_id", "month", name="uq_recurring_payment_month"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    recurring_id: Mapped[int] = mapped_column(ForeignKey("recurring_expenses.id", ondelete="CASCADE"))
+    month: Mapped[str] = mapped_column(String(7))  # 'YYYY-MM'
+    due_date: Mapped[dt.date] = mapped_column(Date)
+    status: Mapped[str] = mapped_column(String(16), default="pending")  # pending | paid | skipped
+    amount: Mapped[Decimal | None] = mapped_column(MoneyType, nullable=True)  # фактически оплачено
+    expense_id: Mapped[int | None] = mapped_column(
+        ForeignKey("expenses.id", ondelete="SET NULL"), nullable=True
+    )
+    reminders_sent: Mapped[str] = mapped_column(String(32), default="")  # например "7,3"
+    asked: Mapped[bool] = mapped_column(Boolean, default=False)  # спросили «Оплачено?» в день платежа
+    paid_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
