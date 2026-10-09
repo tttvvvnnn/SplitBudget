@@ -90,7 +90,17 @@ class BudgetOut(BaseModel):
     amount: Decimal
     spent: Decimal
     reserved: Decimal = Decimal("0")  # ещё не оплаченные обязательные платежи этого месяца
+    forecast: Decimal | None = None  # прогноз на конец месяца (только текущий месяц, с 5-го числа)
     label: str
+
+
+class ForecastOut(BaseModel):
+    """Прогноз всех трат пространства на конец текущего месяца (app/shared/forecast.py)."""
+
+    month: str
+    spent: Decimal
+    forecast: Decimal
+    days_left: int
 
 
 class CategorySuggestionOut(BaseModel):
@@ -164,7 +174,7 @@ class ExpenseOut(BaseModel):
 
 
 class AllExpenseOut(BaseModel):
-    """Трата в сводке «Все траты»: из какого пространства и какая в ней доля пользователя."""
+    """Трата в «Моих финансах» (личная или семейная с долей пользователя): из какого пространства и какая в ней доля пользователя."""
 
     id: int
     chat_id: int
@@ -415,3 +425,19 @@ class GoalOut(BaseModel):
     months_left: int | None
     monthly_needed: Decimal | None
     deposits: list[GoalDepositOut]
+
+
+class SubscriptionHintOut(BaseModel):
+    """Трата, похожая на подписку (app/shared/subscriptions.py)."""
+
+    keyword: str
+    title: str
+    amount: Decimal
+    category: str
+    subcategory: str | None
+    day_of_month: int
+    months: int
+
+
+class SubscriptionHintAction(BaseModel):
+    keyword: str = Field(min_length=1, max_length=255)

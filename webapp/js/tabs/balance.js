@@ -1,10 +1,11 @@
 import { state } from "../state.js";
 import { api } from "../api.js";
-import { tg, haptic } from "../telegram.js";
+import { tg, haptic, toast } from "../telegram.js";
 import { fmtMoney, escapeHtml } from "../format.js";
 import { loadAvatarsIn, memberLabel, memberInlineHtml } from "../members.js";
 import { openSheet, closeSheet, useMainButtonFor, showFormError } from "../sheet.js";
 import { openManageMembersModal } from "../member-modals.js";
+import { hideCurrentChat } from "../shell.js";
 
 /* ---------------- Вкладка «Баланс» ---------------- */
 
@@ -31,6 +32,7 @@ async function renderBalanceTab() {
             <button class="btn small settle-btn" data-idx="${i}">Погасить</button>
           </div>
         </div>`).join("")}
+    ${debts.length > 0 ? '<button type="button" class="btn secondary small" id="settle-up-btn" style="margin-top:4px;">🤝 Позвать рассчитаться в чат</button>' : ""}
 
     <div class="section-title">Баланс участников</div>
     <div class="card">
@@ -59,6 +61,22 @@ async function renderBalanceTab() {
       openSettleModal(debts[Number(btn.dataset.idx)]);
     });
   });
+  const settleUpBtn = content.querySelector("#settle-up-btn");
+  if (settleUpBtn) {
+    settleUpBtn.addEventListener("click", async () => {
+      haptic("impact", "light");
+      settleUpBtn.disabled = true;
+      try {
+        await api(`/chats/${state.chatId}/settle-up`, { method: "POST" });
+        haptic("notification", "success");
+        const done = "Отправил в чат список переводов с кнопками «Перевёл(а)»";
+        if (tg && tg.showAlert) tg.showAlert(done); else alert(done);
+      } catch (e) {
+        toast(e.message);
+      }
+      settleUpBtn.disabled = false;
+    });
+  }
   content.querySelector("#manage-members-btn").addEventListener("click", () => {
     haptic("impact", "light");
     openManageMembersModal();
@@ -102,6 +120,11 @@ function openSettleModal(debt) {
       haptic("notification", "success");
       closeSheet(overlay);
       await renderBalanceTab();
+      // Долгов не осталось — спрашиваем, нужен ли ещё чат в списке (сами не скрываем:
+      // семейный чат обычно оставляют, разовый с друзьями — убирают)
+      if (state.balances.simplified_debts.length === 0) {
+        await hideCurrentChat(state.switchSpace, "Все в расчёте 🎉 Убрать этот чат из списка?");
+      }
     } catch (e) {
       showFormError(errorEl, e.message);
     } finally {

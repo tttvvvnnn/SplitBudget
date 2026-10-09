@@ -30,8 +30,12 @@ const KIND_CATEGORY = {
 
 async function renderRecurringTab() {
   const content = document.getElementById("content");
+  let hints = [];
   try {
-    state.recurring = await api(`/chats/${state.chatId}/recurring`);
+    [state.recurring, hints] = await Promise.all([
+      api(`/chats/${state.chatId}/recurring`),
+      api(`/chats/${state.chatId}/subscription-hints`).catch(() => []),
+    ]);
   } catch (e) {
     content.innerHTML = `<div class="empty-state">${escapeHtml(e.message)}</div>`;
     return;
@@ -41,6 +45,7 @@ async function renderRecurringTab() {
     <div class="hint-text" style="margin: 8px 4px 14px;">
       За 7, 3 и 1 день до платежа бот напомнит, а в день платежа спросит «Оплачено?»${isPersonal() ? " в личке" : " в чате"}. После подтверждения платёж запишется тратой. Отметить оплату можно и во вкладке «🎯 Лимиты».
     </div>
+    ${hintsHtml(hints)}
     ${state.recurring.length === 0 ? '<div class="empty-state">Обязательных платежей пока нет.<br>Нажмите «+», чтобы добавить аренду, кредит, карту или подписку.</div>' : state.recurring.map((r) => {
       const [icon] = KIND_INFO[r.kind] || KIND_INFO.other;
       const extra = [];
@@ -69,6 +74,42 @@ async function renderRecurringTab() {
       openRecurringModal(r);
     });
   });
+  content.querySelectorAll(".sub-hint button").forEach((b) => {
+    b.addEventListener("click", () => onHintAction(b.dataset.action, b.closest(".sub-hint").dataset.keyword, b));
+  });
+}
+
+/* «Похоже на подписки» — одинаковые траты несколько месяцев подряд
+   (app/shared/subscriptions.py). «Сделать платежом» заводит подписку по образцу последней
+   траты, «Не подписка» — больше не предлагать. */
+function hintsHtml(hints) {
+  if (!hints.length) return "";
+  return `
+    <div class="section-title">🔎 Похоже на подписки</div>
+    ${hints.map((h) => `
+      <div class="card sub-hint" data-keyword="${escapeHtml(h.keyword)}">
+        <div class="sub-hint-main">
+          <div class="expense-title">${escapeHtml(h.title)} · ${fmtMoney(h.amount)}</div>
+          <div class="expense-meta">${h.months} мес. подряд · будет ${h.day_of_month}-го числа</div>
+        </div>
+        <div class="sub-hint-actions">
+          <button class="btn small" data-action="accept">📌 Сделать платежом</button>
+          <button class="btn small secondary" data-action="dismiss">Не подписка</button>
+        </div>
+      </div>`).join("")}`;
+}
+
+async function onHintAction(action, keyword, button) {
+  button.disabled = true;
+  try {
+    await api(`/chats/${state.chatId}/subscription-hints/${action}`, { method: "POST", body: { keyword } });
+    haptic("notification", "success");
+  } catch (e) {
+    button.disabled = false;
+    toast(e.message);
+    return;
+  }
+  await renderRecurringTab();
 }
 
 function monthShort(ym) {

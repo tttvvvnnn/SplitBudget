@@ -11,10 +11,10 @@
      tabs/*.js        — вкладки «Траты», «Баланс», «Статистика», «Лимиты», «Платежи» и их формы */
 
 import { tg } from "./telegram.js";
-import { state, ALL_SPACE, isAll } from "./state.js";
+import { state } from "./state.js";
 import { escapeHtml } from "./format.js";
 import { api } from "./api.js";
-import { loadVersionBadge, renderShell, renderTab, ALL_VIEW_TABS, PERSONAL_ONLY_TABS } from "./shell.js";
+import { loadVersionBadge, renderShell, renderTab, PERSONAL_ONLY_TABS } from "./shell.js";
 
 /* ---------------- Инициализация ---------------- */
 
@@ -50,8 +50,7 @@ async function init() {
   }
 
   // Личное пространство и семейные чаты нужны всегда — для переключателя в шапке. Без
-  // chat_id (кнопка меню бота) открываем сводку «Все траты», по кнопке «Мои финансы» в
-  // личке (?space=personal) — личное пространство.
+  // chat_id (кнопка меню бота, «Мои финансы» в личке) открываем «Мои финансы».
   try {
     const [personal, chats, hidden, tree] = await Promise.all([
       api("/personal"), api("/my-chats"), api("/my-chats?hidden=true"), api("/categories"),
@@ -65,14 +64,16 @@ async function init() {
     renderError(e.message);
     return;
   }
-  if (params.get("space") === "personal") state.chatId = state.personalChatId;
-  else if (!state.chatId) state.chatId = ALL_SPACE;
+  // chat_id=all — старые ссылки на бывшую сводку «Все траты», теперь это «Мои финансы»
+  if (params.get("space") === "personal" || !state.chatId || state.chatId === "all") {
+    state.chatId = state.personalChatId;
+  }
   state.switchSpace = switchSpace;
 
   await loadMeAndRender();
 }
 
-/* Переключение между «Все траты», «Мои финансы» и семейными чатами из шапки. */
+/* Переключение между «Моими финансами» и семейными чатами из шапки. */
 async function switchSpace(chatId) {
   if (String(chatId) === String(state.chatId)) return;
   state.chatId = chatId;
@@ -90,17 +91,6 @@ function renderError(message) {
 }
 
 async function loadMeAndRender() {
-  if (isAll()) {
-    // Сводка не привязана к одному чату: участников и плательщиков тут нет, валюта — личная.
-    state.chat = { id: ALL_SPACE, title: "Все траты", currency: state.personalCurrency, is_personal: false };
-    state.member = null;
-    state.members = [];
-    if (!ALL_VIEW_TABS.includes(state.tab)) state.tab = "expenses";
-    renderShell({ onSwitchSpace: switchSpace });
-    loadVersionBadge();
-    await renderTab();
-    return;
-  }
   try {
     const me = await api(`/chats/${state.chatId}/me`);
     state.chat = me.chat;

@@ -1,4 +1,4 @@
-import { state, isAll, isPersonal } from "../state.js";
+import { state, isPersonal } from "../state.js";
 import { api } from "../api.js";
 import { tg, haptic, toast, confirmAction } from "../telegram.js";
 import { categoryIcon, monthLabel, shiftMonth, todayMonth, fmtMoney, escapeHtml } from "../format.js";
@@ -7,31 +7,31 @@ import { KIND_INFO } from "./recurring.js";
 
 /* ---------------- Вкладка «Лимиты» ----------------
    Месячные лимиты на весь месяц, категорию или подкатегорию (app/shared/budgets.py). В
-   семейном чате — общие лимиты чата по полным суммам трат. В «Моих финансах» и «Все траты»
-   — личные лимиты (хранятся в личном пространстве): считается доля пользователя во всех его
-   тратах, и личных, и семейных. При 80% и 100% бот присылает уведомление.
+   семейном чате — общие лимиты чата по полным суммам трат. В «Моих финансах» — личные
+   лимиты: считается доля пользователя во всех его тратах, и личных, и семейных. При 80% и 100% бот присылает уведомление.
 
    Сверху — обязательные платежи месяца (app/shared/obligations.py): неоплаченные
    «резервируют» деньги в лимитах, поэтому видно, сколько на самом деле свободно. */
 
 function budgetsChatId() {
-  return isAll() || isPersonal() ? state.personalChatId : state.chatId;
+  return isPersonal() ? state.personalChatId : state.chatId;
 }
 
 async function renderBudgetsTab() {
   const content = document.getElementById("content");
-  let budgets, obligations;
+  let budgets, obligations, forecast;
   try {
-    [budgets, obligations] = await Promise.all([
+    [budgets, obligations, forecast] = await Promise.all([
       api(`/chats/${budgetsChatId()}/budgets?month=${state.month}`),
       api(`/chats/${budgetsChatId()}/obligations?month=${state.month}`),
+      state.month === todayMonth() ? api(`/chats/${budgetsChatId()}/forecast`) : null,
     ]);
   } catch (e) {
     content.innerHTML = `<div class="empty-state">${escapeHtml(e.message)}</div>`;
     return;
   }
 
-  const hint = isAll() || isPersonal()
+  const hint = isPersonal()
     ? "Личные лимиты: считается ваша доля во всех тратах — личных и семейных. Уведомления при 80% и 100% придут вам в личку от бота."
     : "Лимиты семьи: считаются все траты этого чата. Уведомления при 80% и 100% придут в чат.";
 
@@ -41,6 +41,7 @@ async function renderBudgetsTab() {
       <div class="label">${monthLabel(state.month)}</div>
       <button data-dir="1">›</button>
     </div>
+    ${forecastHtml(forecast, budgets)}
     ${obligationsHtml(obligations)}
     <div class="section-title">🎯 Лимиты</div>
     <div class="hint-text" style="margin: 0 4px 12px;">${escapeHtml(hint)}</div>
@@ -66,6 +67,22 @@ async function renderBudgetsTab() {
   });
 }
 
+/* Прогноз всех трат на конец месяца (app/shared/forecast.py): «в этом темпе выйдет ~52 000».
+   Если задан общий лимит месяца — сравниваем с ним. До 5-го числа прогноза нет. */
+function forecastHtml(fc, budgets) {
+  if (!fc) return "";
+  const total = budgets.find((b) => !b.category);
+  const over = total && Number(fc.forecast) > Number(total.amount);
+  const vs = total
+    ? (over ? ` — больше лимита на ${fmtMoney(Number(fc.forecast) - Number(total.amount))}` : ` — в пределах лимита ${fmtMoney(total.amount)}`)
+    : "";
+  return `
+    <div class="card forecast-card ${over ? "over" : ""}">
+      <div>📈 Прогноз на конец месяца: <b>${fmtMoney(fc.forecast)}</b>${escapeHtml(vs)}</div>
+      <div class="hint-text">Потрачено ${fmtMoney(fc.spent)}, впереди ${fc.days_left} дн. — с учётом обычного темпа трат и неоплаченных платежей</div>
+    </div>`;
+}
+
 function budgetCardHtml(b) {
   const amount = Number(b.amount);
   const spent = Number(b.spent);
@@ -83,6 +100,10 @@ function budgetCardHtml(b) {
     const now = new Date();
     const daysLeft = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate() - now.getDate() + 1;
     sub += ` · ~${fmtMoney(left / daysLeft)} в день`;
+  }
+  // Прогноз превышения — пока лимит ещё не исчерпан
+  if (b.forecast != null && left > 0 && Number(b.forecast) > amount) {
+    sub = `⚠️ к концу месяца ~${fmtMoney(b.forecast)}`;
   }
   const icon = b.category ? categoryIcon(b.category) : "📅";
   const usedText = reserved > 0
@@ -133,7 +154,7 @@ function statusHtml(o) {
 
 function obligationsHtml(data) {
   if (!data.items.length) {
-    const where = isAll() ? "в чатах или «Моих финансах»" : "во вкладке «📌 Платежи»";
+    const where = "во вкладке «📌 Платежи»";
     return `
       <div class="section-title">📌 Обязательные платежи</div>
       <div class="hint-text" style="margin: 0 4px 16px;">Аренду, кредиты, карты и подписки можно добавить ${where} — тогда здесь будет видно, сколько денег уже занято.</div>`;

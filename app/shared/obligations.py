@@ -15,8 +15,10 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.shared.autocategory import normalize
 from app.shared.budgets import month_range
 from app.shared.crud import CENT, build_custom_shares, build_equal_shares, load_recurring_participants
 from app.shared.models import (
@@ -82,7 +84,11 @@ async def ensure_payment(
     payment = result.scalar_one_or_none()
     if payment is not None:
         return payment
-    if not applies_in_month(recurring, month):
+    # Платёж завели в этом месяце, а трату за него уже записали руками (так бывает с
+    # подписками, найденными по истории трат) — засчитываем её, а не спрашиваем ещё раз.
+    # Месяц считается, даже если день платежа раньше дня, когда шаблон завели.
+    manual = await _manual_payment_expense(session, recurring, month)
+    if manual is None and not applies_in_month(recurring, month):
         return None
     payment = RecurringPayment(
         recurring_id=recurring.id,
@@ -112,9 +118,53 @@ async def ensure_payment(
         payment.expense_id = expense.id if expense else None
         payment.asked = True
         payment.reminders_sent = ",".join(str(d) for d in REMINDER_DAYS)
-    session.add(payment)
-    await session.flush()
+    elif manual is not None:
+        manual.recurring_id = recurring.id
+        payment.status = "paid"
+        payment.amount = manual.amount
+        payment.expense_id = manual.id
+        payment.asked = True
+        payment.reminders_sent = ",".join(str(d) for d in REMINDER_DAYS)
+    # Вкладка «Лимиты» спрашивает платежи несколькими запросами сразу — первый платёж
+    # месяца могут создать двое. Проигравший берёт уже созданный.
+    try:
+        async with session.begin_nested():
+            session.add(payment)
+    except IntegrityError:
+        return (
+            await session.execute(
+                select(RecurringPayment).where(
+                    RecurringPayment.recurring_id == recurring.id, RecurringPayment.month == month
+                )
+            )
+        ).scalar_one()
     return payment
+
+
+async def _manual_payment_expense(
+    session: AsyncSession, recurring: RecurringExpense, month: str
+) -> Expense | None:
+    """Записанная руками трата с тем же названием в месяце, когда шаблон завели."""
+    if not recurring.is_active or recurring.kind == "card" or recurring.created_at is None:
+        return None
+    if recurring.last_generated_month or month_of(recurring.created_at.date()) != month:
+        return None
+    start, end = month_range(month)
+    key = normalize(recurring.title)
+    expenses = (
+        await session.execute(
+            select(Expense)
+            .where(
+                Expense.chat_id == recurring.chat_id,
+                Expense.recurring_id.is_(None),
+                Expense.expense_date >= start,
+                Expense.expense_date < end,
+            )
+            .order_by(Expense.id)
+        )
+    ).scalars().all()
+    matches = [e for e in expenses if normalize(e.title) == key]
+    return matches[-1] if matches else None
 
 
 def _scale_custom(

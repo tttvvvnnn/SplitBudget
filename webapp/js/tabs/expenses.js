@@ -6,6 +6,7 @@ import { avatarHtml, loadAvatarsIn, memberById } from "../members.js";
 import { openSheet, closeSheet, useMainButtonFor, showFormError } from "../sheet.js";
 import { openAddMemberModal } from "../member-modals.js";
 import { switchTab } from "../shell.js";
+import { renderAllExpensesTab } from "./all.js";
 import {
   categoryFieldsHtml, bindCategoryFields, setCategory, showCategoryHint, readCategoryFields, categoryBadgeHtml,
 } from "../category-fields.js";
@@ -36,6 +37,11 @@ function balanceBannerHtml() {
 /* ---------------- Вкладка «Траты» ---------------- */
 
 async function renderExpensesTab() {
+  // «Мои финансы» — личные траты вместе с долей в семейных (tabs/all.js)
+  if (isPersonal()) {
+    await renderAllExpensesTab();
+    return;
+  }
   const content = document.getElementById("content");
   try {
     // В личном пространстве один участник — баланса и долгов там нет.

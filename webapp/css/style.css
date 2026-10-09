@@ -305,7 +305,7 @@ html, body {
   white-space: nowrap;
 }
 
-/* «из 3 000 RUB» под долей пользователя — в сводке «Все траты» (см. tabs/all.js) */
+/* «из 3 000 RUB» под долей пользователя — в «Моих финансах» (см. tabs/all.js) */
 .expense-amount .amount-sub {
   font-weight: 400;
   font-size: 12px;
@@ -1022,3 +1022,51 @@ html, body {
   border-bottom: 1px solid var(--border);
 }
 .hidden-chat-row span { flex: 1; }
+
+/* Переключатель «Моя доля / Всего» в «Моих финансах» — см. tabs/all.js */
+.share-toggle {
+  display: flex;
+  gap: 4px;
+  width: max-content;
+  margin: 0 auto 4px;
+  padding: 3px;
+  border-radius: 18px;
+  background: var(--secondary-bg);
+  border: 1px solid var(--border);
+}
+.share-toggle button {
+  padding: 5px 14px;
+  border: none;
+  border-radius: 15px;
+  background: none;
+  color: var(--hint);
+  font-size: 13px;
+  cursor: pointer;
+}
+.share-toggle button.active {
+  background: var(--button);
+  color: var(--button-text);
+}
+
+/* Прогноз на конец месяца во вкладке «Лимиты» — см. forecastHtml в tabs/budgets.js */
+.forecast-card {
+  font-size: 14px;
+  line-height: 1.4;
+}
+.forecast-card .hint-text {
+  margin-top: 4px;
+  font-size: 12.5px;
+}
+.forecast-card.over {
+  border-color: var(--danger);
+}
+
+/* «Похоже на подписки» во вкладке «Платежи» */
+.sub-hint .sub-hint-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.sub-hint .sub-hint-actions .btn {
+  flex: 1;
+}

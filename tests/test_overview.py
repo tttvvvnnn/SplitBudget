@@ -50,6 +50,10 @@ def test_all_expenses_counts_my_share(client, seeded_chat, auth_header):
     assert float(stats["total"]) == 1850.0
     assert {c["category"]: float(c["total"]) for c in stats["by_category"]} == {"Еда": 1500.0, "Кафе": 350.0}
 
+    # «Всего» — полные суммы трат, где Алиса участвует (трата «Бобу» без её доли не входит)
+    r = client.get("/api/all/stats?month=2026-09&full=true", headers=alice)
+    assert float(r.json()["total"]) == 3350.0
+
     # Боб видит свою долю 1500 + 500, личных трат Алисы не видит.
     r = client.get("/api/all/stats?month=2026-09", headers=auth_header(seeded_chat.bob_init_data))
     assert float(r.json()["total"]) == 2000.0

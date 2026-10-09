@@ -5,6 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 
 from app.api.dependencies import ChatContext, get_chat_context
+from app.bot.bot_instance import bot
+from app.bot.handlers.settle import settle_message
 from app.bot.notify import notify_settlement
 from app.shared.balance import compute_net_balances, simplify_debts
 from app.shared.models import Member, Settlement
@@ -74,3 +76,16 @@ async def create_settlement(
         ctx.chat, members[payload.from_member_id], members[payload.to_member_id], payload.amount
     )
     return settlement
+
+
+@router.post("/chats/{chat_id}/settle-up", status_code=204)
+async def settle_up(ctx: ChatContext = Depends(get_chat_context)):
+    """Кнопка «Позвать рассчитаться» в приложении: бот присылает в группу список переводов
+    с кнопками «Перевёл(а)» (см. app/bot/handlers/settle.py)."""
+    if ctx.chat.is_personal:
+        raise HTTPException(status_code=400, detail="В «Моих финансах» рассчитываться не с кем")
+    text, markup = await settle_message(ctx.session, ctx.chat)
+    try:
+        await bot.send_message(ctx.chat.id, text, reply_markup=markup)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail="Не удалось написать в чат — бот всё ещё в нём?") from exc

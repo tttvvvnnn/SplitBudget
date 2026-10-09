@@ -3,7 +3,7 @@
 Что считается тратой:
 - семейный чат — полные суммы трат этого чата;
 - личное пространство («Мои финансы») — доля владельца во всех его тратах: личных и
-  семейных (как в сводке «Все траты»), потому что это и есть его личный расход.
+  семейных (как во вкладке «Траты» «Моих финансов»), потому что это и есть его личный расход.
 """
 from __future__ import annotations
 
@@ -26,31 +26,44 @@ def month_range(month: str) -> tuple[dt.date, dt.date]:
     return dt.date(year, mon, 1), dt.date(year + (mon // 12), (mon % 12) + 1, 1)
 
 
-async def spending(session: AsyncSession, chat: Chat, month: str) -> dict[tuple[str, str | None], Decimal]:
-    """Траты за месяц: {(категория, подкатегория): сумма}, {(категория, None): сумма по
-    категории} и {("", None): всего}."""
+async def spending_rows(
+    session: AsyncSession, chat: Chat, month: str, exclude_recurring: bool = False
+) -> list[tuple[str, str | None, Decimal]]:
+    """Траты за месяц строками (категория, подкатегория, сумма). В «Моих финансах» — доля
+    владельца. exclude_recurring — без записанных обязательных платежей."""
     start, end = month_range(month)
     if chat.is_personal:
-        result = await session.execute(
+        query = (
             select(Expense.category, Expense.subcategory, ExpenseShare.amount)
             .join(ExpenseShare, ExpenseShare.expense_id == Expense.id)
             .join(Member, Member.id == ExpenseShare.member_id)
             .where(Member.tg_user_id == chat.id, Expense.expense_date >= start, Expense.expense_date < end)
         )
     else:
-        result = await session.execute(
-            select(Expense.category, Expense.subcategory, Expense.amount).where(
-                Expense.chat_id == chat.id, Expense.expense_date >= start, Expense.expense_date < end
-            )
+        query = select(Expense.category, Expense.subcategory, Expense.amount).where(
+            Expense.chat_id == chat.id, Expense.expense_date >= start, Expense.expense_date < end
         )
+    if exclude_recurring:
+        query = query.where(Expense.recurring_id.is_(None))
+    return [tuple(row) for row in (await session.execute(query)).all()]
+
+
+def sum_by_keys(rows: list[tuple[str, str | None, Decimal]]) -> dict[tuple[str, str | None], Decimal]:
+    """{(категория, подкатегория): сумма}, {(категория, None): сумма по категории} и
+    {("", None): всего}."""
     totals: dict[tuple[str, str | None], Decimal] = {}
-    for category, subcategory, amount in result.all():
+    for category, subcategory, amount in rows:
         keys = [("", None), (category, None)]
         if subcategory:
             keys.append((category, subcategory))
         for key in keys:
             totals[key] = totals.get(key, ZERO) + amount
     return totals
+
+
+async def spending(session: AsyncSession, chat: Chat, month: str) -> dict[tuple[str, str | None], Decimal]:
+    """Траты за месяц по ключам sum_by_keys."""
+    return sum_by_keys(await spending_rows(session, chat, month))
 
 
 @dataclass

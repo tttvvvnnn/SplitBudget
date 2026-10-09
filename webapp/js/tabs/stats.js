@@ -1,7 +1,8 @@
-import { state, isAll } from "../state.js";
+import { state, isPersonal } from "../state.js";
 import { api } from "../api.js";
 import { haptic } from "../telegram.js";
 import { categoryIcon, monthLabel, shiftMonth, fmtMoney, escapeHtml } from "../format.js";
+import { shareMode, shareToggleHtml, bindShareToggle } from "./all.js";
 
 /* ---------------- Вкладка «Статистика» ---------------- */
 
@@ -11,9 +12,10 @@ async function renderStatsTab() {
   const content = document.getElementById("content");
   let stats;
   try {
-    // В сводке «Все траты» — статистика по доле пользователя во всех пространствах.
-    const path = isAll() ? "/all/stats" : `/chats/${state.chatId}/stats`;
-    stats = await api(`${path}?month=${state.month}`);
+    // В «Моих финансах» — личные траты и доля (или полные суммы) семейных трат.
+    stats = isPersonal()
+      ? await api(`/all/stats?month=${state.month}&full=${shareMode() === "total"}`)
+      : await api(`/chats/${state.chatId}/stats?month=${state.month}`);
   } catch (e) {
     content.innerHTML = `<div class="empty-state">${escapeHtml(e.message)}</div>`;
     return;
@@ -25,6 +27,7 @@ async function renderStatsTab() {
       <div class="label">${monthLabel(state.month)}</div>
       <button data-dir="1">›</button>
     </div>
+    ${isPersonal() ? shareToggleHtml() : ""}
     <div class="total-line">${fmtMoney(stats.total)}</div>
     ${stats.by_category.length === 0 ? '<div class="empty-state">Нет трат за этот месяц.</div>' : `
       <div class="chart-wrap"><canvas id="stats-chart" height="220"></canvas></div>
@@ -43,6 +46,8 @@ async function renderStatsTab() {
       row.classList.toggle("open", !open);
     });
   });
+
+  bindShareToggle(content, () => renderStatsTab());
 
   content.querySelectorAll(".month-picker button").forEach((b) => {
     b.addEventListener("click", async () => {

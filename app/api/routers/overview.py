@@ -1,4 +1,4 @@
-"""«Все траты» — сводка по всем пространствам пользователя сразу: личному («Мои финансы») и
+"""Сводка «Моих финансов» по всем пространствам пользователя сразу: личному («Мои финансы») и
 всем семейным чатам. Каждая трата считается по доле пользователя в ней (ExpenseShare), а не по
 полной сумме: если в семейном чате ты заплатил 3 000, а твоя доля 1 000, то твой расход — 1 000,
 остальное тебе должны (это долг, а не трата)."""
@@ -86,11 +86,15 @@ async def all_expenses(
 @router.get("/all/stats", response_model=StatsOut)
 async def all_stats(
     month: str,
+    full: bool = False,
     user: dict = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> StatsOut:
+    """full=true — полные суммы трат, в которых пользователь участвует (переключатель
+    «всего» в «Моих финансах»), иначе — только его доля."""
     rows = await _my_shares(session, int(user["id"]), month)
     total, by_category = summarize_by_category(
-        (expense.category, expense.subcategory, share.amount) for expense, share, _ in rows
+        (expense.category, expense.subcategory, expense.amount if full else share.amount)
+        for expense, share, _ in rows
     )
     return StatsOut(period=month, total=total, by_category=by_category)
