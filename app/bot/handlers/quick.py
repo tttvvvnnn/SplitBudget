@@ -1,6 +1,12 @@
-"""Быстрый ввод трат в личке с ботом: пишешь «кофе 250» — трата записывается в «Мои финансы»
-с автоподбором категории. Под ответом — кнопки: поменять категорию (бот запомнит
-исправление), отменить или перенести трату в семейный чат (поровну на всех)."""
+"""Быстрый ввод трат текстом.
+
+В личке с ботом: «кофе 250» сразу записывается в «Мои финансы» с автоподбором категории.
+Под ответом — кнопки: поменять категорию (бот запомнит исправление), отменить или
+перенести трату в семейный чат (поровну на всех).
+
+В семейном чате: на сообщение, похожее на трату («кофе 250», см. parse_group_message), бот
+отвечает кнопками «👪 Поровну на всех» / «👤 В мои финансы» / «✖️ Это не трата» —
+выбирает автор. Обычную переписку бот не трогает; явно — командой /t кофе 250."""
 from __future__ import annotations
 
 import datetime as dt
@@ -9,6 +15,7 @@ from html import escape
 from decimal import Decimal
 
 from aiogram import F, Router
+from aiogram.filters import Command, CommandObject
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from sqlalchemy import select
 
@@ -16,11 +23,19 @@ from app.bot.notify import notify_budget_alerts, notify_new_expense
 from app.shared.autocategory import learn_category
 from app.shared.budgets import alerts_after_expense
 from app.shared.categories import CATEGORY_TREE
-from app.shared.crud import get_or_create_personal_space
+from app.shared.crud import get_or_create_member, get_or_create_personal_space
 from app.shared.database import async_session_maker
 from app.shared.income import record_income
 from app.shared.models import Chat, Expense, Income, Member
-from app.shared.quick_entry import add_personal_expense, move_to_family, parse_message
+from app.shared.quick_entry import (
+    ParsedExpense,
+    active_members,
+    add_personal_expense,
+    add_split_expense,
+    move_to_family,
+    parse_group_message,
+    parse_message,
+)
 
 logger = logging.getLogger(__name__)
 router = Router(name="quick")
@@ -164,12 +179,31 @@ def _subcategory_markup(expense_id: int, ci: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-async def _own_personal_expense(session, callback: CallbackQuery, expense_id: int) -> Expense | None:
-    expense = await session.get(Expense, expense_id)
-    if expense is None or expense.chat_id != callback.from_user.id:
+def _created_by(tg_user_id: int):
+    """Условие «трату создал этот пользователь Telegram» (в любом его пространстве)."""
+    return Expense.created_by_member_id.in_(select(Member.id).where(Member.tg_user_id == tg_user_id))
+
+
+async def _own_expense(session, callback: CallbackQuery, expense_id: int) -> Expense | None:
+    expense = (
+        await session.execute(select(Expense).where(Expense.id == expense_id, _created_by(callback.from_user.id)))
+    ).scalar_one_or_none()
+    if expense is None:
         await callback.answer("Трата не найдена — возможно, её уже удалили или перенесли", show_alert=True)
         return None
     return expense
+
+
+def _in_private(callback: CallbackQuery) -> bool:
+    chat = getattr(callback.message, "chat", None)
+    return chat is None or chat.type == "private"
+
+
+def _header(chat: Chat, members_count: int | None = None) -> str:
+    if chat.is_personal:
+        return "✅ Записал в «Мои финансы»"
+    split = f", поровну на {members_count}" if members_count else ""
+    return f"✅ Записал в «{escape(chat.title or 'семейный чат')}»{split}"
 
 
 async def _edit(callback: CallbackQuery, text: str | None = None, markup: InlineKeyboardMarkup | None = None) -> None:
@@ -196,21 +230,21 @@ async def on_quick_button(callback: CallbackQuery) -> None:
         return
 
     async with async_session_maker() as session:
-        personal = await session.get(Chat, callback.from_user.id)
-        currency = personal.currency if personal else ""
-
         if action == "undoall" and len(nums) in (2, 4):
             removed = 0
-            ranges = [(Expense, Expense.id, nums[0], nums[1])]
-            if len(nums) == 4:
-                ranges.append((Income, Income.id, nums[2], nums[3]))
-            for model, column, first, last in ranges:
-                if not first:
-                    continue
-                result = await session.execute(
-                    select(model).where(model.chat_id == callback.from_user.id, column >= first, column <= last)
+            queries = []
+            if nums[0]:
+                queries.append(
+                    select(Expense).where(Expense.id >= nums[0], Expense.id <= nums[1], _created_by(callback.from_user.id))
                 )
-                for row in result.scalars().all():
+            if len(nums) == 4 and nums[2]:
+                queries.append(
+                    select(Income).where(
+                        Income.id >= nums[2], Income.id <= nums[3], Income.chat_id == callback.from_user.id
+                    )
+                )
+            for query in queries:
+                for row in (await session.execute(query)).scalars().all():
                     await session.delete(row)
                     removed += 1
             await session.commit()
@@ -218,9 +252,11 @@ async def on_quick_button(callback: CallbackQuery) -> None:
             await callback.answer()
             return
 
-        expense = await _own_personal_expense(session, callback, nums[0])
+        expense = await _own_expense(session, callback, nums[0])
         if expense is None:
             return
+        chat = await session.get(Chat, expense.chat_id)
+        currency = chat.currency
 
         if action == "undo":
             text = f"↩️ Отменено: {escape(expense.title)} — {_money(expense.amount, currency)}"
@@ -240,13 +276,13 @@ async def on_quick_button(callback: CallbackQuery) -> None:
             expense.subcategory = subs[si] if 0 <= si < len(subs) else None
             await learn_category(session, expense.chat_id, expense.title, expense.category, expense.subcategory)
             await session.commit()
-            family = await _family_chats(session, callback.from_user.id)
+            family = await _family_chats(session, callback.from_user.id) if chat.is_personal and _in_private(callback) else []
             await _edit(
                 callback,
-                f"✅ Записал в «Мои финансы»\n{_line(expense, currency)}\n🧠 Запомнил на будущее",
+                f"{_header(chat)}\n{_line(expense, currency)}\n🧠 Запомнил на будущее",
                 _single_markup(expense.id, family),
             )
-        elif action == "fam" and len(nums) == 2:
+        elif action == "fam" and len(nums) == 2 and chat.is_personal:
             family_chat = await session.get(Chat, nums[1])
             payer = (
                 await session.execute(
@@ -275,3 +311,112 @@ async def on_quick_button(callback: CallbackQuery) -> None:
                 await session.commit()
                 await notify_budget_alerts(alerts)
         await callback.answer()
+
+
+# ---------------- Семейный чат ----------------
+
+GROUP_CHOICE = InlineKeyboardMarkup(
+    inline_keyboard=[
+        [
+            InlineKeyboardButton(text="👪 Поровну на всех", callback_data="qg:split"),
+            InlineKeyboardButton(text="👤 В мои финансы", callback_data="qg:mine"),
+        ],
+        [InlineKeyboardButton(text="✖️ Это не трата", callback_data="qg:no")],
+    ]
+)
+
+
+def _entry_text(text: str) -> str:
+    """Текст траты без команды: «/t кофе 250» → «кофе 250»."""
+    if text.startswith("/"):
+        return text.split(maxsplit=1)[1] if len(text.split(maxsplit=1)) > 1 else ""
+    return text
+
+
+async def _ask_group(message: Message, parsed: list[ParsedExpense]) -> None:
+    async with async_session_maker() as session:
+        chat = await session.get(Chat, message.chat.id)
+        currency = chat.currency if chat else ""
+    lines = "\n".join(
+        f"💸 {escape(p.title)} — <b>{_money(p.amount, currency)}</b>"
+        + {0: "", 1: " · вчера", 2: " · позавчера"}.get((dt.date.today() - p.date).days, "")
+        for p in parsed
+    )
+    await message.reply(f"{lines}\nКак записать?", reply_markup=GROUP_CHOICE)
+
+
+@router.message(Command("t"), F.chat.type.in_({"group", "supergroup"}))
+async def group_command(message: Message, command: CommandObject) -> None:
+    parsed = parse_message(command.args or "", dt.date.today())
+    parsed = [p for p in parsed if not p.is_income]
+    if not parsed:
+        await message.reply("Напишите трату после команды, например: <code>/t кофе 250</code>")
+        return
+    await _ask_group(message, parsed)
+
+
+@router.message(F.chat.type.in_({"group", "supergroup"}), F.text, ~F.text.startswith("/"))
+async def group_expense(message: Message) -> None:
+    if not message.from_user or message.from_user.is_bot:
+        return
+    parsed = parse_group_message(message.text, dt.date.today())
+    if parsed:
+        await _ask_group(message, parsed)
+
+
+@router.callback_query(F.data.startswith("qg:"))
+async def on_group_choice(callback: CallbackQuery) -> None:
+    action = callback.data.split(":", 1)[1]
+    original = getattr(callback.message, "reply_to_message", None)
+    if original is None or original.from_user is None:
+        await callback.answer("Не нашёл исходное сообщение — напишите трату ещё раз", show_alert=True)
+        return
+    if original.from_user.id != callback.from_user.id:
+        await callback.answer("Выбрать может только тот, кто написал трату", show_alert=True)
+        return
+    if action == "no":
+        try:
+            await callback.message.delete()
+        except Exception:  # noqa: BLE001
+            logger.warning("Не удалось удалить вопрос о трате", exc_info=True)
+        await callback.answer()
+        return
+
+    parsed = [p for p in parse_message(_entry_text(original.text or ""), dt.date.today()) if not p.is_income]
+    if not parsed:
+        await callback.answer("Не получилось разобрать трату", show_alert=True)
+        return
+
+    user = callback.from_user
+    async with async_session_maker() as session:
+        if action == "split":
+            chat = await session.get(Chat, callback.message.chat.id)
+            payer = await get_or_create_member(session, chat.id, user.id, user.username, user.full_name)
+            members = await active_members(session, chat.id) or [payer]
+        else:
+            chat, payer = await get_or_create_personal_space(session, user.id, user.username, user.full_name)
+            members = [payer]
+        expenses = [await add_split_expense(session, chat, payer, members, p) for p in parsed]
+        await session.commit()
+
+        header = _header(chat, len(members) if action == "split" else None)
+        if action == "split":
+            header += f" (платит {escape(payer.full_name)})"
+        body = "\n".join(_line(e, chat.currency) for e in expenses)
+        if len(expenses) == 1:
+            markup = _single_markup(expenses[0].id, [])
+        else:
+            markup = InlineKeyboardMarkup(
+                inline_keyboard=[[InlineKeyboardButton(
+                    text="↩️ Отменить все", callback_data=f"qe:undoall:{expenses[0].id}:{expenses[-1].id}"
+                )]]
+            )
+        await _edit(callback, f"{header}\n{body}", markup)
+        await callback.answer()
+
+        alerts = []
+        for expense in expenses:
+            alerts.extend(await alerts_after_expense(session, expense.id))
+        if alerts:
+            await session.commit()
+            await notify_budget_alerts(alerts)
