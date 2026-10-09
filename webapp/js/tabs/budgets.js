@@ -1,4 +1,4 @@
-import { state, isAll, isPersonal } from "../state.js";
+import { state, isPersonal } from "../state.js";
 import { api } from "../api.js";
 import { tg, haptic, toast, confirmAction } from "../telegram.js";
 import { categoryIcon, monthLabel, shiftMonth, todayMonth, fmtMoney, escapeHtml } from "../format.js";
@@ -7,15 +7,14 @@ import { KIND_INFO } from "./recurring.js";
 
 /* ---------------- Вкладка «Лимиты» ----------------
    Месячные лимиты на весь месяц, категорию или подкатегорию (app/shared/budgets.py). В
-   семейном чате — общие лимиты чата по полным суммам трат. В «Моих финансах» и «Все траты»
-   — личные лимиты (хранятся в личном пространстве): считается доля пользователя во всех его
-   тратах, и личных, и семейных. При 80% и 100% бот присылает уведомление.
+   семейном чате — общие лимиты чата по полным суммам трат. В «Моих финансах» — личные
+   лимиты: считается доля пользователя во всех его тратах, и личных, и семейных. При 80% и 100% бот присылает уведомление.
 
    Сверху — обязательные платежи месяца (app/shared/obligations.py): неоплаченные
    «резервируют» деньги в лимитах, поэтому видно, сколько на самом деле свободно. */
 
 function budgetsChatId() {
-  return isAll() || isPersonal() ? state.personalChatId : state.chatId;
+  return isPersonal() ? state.personalChatId : state.chatId;
 }
 
 async function renderBudgetsTab() {
@@ -31,7 +30,7 @@ async function renderBudgetsTab() {
     return;
   }
 
-  const hint = isAll() || isPersonal()
+  const hint = isPersonal()
     ? "Личные лимиты: считается ваша доля во всех тратах — личных и семейных. Уведомления при 80% и 100% придут вам в личку от бота."
     : "Лимиты семьи: считаются все траты этого чата. Уведомления при 80% и 100% придут в чат.";
 
@@ -133,7 +132,7 @@ function statusHtml(o) {
 
 function obligationsHtml(data) {
   if (!data.items.length) {
-    const where = isAll() ? "в чатах или «Моих финансах»" : "во вкладке «📌 Платежи»";
+    const where = "во вкладке «📌 Платежи»";
     return `
       <div class="section-title">📌 Обязательные платежи</div>
       <div class="hint-text" style="margin: 0 4px 16px;">Аренду, кредиты, карты и подписки можно добавить ${where} — тогда здесь будет видно, сколько денег уже занято.</div>`;

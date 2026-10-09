@@ -1,4 +1,4 @@
-import { state, ALL_SPACE, isAll, isPersonal } from "./state.js";
+import { state, isPersonal } from "./state.js";
 import { haptic, toast, confirmAction } from "./telegram.js";
 import { api } from "./api.js";
 import { openSheet, closeSheet } from "./sheet.js";
@@ -7,7 +7,6 @@ import { memberLabel } from "./members.js";
 import { renderExpensesTab, openExpenseModal } from "./tabs/expenses.js";
 import { renderBalanceTab } from "./tabs/balance.js";
 import { renderStatsTab } from "./tabs/stats.js";
-import { renderAllExpensesTab } from "./tabs/all.js";
 import { renderBudgetsTab, openBudgetModal } from "./tabs/budgets.js";
 import { renderRecurringTab, openRecurringModal } from "./tabs/recurring.js";
 import { renderIncomeTab, openIncomeModal } from "./tabs/income.js";
@@ -54,15 +53,12 @@ const TABS = [
   { id: "goals", icon: "🐷", label: "Цели" },
 ];
 
-/* Вкладки сводки «Все траты» — остальные привязаны к конкретному пространству */
-const ALL_VIEW_TABS = ["expenses", "stats", "budgets", "income", "goals"];
 // Только личные вкладки — в семейном чате их нет
 const PERSONAL_ONLY_TABS = ["income", "goals"];
 
-/* Переключатель «📋 Все траты | 👤 Мои финансы | 🏠 семейные чаты» под заголовком. */
+/* Переключатель «👤 Мои финансы | 🏠 семейные чаты» под заголовком. */
 function spaceSwitcherHtml() {
   const spaces = [
-    { id: ALL_SPACE, label: "📋 Все траты" },
     { id: state.personalChatId, label: "👤 Мои финансы" },
     ...state.familyChats.map((c) => ({ id: c.id, label: `🏠 ${c.title || c.id}` })),
   ].filter((s) => s.id !== null);
@@ -95,7 +91,7 @@ async function hideCurrentChat(onSwitchSpace) {
   haptic("notification", "success");
   state.familyChats = state.familyChats.filter((c) => String(c.id) !== String(chat.id));
   state.hiddenChats = [...state.hiddenChats, { id: chat.id, title: chat.title, currency: chat.currency, is_personal: false }];
-  if (onSwitchSpace) await onSwitchSpace(ALL_SPACE);
+  if (onSwitchSpace) await onSwitchSpace(state.personalChatId);
 }
 
 /* Шторка со скрытыми чатами: открыть или вернуть в шапку. */
@@ -131,12 +127,10 @@ function openHiddenChats(onSwitchSpace) {
 function renderShell({ onSwitchSpace } = {}) {
   const app = document.getElementById("app");
   let tabs = TABS;
-  if (isAll()) tabs = TABS.filter((t) => ALL_VIEW_TABS.includes(t.id));
-  else if (isPersonal()) tabs = TABS.filter((t) => t.id !== "balance");
+  if (isPersonal()) tabs = TABS.filter((t) => t.id !== "balance");
   else tabs = TABS.filter((t) => !PERSONAL_ONLY_TABS.includes(t.id));
   let sub;
-  if (isAll()) sub = "Личные + ваша доля в семейных · видно только вам";
-  else if (isPersonal()) sub = `Видно только вам · Валюта: ${escapeHtml(state.chat.currency)}`;
+  if (isPersonal()) sub = "Личное + ваша доля в семейных · видно только вам";
   else sub = `Валюта: ${escapeHtml(state.chat.currency)} · Вы: ${escapeHtml(memberLabel(state.member.id))}`
     + ` · <button class="link-btn inline" id="hide-chat">Убрать из списка</button>`;
   app.innerHTML = `
@@ -192,18 +186,16 @@ async function switchTab(tabId) {
   await renderTab();
 }
 
-/* «+» не нужен на статистике и на тратах в сводке «Все траты» (непонятно, в какой чат
-   добавлять — траты добавляются в своём пространстве). Лимит из сводки — личный. */
+/* «+» не нужен на статистике. В «Моих финансах» «+» на тратах добавляет личную трату. */
 function updateFab() {
-  const hidden = state.tab === "stats" || (isAll() && !["budgets", "income", "goals"].includes(state.tab));
+  const hidden = state.tab === "stats";
   document.getElementById("fab-add").style.display = hidden ? "none" : "flex";
 }
 
 async function renderTab() {
   const content = document.getElementById("content");
   content.innerHTML = `<div class="loading">Загрузка…</div>`;
-  if (state.tab === "expenses" && isAll()) await renderAllExpensesTab();
-  else if (state.tab === "expenses") await renderExpensesTab();
+  if (state.tab === "expenses") await renderExpensesTab();
   else if (state.tab === "balance") await renderBalanceTab();
   else if (state.tab === "stats") await renderStatsTab();
   else if (state.tab === "budgets") await renderBudgetsTab();
@@ -212,4 +204,4 @@ async function renderTab() {
   else if (state.tab === "goals") await renderGoalsTab();
 }
 
-export { loadVersionBadge, renderShell, switchTab, renderTab, ALL_VIEW_TABS, PERSONAL_ONLY_TABS };
+export { loadVersionBadge, renderShell, switchTab, renderTab, PERSONAL_ONLY_TABS };

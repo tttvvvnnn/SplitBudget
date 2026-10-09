@@ -6,7 +6,8 @@ const state = {
   chatId: null,
   personalChatId: null, // id личного пространства «Мои финансы» (GET /personal)
   personalCurrency: "",
-  switchSpace: null, // переключение пространства (задаёт app.js) — для перехода из «Все траты» к трате
+  switchSpace: null, // переключение пространства (задаёт app.js) — для перехода из «Моих финансов» к семейной трате
+  shareMode: "", // «Мои финансы»: "share" — моя доля в семейных тратах, "total" — полные суммы
   familyChats: [], // семейные чаты пользователя — для переключателя в шапке
   hiddenChats: [], // чаты, которые пользователь убрал из шапки (GET /my-chats?hidden=true)
   initData: "",
@@ -30,13 +31,6 @@ const state = {
   buildInfo: "",
 };
 
-/* Особое значение chatId: сводка «Все траты» по всем пространствам пользователя сразу. */
-const ALL_SPACE = "all";
-
-function isAll() {
-  return state.chatId === ALL_SPACE;
-}
-
 /* Открыто личное пространство «Мои финансы» (а не семейный чат): участник один — сам
    пользователь, поэтому всё про «кто платил / как делить / кто кому должен» скрыто. */
 function isPersonal() {
@@ -49,4 +43,4 @@ function hideFamilyOnly(root) {
   root.querySelectorAll("[data-family-only]").forEach((el) => { el.style.display = "none"; });
 }
 
-export { state, ALL_SPACE, isAll, isPersonal, hideFamilyOnly };
+export { state, isPersonal, hideFamilyOnly };
