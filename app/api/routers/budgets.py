@@ -7,10 +7,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import delete, select
 
 from app.api.dependencies import ChatContext, get_chat_context
-from app.shared.budgets import budget_label, budgets_status, month_range
+from app.shared.budgets import budget_label, budgets_status, month_range, spending
 from app.shared import obligations as ob
+from app.shared.forecast import forecast
 from app.shared.models import Budget, BudgetAlert
-from app.shared.schemas import BudgetIn, BudgetOut
+from app.shared.schemas import BudgetIn, BudgetOut, ForecastOut
 
 router = APIRouter(tags=["budgets"])
 
@@ -27,6 +28,9 @@ async def list_budgets(month: str, ctx: ChatContext = Depends(get_chat_context))
     if statuses and month >= dt.date.today().strftime("%Y-%m"):
         reserved = ob.reserved(await ob.obligations(ctx.session, ctx.chat, month))
         await ctx.session.commit()
+    fc = await forecast(ctx.session, ctx.chat, dt.date.today()) if statuses else None
+    if fc is not None and fc.month != month:
+        fc = None
     # Сначала общий лимит месяца, дальше категории по алфавиту, внутри — сама категория раньше подкатегорий
     statuses.sort(key=lambda s: (s.budget.category != "", s.budget.category, s.budget.subcategory or ""))
     return [
@@ -37,10 +41,22 @@ async def list_budgets(month: str, ctx: ChatContext = Depends(get_chat_context))
             amount=s.budget.amount,
             spent=s.spent,
             reserved=reserved.get((s.budget.category, s.budget.subcategory), 0),
+            forecast=fc.get((s.budget.category, s.budget.subcategory)) if fc else None,
             label=budget_label(s.budget),
         )
         for s in statuses
     ]
+
+
+@router.get("/chats/{chat_id}/forecast", response_model=ForecastOut | None)
+async def get_forecast(ctx: ChatContext = Depends(get_chat_context)) -> ForecastOut | None:
+    """Прогноз всех трат пространства на конец текущего месяца; null — рано (до 5-го числа)."""
+    fc = await forecast(ctx.session, ctx.chat, dt.date.today())
+    await ctx.session.commit()  # obligations() мог завести записи платежей месяца
+    if fc is None:
+        return None
+    spent = (await spending(ctx.session, ctx.chat, fc.month)).get(("", None), 0)
+    return ForecastOut(month=fc.month, spent=spent, forecast=fc.get(("", None)), days_left=fc.days_left)
 
 
 @router.post("/chats/{chat_id}/budgets", response_model=BudgetOut, status_code=201)

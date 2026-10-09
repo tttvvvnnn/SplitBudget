@@ -1047,3 +1047,16 @@ html, body {
   background: var(--button);
   color: var(--button-text);
 }
+
+/* Прогноз на конец месяца во вкладке «Лимиты» — см. forecastHtml в tabs/budgets.js */
+.forecast-card {
+  font-size: 14px;
+  line-height: 1.4;
+}
+.forecast-card .hint-text {
+  margin-top: 4px;
+  font-size: 12.5px;
+}
+.forecast-card.over {
+  border-color: var(--danger);
+}

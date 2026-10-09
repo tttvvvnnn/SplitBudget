@@ -4,7 +4,8 @@
 «Оплачено?» с кнопками (см. app/shared/obligations.py, app/bot/handlers/payments.py).
 Трата записывается только после подтверждения оплаты. Так же в день зарплаты спрашивает
 «Пришла?» (app/shared/income.py), а 1-го числа присылает итоги прошлого месяца
-(app/shared/report.py).
+(app/shared/report.py), а если по прогнозу лимит будет превышен — предупреждает
+(app/shared/forecast.py).
 """
 from __future__ import annotations
 
@@ -17,6 +18,7 @@ from apscheduler.triggers.cron import CronTrigger
 from app.bot.notify import notify_obligations, send_texts
 from app.shared.config import settings
 from app.shared.database import async_session_maker
+from app.shared.forecast import due_forecast_alerts
 from app.shared.income import due_income_asks
 from app.shared.obligations import due_notices
 from app.shared.report import due_reports
@@ -30,6 +32,7 @@ async def process_obligations(today: dt.date | None = None) -> None:
         notices = await due_notices(session, day)
         notices += await due_income_asks(session, day)
         reports = await due_reports(session, day)
+        reports += await due_forecast_alerts(session, day)
         await session.commit()
     await notify_obligations(notices)
     await send_texts(reports)

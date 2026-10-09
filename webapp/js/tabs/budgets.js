@@ -19,11 +19,12 @@ function budgetsChatId() {
 
 async function renderBudgetsTab() {
   const content = document.getElementById("content");
-  let budgets, obligations;
+  let budgets, obligations, forecast;
   try {
-    [budgets, obligations] = await Promise.all([
+    [budgets, obligations, forecast] = await Promise.all([
       api(`/chats/${budgetsChatId()}/budgets?month=${state.month}`),
       api(`/chats/${budgetsChatId()}/obligations?month=${state.month}`),
+      state.month === todayMonth() ? api(`/chats/${budgetsChatId()}/forecast`) : null,
     ]);
   } catch (e) {
     content.innerHTML = `<div class="empty-state">${escapeHtml(e.message)}</div>`;
@@ -40,6 +41,7 @@ async function renderBudgetsTab() {
       <div class="label">${monthLabel(state.month)}</div>
       <button data-dir="1">›</button>
     </div>
+    ${forecastHtml(forecast, budgets)}
     ${obligationsHtml(obligations)}
     <div class="section-title">🎯 Лимиты</div>
     <div class="hint-text" style="margin: 0 4px 12px;">${escapeHtml(hint)}</div>
@@ -65,6 +67,22 @@ async function renderBudgetsTab() {
   });
 }
 
+/* Прогноз всех трат на конец месяца (app/shared/forecast.py): «в этом темпе выйдет ~52 000».
+   Если задан общий лимит месяца — сравниваем с ним. До 5-го числа прогноза нет. */
+function forecastHtml(fc, budgets) {
+  if (!fc) return "";
+  const total = budgets.find((b) => !b.category);
+  const over = total && Number(fc.forecast) > Number(total.amount);
+  const vs = total
+    ? (over ? ` — больше лимита на ${fmtMoney(Number(fc.forecast) - Number(total.amount))}` : ` — в пределах лимита ${fmtMoney(total.amount)}`)
+    : "";
+  return `
+    <div class="card forecast-card ${over ? "over" : ""}">
+      <div>📈 Прогноз на конец месяца: <b>${fmtMoney(fc.forecast)}</b>${escapeHtml(vs)}</div>
+      <div class="hint-text">Потрачено ${fmtMoney(fc.spent)}, впереди ${fc.days_left} дн. — с учётом обычного темпа трат и неоплаченных платежей</div>
+    </div>`;
+}
+
 function budgetCardHtml(b) {
   const amount = Number(b.amount);
   const spent = Number(b.spent);
@@ -82,6 +100,10 @@ function budgetCardHtml(b) {
     const now = new Date();
     const daysLeft = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate() - now.getDate() + 1;
     sub += ` · ~${fmtMoney(left / daysLeft)} в день`;
+  }
+  // Прогноз превышения — пока лимит ещё не исчерпан
+  if (b.forecast != null && left > 0 && Number(b.forecast) > amount) {
+    sub = `⚠️ к концу месяца ~${fmtMoney(b.forecast)}`;
   }
   const icon = b.category ? categoryIcon(b.category) : "📅";
   const usedText = reserved > 0

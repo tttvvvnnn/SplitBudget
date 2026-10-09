@@ -26,23 +26,27 @@ def month_range(month: str) -> tuple[dt.date, dt.date]:
     return dt.date(year, mon, 1), dt.date(year + (mon // 12), (mon % 12) + 1, 1)
 
 
-async def spending(session: AsyncSession, chat: Chat, month: str) -> dict[tuple[str, str | None], Decimal]:
+async def spending(
+    session: AsyncSession, chat: Chat, month: str, exclude_recurring: bool = False
+) -> dict[tuple[str, str | None], Decimal]:
     """Траты за месяц: {(категория, подкатегория): сумма}, {(категория, None): сумма по
-    категории} и {("", None): всего}."""
+    категории} и {("", None): всего}. exclude_recurring — без записанных обязательных
+    платежей (для прогноза: их не экстраполируют, см. app/shared/forecast.py)."""
     start, end = month_range(month)
     if chat.is_personal:
-        result = await session.execute(
+        query = (
             select(Expense.category, Expense.subcategory, ExpenseShare.amount)
             .join(ExpenseShare, ExpenseShare.expense_id == Expense.id)
             .join(Member, Member.id == ExpenseShare.member_id)
             .where(Member.tg_user_id == chat.id, Expense.expense_date >= start, Expense.expense_date < end)
         )
     else:
-        result = await session.execute(
-            select(Expense.category, Expense.subcategory, Expense.amount).where(
-                Expense.chat_id == chat.id, Expense.expense_date >= start, Expense.expense_date < end
-            )
+        query = select(Expense.category, Expense.subcategory, Expense.amount).where(
+            Expense.chat_id == chat.id, Expense.expense_date >= start, Expense.expense_date < end
         )
+    if exclude_recurring:
+        query = query.where(Expense.recurring_id.is_(None))
+    result = await session.execute(query)
     totals: dict[tuple[str, str | None], Decimal] = {}
     for category, subcategory, amount in result.all():
         keys = [("", None), (category, None)]

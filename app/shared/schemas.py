@@ -90,7 +90,17 @@ class BudgetOut(BaseModel):
     amount: Decimal
     spent: Decimal
     reserved: Decimal = Decimal("0")  # ещё не оплаченные обязательные платежи этого месяца
+    forecast: Decimal | None = None  # прогноз на конец месяца (только текущий месяц, с 5-го числа)
     label: str
+
+
+class ForecastOut(BaseModel):
+    """Прогноз всех трат пространства на конец текущего месяца (app/shared/forecast.py)."""
+
+    month: str
+    spent: Decimal
+    forecast: Decimal
+    days_left: int
 
 
 class CategorySuggestionOut(BaseModel):
