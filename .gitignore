@@ -1,5 +1,6 @@
 .env
 data/
+!.claude/skills/*/data/
 __pycache__/
 *.pyc
 .venv/
