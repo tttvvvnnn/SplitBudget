@@ -48,9 +48,9 @@ async function renderIncomeTab() {
 
   content.innerHTML = `
     <div class="month-picker">
-      <button data-dir="-1">‹</button>
+      <button data-dir="-1" aria-label="Предыдущий месяц">‹</button>
       <div class="label">${monthLabel(state.month)}</div>
-      <button data-dir="1">›</button>
+      <button data-dir="1" aria-label="Следующий месяц">›</button>
     </div>
     <div class="card free-card">
       <div class="hint-text">Свободно в этом месяце</div>

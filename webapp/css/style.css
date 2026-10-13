@@ -16,39 +16,83 @@
      как поле, а не просто текст на фоне */
   --field-bg: var(--tg-theme-secondary-bg-color, #f2f2f7);
   --field-border: rgba(120, 120, 128, 0.35);
+  /* «Сгруппированный» вид, как настройки самого Telegram: страница — secondary_bg,
+     карточки — section_bg (в старых клиентах его нет → обычный bg). Шапка и
+     таббар — того же цвета, что страница/карточки соответственно. */
+  --page-bg: var(--secondary-bg);
+  --card-bg: var(--tg-theme-section-bg-color, var(--bg));
+  --warning: #ff9500;
+  /* мягкая подсветка акцентом темы — фон иконок, активной вкладки и т.п. */
+  --accent-soft: rgba(36, 129, 204, 0.12);
+  --accent-soft: color-mix(in srgb, var(--link) 12%, transparent);
+  --radius-card: 16px;
+  --tabbar-h: 58px;
 }
 
 html, body {
   margin: 0;
   padding: 0;
   height: 100%;
-  background: var(--bg);
+  background: var(--page-bg);
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   -webkit-tap-highlight-color: transparent;
   /* запрет pinch-zoom и двойного тапа — плюс к user-scalable=no в viewport-мете:
      без этого некоторые WebView всё равно позволяют щипковый зум */
   touch-action: pan-x pan-y;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Суммы — моноширинные цифры, чтобы столбцы денег в списках не «прыгали» по ширине */
+.expense-amount, .total-line, .balance-row, .budget-sub, .ob-amount, .ob-summary,
+.free-amount, .free-rows, .free-per-day, .debt-row b, .balance-banner {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Видимый фокус для клавиатуры (десктопный Telegram) — без влияния на тапы */
+button:focus-visible, .card:focus-visible, .chip:focus-visible, a:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 2px;
+}
+
+/* Отклик на нажатие: всё, что нажимается, чуть гаснет — без сдвига вёрстки */
+button, .card[data-id], .expense-card, .budget-card, .obligation-row, .income-row,
+.balance-banner, .chip, .split-toggle div, .stats-cat[data-expandable] {
+  transition: opacity 0.12s ease, background-color 0.15s ease, color 0.15s ease;
+}
+button:active, .expense-card:active, .budget-card:active, .obligation-row:active,
+.income-row:active, .balance-banner:active, .chip:active, .stats-cat[data-expandable]:active {
+  opacity: 0.65;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 #app {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
-  padding-bottom: 64px;
+  /* таббар + место под «+», чтобы кнопка не закрывала сумму последней карточки */
+  padding-bottom: calc(var(--tabbar-h) + 76px + env(safe-area-inset-bottom));
 }
 
 .header {
   padding: 14px 16px 10px;
   border-bottom: 1px solid var(--border);
-  background: var(--bg);
+  background: var(--page-bg);
   position: sticky;
   top: 0;
   z-index: 5;
 }
 
 .header h1 {
-  font-size: 18px;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
   margin: 0 0 2px;
 }
 
@@ -73,12 +117,14 @@ html, body {
 
 .space-switcher button {
   flex: 0 0 auto;
-  padding: 6px 12px;
-  border-radius: 16px;
+  min-height: 34px;
+  padding: 6px 14px;
+  border-radius: 17px;
   border: 1px solid var(--border);
-  background: var(--secondary-bg);
+  background: var(--card-bg);
   color: var(--text);
-  font-size: 13px;
+  font-size: 14px;
+  font-weight: 500;
   white-space: nowrap;
   cursor: pointer;
 }
@@ -128,7 +174,7 @@ html, body {
 }
 
 .balance-banner.neutral {
-  background: var(--secondary-bg);
+  background: var(--card-bg);
   color: var(--hint);
   border: 1px solid var(--border);
 }
@@ -146,17 +192,26 @@ html, body {
   padding: 10px 16px;
 }
 
+/* стрелки — круглые кнопки 44×44 (минимальная зона касания), а не голые символы */
 .month-picker button {
-  background: none;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--accent-soft);
   border: none;
   color: var(--link);
-  font-size: 20px;
-  padding: 4px 10px;
+  font-size: 24px;
+  line-height: 1;
+  padding: 0 0 3px;
   cursor: pointer;
 }
 
 .month-picker .label {
   font-weight: 600;
+  font-size: 17px;
   min-width: 140px;
   text-align: center;
 }
@@ -167,13 +222,13 @@ html, body {
 }
 
 .card {
-  background: var(--secondary-bg);
+  background: var(--card-bg);
   /* в некоторых темах Telegram secondary_bg_color почти не отличается от основного фона —
      без границы карточки трат в такой теме визуально сливались со страницей */
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   padding: 12px 14px;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .expense-card {
@@ -186,10 +241,10 @@ html, body {
 .expense-thumb {
   width: 44px;
   height: 44px;
-  border-radius: 10px;
+  border-radius: 12px;
   object-fit: cover;
   flex-shrink: 0;
-  background: var(--border);
+  background: var(--accent-soft);
 }
 
 .expense-thumb.placeholder {
@@ -278,7 +333,7 @@ html, body {
   font-size: 7.5px;
   /* Рамка цвета фона карточки — иначе перекрывающиеся кружки визуально сливаются в одно
      пятно вместо читаемой "стопки" аватарок */
-  border: 1.5px solid var(--secondary-bg);
+  border: 1.5px solid var(--card-bg);
   margin-left: -6px;
 }
 
@@ -289,10 +344,10 @@ html, body {
 
 /* Заголовок группы трат за один день в списке — «Сегодня» / «Вчера» / «пн, 3 сен» */
 .day-header {
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--hint);
-  margin: 14px 4px 6px;
+  margin: 16px 6px 6px;
 }
 
 .day-header:first-child {
@@ -349,44 +404,71 @@ html, body {
   left: 0;
   right: 0;
   display: flex;
-  background: var(--bg);
+  background: var(--card-bg);
   border-top: 1px solid var(--border);
-  padding-bottom: env(safe-area-inset-bottom);
+  padding: 4px 4px env(safe-area-inset-bottom);
   z-index: 10;
 }
 
 .tabbar button {
   flex: 1;
+  min-width: 0;
+  min-height: var(--tabbar-h);
   background: none;
   border: none;
-  padding: 8px 0 6px;
-  font-size: 11px;
+  padding: 6px 0 6px;
+  font-size: 10.5px;
+  font-weight: 500;
   color: var(--hint);
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
+  justify-content: center;
+  gap: 3px;
   cursor: pointer;
 }
 
-.tabbar button .icon { font-size: 20px; }
+.tabbar button span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
-.tabbar button.active { color: var(--link); }
+/* иконка активной вкладки — на «пилюле» акцентного цвета, как в Material/iOS 18 */
+.tabbar .icon {
+  width: 46px;
+  height: 28px;
+  padding: 3px 12px;
+  border-radius: 14px;
+  transition: background-color 0.2s ease;
+}
+
+.tabbar button.active { color: var(--link); font-weight: 600; }
+.tabbar button.active .icon { background: var(--accent-soft); }
 
 .fab {
   position: fixed;
-  right: 18px;
-  bottom: 78px;
-  width: 54px;
-  height: 54px;
-  border-radius: 50%;
+  right: 16px;
+  bottom: calc(var(--tabbar-h) + 22px + env(safe-area-inset-bottom));
+  width: 56px;
+  height: 56px;
+  border-radius: 18px;
   background: var(--button);
   color: var(--button-text);
   border: none;
-  font-size: 26px;
-  box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+  /* display задаётся из updateFab() (flex/none) — центрирование иконки ниже */
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22), 0 2px 6px rgba(0, 0, 0, 0.12);
   cursor: pointer;
   z-index: 8;
+}
+
+.fab svg {
+  width: 26px;
+  height: 26px;
 }
 
 .btn {
@@ -404,7 +486,7 @@ html, body {
 }
 
 .btn.secondary {
-  background: var(--secondary-bg);
+  background: var(--card-bg);
   color: var(--text);
   /* без границы кнопка сливалась с соседними полями/фоном — тот же приём контраста,
      что и у .field */
@@ -418,6 +500,7 @@ html, body {
 
 .btn.small {
   width: auto;
+  min-height: 36px;
   padding: 8px 14px;
   font-size: 13px;
   border-radius: 10px;
@@ -591,7 +674,7 @@ html, body {
   gap: 6px;
   padding: 6px 12px 6px 6px;
   border-radius: 20px;
-  background: var(--secondary-bg);
+  background: var(--field-bg);
   border: 1px solid var(--border);
   font-size: 13.5px;
   cursor: pointer;
@@ -671,7 +754,14 @@ html, body {
   z-index: 20;
   display: flex;
   align-items: flex-end;
+  animation: overlay-in 0.2s ease-out;
 }
+
+/* Шторка выезжает снизу, а не появляется мгновенно — видно, откуда она взялась */
+.sheet { animation: sheet-in 0.26s cubic-bezier(0.2, 0.9, 0.3, 1); }
+
+@keyframes overlay-in { from { background: rgba(0,0,0,0); } }
+@keyframes sheet-in { from { transform: translateY(40%); opacity: 0.4; } }
 
 .sheet {
   background: var(--bg);
@@ -684,20 +774,20 @@ html, body {
   /* страховка от горизонтальной прокрутки, если какой-то ряд внутри формы всё же не
      впишется по ширине — обрезаем, а не даём утянуть страницу вбок */
   overflow-x: hidden;
-  border-radius: 18px 18px 0 0;
-  padding: 12px 16px calc(16px + env(safe-area-inset-bottom));
+  border-radius: 20px 20px 0 0;
+  padding: 8px 16px calc(16px + env(safe-area-inset-bottom));
 }
 
 .sheet-handle {
   width: 36px;
-  height: 4px;
-  background: var(--border);
+  height: 5px;
+  background: var(--field-border);
   border-radius: 4px;
   margin: 0 auto 10px;
 }
 
 .sheet-title {
-  font-size: 17px;
+  font-size: 20px;
   font-weight: 700;
   margin-bottom: 10px;
 }
@@ -723,7 +813,11 @@ html, body {
 
 .debt-row .who {
   font-size: 14.5px;
+  min-width: 0;
 }
+
+/* сумма долга не должна переноситься на две строки («145,00 / RUB») */
+.debt-row b { white-space: nowrap; }
 
 .balance-row {
   display: flex;
@@ -740,9 +834,10 @@ html, body {
 
 .section-title {
   font-size: 13px;
+  font-weight: 500;
   text-transform: uppercase;
   color: var(--hint);
-  margin: 18px 4px 8px;
+  margin: 20px 6px 8px;
   letter-spacing: 0.4px;
 }
 
@@ -793,6 +888,8 @@ html, body {
   border: none;
   background: transparent;
   font-size: 16px;
+  min-width: 40px;
+  min-height: 40px;
   padding: 4px 8px;
   cursor: pointer;
   border-radius: 8px;
@@ -800,7 +897,7 @@ html, body {
 }
 
 .icon-btn:active {
-  background: var(--secondary-bg);
+  background: var(--field-bg);
 }
 
 .icon-btn.delete-btn:active {
@@ -833,16 +930,18 @@ html, body {
 }
 
 .chart-wrap {
-  background: var(--secondary-bg);
-  border-radius: 14px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
   padding: 14px;
   margin-bottom: 10px;
 }
 
 .total-line {
   text-align: center;
-  font-size: 22px;
+  font-size: 30px;
   font-weight: 700;
+  letter-spacing: -0.5px;
   margin: 6px 0 14px;
 }
 
@@ -897,12 +996,13 @@ html, body {
   height: 8px;
   margin-top: 8px;
   border-radius: 4px;
-  background: var(--border);
+  background: var(--field-bg);
   overflow: hidden;
 }
 
 .budget-fill {
   height: 100%;
+  border-radius: 4px;
 }
 
 /* Неоплаченные обязательные платежи — заштрихованная часть полоски */
@@ -912,9 +1012,9 @@ html, body {
 }
 
 .budget-fill.ok { background: var(--success); }
-.budget-fill.warn { background: #ff9500; }
+.budget-fill.warn { background: var(--warning); }
 .budget-fill.over { background: var(--danger); }
-.budget-pct.warn { color: #ff9500; }
+.budget-pct.warn { color: var(--warning); }
 .budget-pct.over { color: var(--danger); }
 
 /* Обязательные платежи во вкладке «Лимиты» */
@@ -952,7 +1052,7 @@ html, body {
 .ob-amount { font-weight: 600; }
 .ob-status { font-size: 12px; color: var(--hint); }
 .ob-status.paid { color: var(--success); }
-.ob-status.soon { color: #ff9500; }
+.ob-status.soon { color: var(--warning); }
 .ob-status.overdue { color: var(--danger); }
 
 /* Вкладка «Доходы» (tabs/income.js) */
@@ -1031,11 +1131,12 @@ html, body {
   margin: 0 auto 4px;
   padding: 3px;
   border-radius: 18px;
-  background: var(--secondary-bg);
+  background: var(--card-bg);
   border: 1px solid var(--border);
 }
 .share-toggle button {
-  padding: 5px 14px;
+  min-height: 32px;
+  padding: 5px 16px;
   border: none;
   border-radius: 15px;
   background: none;

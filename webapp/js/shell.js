@@ -43,14 +43,31 @@ function renderVersionBadge() {
 
 /* ---------------- Каркас: шапка + вкладки ---------------- */
 
+/* Иконки таббара — линейные SVG (24×24, stroke = currentColor), а не эмодзи: эмодзи
+   рисуются шрифтом системы, на каждой платформе выглядят по-разному и не красятся в цвет
+   темы, а SVG берут цвет текста кнопки — активная вкладка подсвечивается цветом темы. */
+const TAB_ICONS = {
+  expenses: '<path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><path d="M12 17.5v-11"/>',
+  balance: '<path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="M7 21h10"/><path d="M12 3v18"/><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/>',
+  stats: '<path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/>',
+  budgets: '<path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/>',
+  recurring: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/>',
+  income: '<path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/>',
+  goals: '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><path d="M4 22v-7"/>',
+};
+
+function tabIconSvg(id) {
+  return `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${TAB_ICONS[id]}</svg>`;
+}
+
 const TABS = [
-  { id: "expenses", icon: "💸", label: "Траты" },
-  { id: "balance", icon: "⚖️", label: "Баланс" },
-  { id: "stats", icon: "📊", label: "Статистика" },
-  { id: "budgets", icon: "🎯", label: "Лимиты" },
-  { id: "recurring", icon: "📌", label: "Платежи" },
-  { id: "income", icon: "💰", label: "Доходы" },
-  { id: "goals", icon: "🐷", label: "Цели" },
+  { id: "expenses", label: "Траты" },
+  { id: "balance", label: "Баланс" },
+  { id: "stats", label: "Статистика" },
+  { id: "budgets", label: "Лимиты" },
+  { id: "recurring", label: "Платежи" },
+  { id: "income", label: "Доходы" },
+  { id: "goals", label: "Цели" },
 ];
 
 // Только личные вкладки — в семейном чате их нет
@@ -141,13 +158,15 @@ function renderShell({ onSwitchSpace } = {}) {
       ${spaceSwitcherHtml()}
     </div>
     <div id="content" class="content"></div>
-    <button class="fab" id="fab-add" title="Добавить">+</button>
-    <div class="tabbar">
+    <button class="fab" id="fab-add" title="Добавить" aria-label="Добавить">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+    </button>
+    <nav class="tabbar">
       ${tabs.map((t) => `
-        <button data-tab="${t.id}" class="${state.tab === t.id ? "active" : ""}">
-          <span class="icon">${t.icon}</span><span>${t.label}</span>
+        <button data-tab="${t.id}" class="${state.tab === t.id ? "active" : ""}"${state.tab === t.id ? ' aria-current="page"' : ""}>
+          ${tabIconSvg(t.id)}<span>${t.label}</span>
         </button>`).join("")}
-    </div>`;
+    </nav>`;
 
   app.querySelectorAll(".space-switcher button[data-space]").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -182,7 +201,12 @@ async function switchTab(tabId) {
   if (tabId === state.tab) return;
   haptic("selection");
   state.tab = tabId;
-  document.querySelectorAll(".tabbar button").forEach((b) => b.classList.toggle("active", b.dataset.tab === tabId));
+  document.querySelectorAll(".tabbar button").forEach((b) => {
+    const active = b.dataset.tab === tabId;
+    b.classList.toggle("active", active);
+    if (active) b.setAttribute("aria-current", "page");
+    else b.removeAttribute("aria-current");
+  });
   updateFab();
   await renderTab();
 }

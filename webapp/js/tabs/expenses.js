@@ -61,9 +61,9 @@ async function renderExpensesTab() {
   content.innerHTML = `
     ${balanceBannerHtml()}
     <div class="month-picker">
-      <button data-dir="-1">‹</button>
+      <button data-dir="-1" aria-label="Предыдущий месяц">‹</button>
       <div class="label">${monthLabel(state.month)}</div>
-      <button data-dir="1">›</button>
+      <button data-dir="1" aria-label="Следующий месяц">›</button>
     </div>
     <div class="total-line" id="total-line"></div>
     <div class="top-actions">

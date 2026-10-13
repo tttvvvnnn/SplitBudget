@@ -38,8 +38,14 @@ async function init() {
   }
   state.initData = tg ? tg.initData : "";
 
-  if (tg && tg.themeParams && tg.themeParams.bg_color) {
-    document.body.style.background = tg.themeParams.bg_color;
+  // Фон страницы — secondary_bg_color темы, карточки — section_bg_color (как списки в
+  // настройках самого Telegram), см. --page-bg/--card-bg в style.css. Шапку и подложку
+  // самого Telegram красим в тот же цвет, чтобы приложение не выглядело вставкой.
+  if (tg) {
+    try {
+      if (tg.setBackgroundColor) tg.setBackgroundColor("secondary_bg_color");
+      if (tg.setHeaderColor) tg.setHeaderColor("secondary_bg_color");
+    } catch (e) { /* старый клиент — не критично */ }
   }
 
   if (!state.initData) {

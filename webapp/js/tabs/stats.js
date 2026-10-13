@@ -23,9 +23,9 @@ async function renderStatsTab() {
 
   content.innerHTML = `
     <div class="month-picker">
-      <button data-dir="-1">‹</button>
+      <button data-dir="-1" aria-label="Предыдущий месяц">‹</button>
       <div class="label">${monthLabel(state.month)}</div>
-      <button data-dir="1">›</button>
+      <button data-dir="1" aria-label="Следующий месяц">›</button>
     </div>
     ${isPersonal() ? shareToggleHtml() : ""}
     <div class="total-line">${fmtMoney(stats.total)}</div>
@@ -68,11 +68,21 @@ async function renderStatsTab() {
         datasets: [{
           data: stats.by_category.map((c) => Number(c.total)),
           backgroundColor: stats.by_category.map((_, i) => palette[i % palette.length]),
-          borderWidth: 0,
+          // обводка цветом карточки — тонкие «зазоры» между секторами, иначе соседние
+          // яркие сектора сливаются
+          borderWidth: 2,
+          borderColor: getComputedStyle(ctx.closest(".chart-wrap")).backgroundColor,
+          hoverOffset: 6,
         }],
       },
       options: {
-        plugins: { legend: { position: "bottom", labels: { color: getComputedStyle(document.body).color } } },
+        cutout: "62%",
+        plugins: {
+          legend: {
+            position: "bottom",
+            labels: { color: getComputedStyle(document.body).color, usePointStyle: true, pointStyle: "circle", boxWidth: 8, boxHeight: 8, padding: 14 },
+          },
+        },
       },
     });
   }
