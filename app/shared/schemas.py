@@ -499,3 +499,36 @@ class PlanSettingsIn(BaseModel):
 
 class PlanOrderIn(BaseModel):
     ids: list[int]
+
+
+class SubcategoryNodeOut(BaseModel):
+    name: str
+    custom: bool
+    hidden: bool
+    id: int | None
+
+
+class CategoryTreeNodeOut(BaseModel):
+    """Категория пространства (app/shared/custom_categories.py)."""
+
+    name: str
+    icon: str
+    subcategories: list[str]  # видимые подкатегории
+    all_subcategories: list[SubcategoryNodeOut]
+    custom: bool
+    hidden: bool
+    id: int | None
+    family: str | None = None  # своя категория семейного чата (только в «Моих финансах»)
+    family_subcategories: list[str] = []
+
+
+class CustomCategoryIn(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+    icon: str | None = Field(default=None, max_length=16)
+    parent: str | None = Field(default=None, max_length=64)
+
+
+class CategoryHiddenIn(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+    parent: str | None = Field(default=None, max_length=64)
+    hidden: bool

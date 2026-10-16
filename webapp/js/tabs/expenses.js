@@ -1,3 +1,4 @@
+import { openCategoriesSheet } from "../categories.js";
 import { state, isPersonal, hideFamilyOnly } from "../state.js";
 import { api, loadAuthedImage } from "../api.js";
 import { tg, haptic, toast, confirmAction } from "../telegram.js";
@@ -68,6 +69,7 @@ async function renderExpensesTab() {
     <div class="total-line" id="total-line"></div>
     <div class="top-actions">
       <button class="btn small secondary" id="filter-toggle-btn">🔍 Фильтр${hasFilters ? " •" : ""}</button>
+      <button class="btn small secondary" id="categories-btn">🏷 Категории</button>
     </div>
     <div id="filter-panel" style="display:${state.filtersOpen ? "block" : "none"}; margin: 0 0 10px;">
       <div class="field">
@@ -102,6 +104,10 @@ async function renderExpensesTab() {
     });
   });
   const filterPanel = document.getElementById("filter-panel");
+  document.getElementById("categories-btn").addEventListener("click", () => {
+    haptic("selection");
+    openCategoriesSheet(() => renderExpensesTab());
+  });
   const filterToggleBtn = document.getElementById("filter-toggle-btn");
   filterToggleBtn.addEventListener("click", () => {
     haptic("selection");

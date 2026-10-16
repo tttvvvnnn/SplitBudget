@@ -17,7 +17,7 @@ function todayISO() {
 /* Иконка категории — из дерева категорий с сервера (state.categoryTree, см.
    app/shared/categories.py). Для категорий не из дерева — 🏷️. */
 function categoryIcon(category) {
-  const node = state.categoryTree.find((c) => c.name === category);
+  const node = state.categoryNodes.find((c) => c.name === category) || state.categoryTree.find((c) => c.name === category);
   return node ? node.icon : "🏷️";
 }
 

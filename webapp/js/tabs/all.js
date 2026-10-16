@@ -4,6 +4,7 @@ import { haptic } from "../telegram.js";
 import { categoryIcon, monthLabel, shiftMonth, fmtMoney, escapeHtml } from "../format.js";
 import { openExpenseModal, dayHeaderLabel } from "./expenses.js";
 import { categoryBadgeHtml } from "../category-fields.js";
+import { openCategoriesSheet } from "../categories.js";
 
 /* ---------------- Вкладка «Траты» в «Моих финансах» ----------------
    Личные траты и траты семейных чатов, в которых у пользователя есть доля, одним списком.
@@ -76,6 +77,9 @@ async function renderAllExpensesTab() {
     </div>
     ${shareToggleHtml()}
     <div class="total-line" id="total-line"></div>
+    <div class="top-actions">
+      <button class="btn small secondary" id="categories-btn">🏷 Категории</button>
+    </div>
     <div class="field-row" style="margin-bottom: 10px;">
       <div class="field">
         <input type="text" id="all-search" placeholder="Поиск по названию…" value="${escapeHtml(allFilters.search)}">
@@ -95,6 +99,10 @@ async function renderAllExpensesTab() {
       state.month = shiftMonth(state.month, Number(b.dataset.dir));
       await renderAllExpensesTab();
     });
+  });
+  document.getElementById("categories-btn").addEventListener("click", () => {
+    haptic("selection");
+    openCategoriesSheet(() => renderAllExpensesTab());
   });
   bindShareToggle(content, () => {
     content.querySelectorAll("#share-toggle button").forEach((x) => x.classList.toggle("active", x.dataset.mode === shareMode()));

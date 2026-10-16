@@ -1406,3 +1406,47 @@ button:active, .expense-card:active, .budget-card:active, .obligation-row:active
 .sub-hint .sub-hint-actions .btn {
   flex: 1;
 }
+
+/* Экран «Категории» (categories.js) */
+.cat-list {
+  margin-top: 14px;
+}
+
+.cat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.cat-row.cat-sub {
+  padding-left: 22px;
+  font-size: 14px;
+}
+
+.cat-row.hidden-cat .cat-name {
+  opacity: 0.45;
+}
+
+.cat-name {
+  flex: 1;
+  cursor: pointer;
+}
+
+.cat-toggle {
+  display: inline-block;
+  width: 14px;
+  color: var(--hint);
+}
+
+.cat-actions {
+  display: flex;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.cat-actions .link-btn {
+  padding: 4px 6px;
+}
