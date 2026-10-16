@@ -68,10 +68,11 @@ async function renderStatsTab() {
         datasets: [{
           data: stats.by_category.map((c) => Number(c.total)),
           backgroundColor: stats.by_category.map((_, i) => palette[i % palette.length]),
-          // обводка цветом карточки — тонкие «зазоры» между секторами, иначе соседние
-          // яркие сектора сливаются
-          borderWidth: 2,
-          borderColor: getComputedStyle(ctx.closest(".chart-wrap")).backgroundColor,
+          // зазоры между секторами — промежутком, а не обводкой цветом карточки:
+          // карточка теперь полупрозрачная, и обводка её цветом легла бы поверх фона пятнами
+          borderWidth: 0,
+          spacing: 3,
+          borderRadius: 6,
           hoverOffset: 6,
         }],
       },

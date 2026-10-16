@@ -1,4 +1,4 @@
-/* Семейные траты — mini app. Ванильный JS, без сборки: нативные ES-модули, точка входа —
+/* SplitBudget — mini app. Ванильный JS, без сборки: нативные ES-модули, точка входа —
    этот файл (подключён в index.html как <script type="module">). Что где лежит:
      telegram.js      — объект Telegram WebApp, вибрация, алерты/подтверждения
      state.js         — общее состояние приложения
@@ -7,6 +7,7 @@
      members.js       — подписи и аватарки участников
      sheet.js         — шторки (bottom sheet), нативная MainButton, ошибки форм
      member-modals.js — добавление/переименование/список участников
+     brand.js         — знак бренда, светлая/тёмная тема
      shell.js         — шапка, таббар, переключение вкладок, бейдж версии
      tabs/*.js        — вкладки «Траты», «Баланс», «Статистика», «Лимиты», «Платежи» и их формы */
 
@@ -15,6 +16,9 @@ import { state } from "./state.js";
 import { escapeHtml } from "./format.js";
 import { api } from "./api.js";
 import { loadVersionBadge, renderShell, renderTab, PERSONAL_ONLY_TABS } from "./shell.js";
+import { initTheme } from "./brand.js";
+
+initTheme();
 
 /* ---------------- Инициализация ---------------- */
 
@@ -37,16 +41,6 @@ async function init() {
     }
   }
   state.initData = tg ? tg.initData : "";
-
-  // Фон страницы — secondary_bg_color темы, карточки — section_bg_color (как списки в
-  // настройках самого Telegram), см. --page-bg/--card-bg в style.css. Шапку и подложку
-  // самого Telegram красим в тот же цвет, чтобы приложение не выглядело вставкой.
-  if (tg) {
-    try {
-      if (tg.setBackgroundColor) tg.setBackgroundColor("secondary_bg_color");
-      if (tg.setHeaderColor) tg.setHeaderColor("secondary_bg_color");
-    } catch (e) { /* старый клиент — не критично */ }
-  }
 
   if (!state.initData) {
     renderError(

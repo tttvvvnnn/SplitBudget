@@ -3,15 +3,33 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-  <title>Семейные траты</title>
+  <title>SplitBudget</title>
+  <meta name="theme-color" content="#edf3fa" />
   <link rel="icon" href="favicon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="apple-touch-icon.png" />
   <link rel="stylesheet" href="css/style.css" />
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <!-- Тема ставится сразу, до загрузки модулей, чтобы заставка не мигала светлой в тёмной теме.
+       Дальше её ведёт js/brand.js (в том числе смену темы на лету). -->
+  <script>
+    (function () {
+      var tg = window.Telegram && window.Telegram.WebApp;
+      if (tg && tg.colorScheme) document.documentElement.dataset.theme = tg.colorScheme;
+    })();
+  </script>
 </head>
 <body>
   <div id="app">
-    <div class="loading" id="global-loading">Загрузка…</div>
+    <!-- Заставка до загрузки JS: знак из brand/logo-mark.svg (цвета — из style.css) -->
+    <div class="splash" id="global-loading">
+      <svg class="brand-mark" viewBox="0 0 100 100" aria-hidden="true">
+        <g transform="rotate(-24 50 50) translate(0 -2)">
+          <path class="half-a" d="M47 10A40 40 0 0 0 47 90Z"/>
+          <path class="half-b" d="M53 14A40 40 0 0 1 53 94Z"/>
+        </g>
+      </svg>
+      <div class="wordmark"><span class="split">Split</span>Budget</div>
+    </div>
   </div>
 
   <!-- Раньше грузился с cdnjs.cloudflare.com — этот CDN недоступен на части сетей в России,

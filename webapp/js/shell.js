@@ -4,6 +4,7 @@ import { api } from "./api.js";
 import { openSheet, closeSheet } from "./sheet.js";
 import { escapeHtml } from "./format.js";
 import { memberLabel } from "./members.js";
+import { brandMarkSvg, wordmarkHtml } from "./brand.js";
 import { renderExpensesTab, openExpenseModal } from "./tabs/expenses.js";
 import { renderBalanceTab } from "./tabs/balance.js";
 import { renderStatsTab } from "./tabs/stats.js";
@@ -153,7 +154,8 @@ function renderShell({ onSwitchSpace } = {}) {
     + ` · <button class="link-btn inline" id="hide-chat">Убрать из списка</button>`;
   app.innerHTML = `
     <div class="header">
-      <h1>${escapeHtml(state.chat.title || "Семейные траты")}</h1>
+      <div class="brand-row">${brandMarkSvg()}${wordmarkHtml()}</div>
+      <h1>${escapeHtml(state.chat.title || "SplitBudget")}</h1>
       <div class="sub">${sub}</div>
       ${spaceSwitcherHtml()}
     </div>
