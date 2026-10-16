@@ -326,12 +326,24 @@ class CategoryStat(BaseModel):
     total: Decimal
     count: int
     subcategories: list[SubcategoryStat] = Field(default_factory=list)
+    prev_total: Decimal = Decimal("0")  # та же категория в прошлом месяце
+
+
+class MonthTotal(BaseModel):
+    month: str
+    total: Decimal
 
 
 class StatsOut(BaseModel):
     period: str
     total: Decimal
     by_category: list[CategoryStat]
+    prev_total: Decimal = Decimal("0")  # весь прошлый месяц
+    # Траты нарастающим итогом по дням: daily[i] — потрачено с 1-го по (i+1)-е число
+    daily: list[Decimal] = Field(default_factory=list)
+    prev_daily: list[Decimal] = Field(default_factory=list)
+    # Итоги за 12 месяцев, заканчивая выбранным, от старых к новым
+    trend: list[MonthTotal] = Field(default_factory=list)
 
 
 class IncomeIn(BaseModel):

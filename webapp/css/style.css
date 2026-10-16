@@ -158,11 +158,11 @@ button:focus-visible, .card:focus-visible, .chip:focus-visible, a:focus-visible 
 
 /* Отклик на нажатие: всё, что нажимается, чуть гаснет — без сдвига вёрстки */
 button, .card[data-id], .expense-card, .budget-card, .obligation-row, .income-row,
-.balance-banner, .chip, .split-toggle div, .stats-cat[data-expandable] {
+.balance-banner, .chip, .split-toggle div, .stats-cat {
   transition: opacity 0.12s ease, background-color 0.15s ease, color 0.15s ease;
 }
 button:active, .expense-card:active, .budget-card:active, .obligation-row:active,
-.income-row:active, .balance-banner:active, .chip:active, .stats-cat[data-expandable]:active {
+.income-row:active, .balance-banner:active, .chip:active, .stats-cat:active {
   opacity: 0.65;
 }
 
@@ -1087,27 +1087,66 @@ button:active, .expense-card:active, .budget-card:active, .obligation-row:active
   margin: 6px 0 14px;
 }
 
-/* Статистика: раскрытие категории по подкатегориям (см. categoryRowHtml в tabs/stats.js) */
-.stats-cat[data-expandable] {
-  cursor: pointer;
-}
+/* Статистика (tabs/stats.js) */
+.total-delta { text-align: center; margin: -10px 0 14px; font-size: 13px; min-height: 4px; }
+.delta { font-size: 12px; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.delta.up { color: var(--danger); }
+.delta.down { color: var(--success); }
+.delta.same { color: var(--hint); font-weight: 500; }
 
-.stats-cat .chevron {
-  display: inline-block;
-  width: 14px;
-  color: var(--hint);
-  transition: transform 0.15s;
-}
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; flex-shrink: 0; }
+.dot.big { width: 12px; height: 12px; margin-right: 8px; vertical-align: 2px; }
 
-.stats-cat.open .chevron {
-  transform: rotate(90deg);
+.chart-box { position: relative; height: 190px; }
+.chart-box.short { height: 160px; }
+.donut-wrap { position: relative; }
+.donut-box { height: 230px; }
+.donut-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
 }
+.donut-center b { font-size: 19px; letter-spacing: -0.3px; }
+.donut-center .hint-text { margin: 0 0 2px; }
 
-.stats-sub {
-  padding-left: 22px;
-  font-size: 14px;
-  color: var(--hint);
-}
+.stats-list { padding: 4px 14px; }
+.stats-cat { padding: 10px 0; border-bottom: 1px solid var(--border); cursor: pointer; }
+.stats-cat:last-child { border-bottom: none; }
+.stats-cat-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 14.5px; }
+.stats-cat-name { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.stats-cat-name .hint-text { margin: 0 0 0 2px; }
+.stats-cat-amount { font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.stats-cat-sub { display: flex; align-items: center; gap: 10px; margin-top: 7px; padding-left: 15px; }
+.stats-cat-bar { flex: 1; height: 5px; border-radius: 3px; background: var(--field-bg); overflow: hidden; }
+.stats-cat-bar div { height: 100%; border-radius: 3px; }
+
+.chart-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--hint); margin-bottom: 10px; }
+.chart-legend span { display: inline-flex; align-items: center; }
+.chart-legend .dot { width: 14px; height: 3px; border-radius: 2px; margin-right: 6px; }
+.chart-legend .dot.dashed { background: repeating-linear-gradient(90deg, var(--hint) 0 4px, transparent 4px 7px); }
+.chart-legend .dot.dashed.accent { background: repeating-linear-gradient(90deg, var(--link) 0 5px, transparent 5px 8px); }
+
+.trend-title { display: flex; align-items: center; justify-content: space-between; }
+.trend-toggle { margin: 0; text-transform: none; letter-spacing: 0; }
+.trend-toggle button { min-height: 28px; padding: 3px 12px; font-size: 12px; }
+
+.income-vs { padding: 12px 14px; }
+.income-vs-bar { height: 8px; border-radius: 4px; background: color-mix(in srgb, var(--success) 25%, transparent); overflow: hidden; }
+.income-vs-bar div { height: 100%; border-radius: 4px; background: var(--link); }
+.income-vs-rows { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; font-variant-numeric: tabular-nums; }
+.income-vs-rows > div { display: flex; flex-direction: column; gap: 2px; font-size: 14px; }
+.income-vs-rows > div:last-child { text-align: right; }
+.income-vs-rows .hint-text { margin: 0; }
+
+.cat-expense { align-items: baseline; gap: 10px; }
+.cat-expense-title { min-width: 0; }
+.cat-expense-title .hint-text { margin-right: 6px; }
+.cat-expense > span:last-child { white-space: nowrap; }
 
 /* Вкладка «Лимиты» (tabs/budgets.js): карточка с полоской прогресса */
 .budget-card {

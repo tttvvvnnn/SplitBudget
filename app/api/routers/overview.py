@@ -11,10 +11,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
-from app.shared.categories import summarize_by_category
 from app.shared.database import get_session
 from app.shared.models import Chat, Expense, ExpenseShare, Member
 from app.shared.schemas import AllExpenseOut, StatsOut
+from app.shared.stats import build_stats, stats_range
 
 router = APIRouter(tags=["overview"])
 
@@ -30,7 +30,10 @@ def _month_range(month: str) -> tuple[dt.date, dt.date]:
 async def _my_shares(session: AsyncSession, tg_user_id: int, month: str):
     """Строки (Expense, ExpenseShare, Chat) — траты за месяц, в которых у пользователя есть доля,
     по всем чатам, где он участник (в т.ч. тем, из которых он уже вышел: история остаётся)."""
-    start, end = _month_range(month)
+    return await _my_shares_between(session, tg_user_id, *_month_range(month))
+
+
+async def _my_shares_between(session: AsyncSession, tg_user_id: int, start: dt.date, end: dt.date):
     result = await session.execute(
         select(Expense, ExpenseShare, Chat)
         .join(ExpenseShare, ExpenseShare.expense_id == Expense.id)
@@ -92,9 +95,12 @@ async def all_stats(
 ) -> StatsOut:
     """full=true — полные суммы трат, в которых пользователь участвует (переключатель
     «всего» в «Моих финансах»), иначе — только его доля."""
-    rows = await _my_shares(session, int(user["id"]), month)
-    total, by_category = summarize_by_category(
-        (expense.category, expense.subcategory, expense.amount if full else share.amount)
+    try:
+        start, end = stats_range(month)
+    except (ValueError, IndexError) as exc:
+        raise HTTPException(status_code=400, detail="month должен быть в формате YYYY-MM") from exc
+    rows = await _my_shares_between(session, int(user["id"]), start, end)
+    return build_stats(month, [
+        (expense.expense_date, expense.category, expense.subcategory, expense.amount if full else share.amount)
         for expense, share, _ in rows
-    )
-    return StatsOut(period=month, total=total, by_category=by_category)
+    ])
