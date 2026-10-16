@@ -1247,9 +1247,58 @@ button:active, .expense-card:active, .budget-card:active, .obligation-row:active
   margin: 6px 0 4px 18px;
 }
 
-.plan-free {
-  border: 1px dashed var(--border);
+/* Компактный список статей: одна строка на статью */
+.plan-list {
+  padding: 2px 14px;
 }
+
+.plan-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.plan-row:last-child,
+.plan-row:has(+ .plan-row-free) { border-bottom: none; }
+.plan-row-free { border-top: 1px dashed var(--border); }
+.plan-row-icon { font-size: 20px; width: 26px; text-align: center; }
+.plan-row-main { flex: 1; min-width: 0; }
+
+.plan-row-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.plan-row-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plan-row-left { font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.plan-row-left.warn { color: var(--warning); }
+.plan-row-bar { height: 4px; margin-top: 5px; }
+.plan-row-sub { font-size: 12px; margin-top: 3px; }
+
+.plan-figures { margin-bottom: 10px; }
+
+/* «На что ушли деньги» в статье */
+.plan-entries { margin-top: 8px; }
+.plan-entries-empty { margin-top: 8px; }
+
+.plan-entry {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 6px 0;
+  font-size: 13.5px;
+  border-bottom: 1px solid var(--border);
+}
+
+.plan-entry:last-child { border-bottom: none; }
+.plan-entry-date { width: 46px; flex-shrink: 0; font-size: 12px; }
+.plan-entry-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plan-entry-amount { white-space: nowrap; font-weight: 600; font-variant-numeric: tabular-nums; }
 
 /* Обязательные платежи во вкладке «Лимиты» */
 .obligations-card {

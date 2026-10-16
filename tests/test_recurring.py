@@ -75,3 +75,17 @@ def test_delete_recurring(client, seeded_chat, auth_header):
 
     r = client.get(f"/api/chats/{seeded_chat.chat_id}/recurring", headers=auth_header(seeded_chat.alice_init_data))
     assert all(item["id"] != recurring_id for item in r.json())
+
+
+def test_recurring_without_amount(client, seeded_chat, auth_header):
+    """Платёж без суммы — только напоминание; делить его можно только поровну."""
+    a, b = seeded_chat.alice_member_id, seeded_chat.bob_member_id
+    base = {"title": "Кредитка", "amount": 0, "payer_member_id": a, "day_of_month": 7, "kind": "card"}
+    h = auth_header(seeded_chat.alice_init_data)
+    url = f"/api/chats/{seeded_chat.chat_id}/recurring"
+    r = client.post(url, headers=h, json={**base, "participants": [{"member_id": a}, {"member_id": b}]})
+    assert r.status_code == 201, r.text
+    assert float(r.json()["amount"]) == 0.0
+    r = client.post(url, headers=h, json={**base, "split_type": "custom",
+                                          "participants": [{"member_id": a, "custom_amount": 0}]})
+    assert r.status_code == 400

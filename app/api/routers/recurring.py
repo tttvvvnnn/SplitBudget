@@ -38,6 +38,8 @@ async def _validate_members(session, chat_id: int, ids: set[int]) -> None:
 def _validate_split(amount, split_type: str, participants: list[RecurringParticipantIn]) -> None:
     """Просто проверяем корректность на этапе создания, не сохраняя результат — реальный расчёт
     долей происходит при генерации конкретной траты планировщиком."""
+    if not amount and split_type != "equal":
+        raise ValueError("Без суммы платёж можно делить только поровну")
     if split_type == "equal":
         build_equal_shares(amount, [p.member_id for p in participants])
     else:

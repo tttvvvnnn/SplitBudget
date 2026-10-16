@@ -3,18 +3,19 @@ import { api } from "../api.js";
 import { tg, haptic, toast, confirmAction } from "../telegram.js";
 import { categoryIcon, todayISO, fmtMoney, escapeHtml } from "../format.js";
 import { openSheet, closeSheet, useMainButtonFor, showFormError } from "../sheet.js";
-import { obligationsHtml, openPaymentSheet } from "./budgets.js";
 
 /* ---------------- Вкладка «План» ----------------
    План распределения дохода «Моих финансов» (app/shared/plan.py): каждое поступление
    делится по процентам статей, «Свободно» получает остаток процентов. По статье видно,
    сколько выделено, потрачено и осталось. В конце месяца плана статьи обнуляются, а их
-   остатки (и минусы) переходят в «Свободно». */
+   остатки (и минусы) переходят в «Свободно».
+
+   Список компактный: статья — одна строка, те, что ушли в минус или близки к лимиту, —
+   сверху. Нажатие открывает статью: цифры, «Отложил», на что ушли деньги, изменение. */
 
 const KIND_LABELS = {
-  spend: ["💸", "Расходы", "Траты выбранных категорий списываются с этой статьи."],
+  spend: ["💸", "Расходы", "Траты выбранных категорий списываются с этой статьи. Для кредитов и кредиток выберите «Кредиты» — туда же попадут платежи по картам."],
   goal: ["🐷", "Накопления", "Выделенное откладывается на цель по кнопке «Отложил»."],
-  debt: ["💳", "Долги", "Статью закрывают платежи по выбранным кредиткам и кредитам."],
 };
 
 // «Категория › Подкатегория» в списке категорий статьи (app/shared/plan.py, SUB_SEP)
@@ -55,56 +56,57 @@ function itemIcon(it) {
   return KIND_LABELS[it.kind][0];
 }
 
-function itemCardHtml(it, isCurrent) {
+// ok | warn | over — как близко статья к лимиту (у накоплений «близко» не бывает)
+function itemLevel(it) {
   const allocated = Number(it.allocated);
   const spent = Number(it.spent);
-  const remaining = Number(it.remaining);
-  const used = allocated > 0 ? (spent / allocated) * 100 : spent > 0 ? 100 : 0;
-  const level = remaining < 0 ? "over" : used >= 80 && it.kind !== "goal" ? "warn" : "ok";
-  const width = Math.min(Math.max(used, 0), 100);
-  const verb = { spend: "Потрачено", goal: "Отложено", debt: "Оплачено", free: "Потрачено" }[it.kind];
-  const left = remaining >= 0
-    ? `${it.kind === "goal" ? "отложить ещё" : "осталось"} <b>${fmtMoney(remaining)}</b>`
-    : `<span class="plan-minus">минус ${fmtMoney(-remaining)}</span>`;
+  if (Number(it.remaining) < 0) return "over";
+  const used = allocated > 0 ? (spent / allocated) * 100 : 0;
+  return used >= 80 && it.kind !== "goal" ? "warn" : "ok";
+}
 
-  const notes = [];
-  if (it.kind === "spend") notes.push(it.categories.map(escapeHtml).join(", "));
-  if (it.kind === "goal" && it.goal_title) {
-    notes.push(`🐷 ${escapeHtml(it.goal_title)}: ${fmtMoney(it.goal_saved)} из ${fmtMoney(it.goal_target)}`);
-  }
-  if (it.kind === "goal" && !it.goal_title) notes.push("Цель удалена — выберите другую");
-  if (it.kind === "debt" && it.debt_left !== null) notes.push(`Долг по карте: ${fmtMoney(it.debt_left)}`);
-  if (it.kind === "free") {
-    const carried = Number(it.carried);
-    if (carried) notes.push(`${carried > 0 ? "Перенесено" : "Перерасход"} с прошлых месяцев: ${fmtMoney(Math.abs(carried))}`);
-    notes.push("Сюда же списываются траты без статьи");
-  }
-  const saveBtn = it.kind === "goal" && it.goal_title && remaining > 0 && isCurrent
-    ? `<button class="btn small plan-save" data-save="${it.id}">✅ Отложил ${fmtMoney(remaining)}</button>`
-    : "";
+function usedWidth(it) {
+  const allocated = Number(it.allocated);
+  const spent = Number(it.spent);
+  const used = allocated > 0 ? (spent / allocated) * 100 : spent > 0 ? 100 : 0;
+  return Math.min(Math.max(used, 0), 100);
+}
+
+function leftHtml(it) {
+  const remaining = Number(it.remaining);
+  if (remaining < 0) return `<span class="plan-minus">−${fmtMoney(-remaining)}</span>`;
+  return fmtMoney(remaining);
+}
+
+function itemRowHtml(it) {
+  const level = itemLevel(it);
+  const verb = it.kind === "goal" ? "отложено" : "потрачено";
   return `
-    <div class="card budget-card plan-item ${it.kind === "free" ? "plan-free" : ""}" data-id="${it.id ?? ""}">
-      <div class="budget-head">
-        <span>${itemIcon(it)} ${escapeHtml(it.title)}</span>
-        <span class="plan-pct">${pctText(it.percent)}</span>
+    <div class="plan-row ${it.kind === "free" ? "plan-row-free" : ""}" data-key="${it.id ?? "free"}">
+      <div class="plan-row-icon">${itemIcon(it)}</div>
+      <div class="plan-row-main">
+        <div class="plan-row-head">
+          <span class="plan-row-title">${escapeHtml(it.title)}</span>
+          <span class="plan-row-left ${level}">${leftHtml(it)}</span>
+        </div>
+        <div class="budget-bar plan-row-bar"><div class="budget-fill ${level}" style="width:${usedWidth(it)}%"></div></div>
+        <div class="plan-row-sub hint-text">${pctText(it.percent)} · ${verb} ${fmtMoney(it.spent)} из ${fmtMoney(it.allocated)}</div>
       </div>
-      <div class="budget-bar"><div class="budget-fill ${level}" style="width:${width}%"></div></div>
-      <div class="budget-sub">
-        <span>${verb} ${fmtMoney(spent)} из ${fmtMoney(allocated)}</span>
-        <span class="hint-text">${left}</span>
-      </div>
-      ${notes.map((n) => `<div class="hint-text plan-note">${n}</div>`).join("")}
-      ${saveBtn}
     </div>`;
+}
+
+// Сверху — ушедшие в минус, затем близкие к лимиту; дальше — в порядке плана
+function sortedItems(items) {
+  const rank = { over: 0, warn: 1, ok: 2 };
+  return items.map((it, n) => ({ it, n })).sort((a, b) => rank[itemLevel(a.it)] - rank[itemLevel(b.it)] || a.n - b.n).map((x) => x.it);
 }
 
 async function renderPlanTab() {
   const content = document.getElementById("content");
   const date = state.planDate || todayISO();
-  let plan, obligations;
+  let plan;
   try {
     plan = await api(`/chats/${planChatId()}/plan?date=${date}`);
-    obligations = await api(`/chats/${planChatId()}/obligations?month=${plan.start.slice(0, 7)}`);
   } catch (e) {
     content.innerHTML = `<div class="empty-state">${escapeHtml(e.message)}</div>`;
     return;
@@ -118,7 +120,7 @@ async function renderPlanTab() {
   const incomeLine = count
     ? `Поступило <b>${fmtMoney(income)}</b> · ${count} ${count === 1 ? "поступление" : count < 5 ? "поступления" : "поступлений"}`
     : "Поступлений пока не было — добавьте их во вкладке «💰 Доходы»";
-  // Можно тратить — остатки расходных статей и «Свободно» (накопления и долги не трогаем)
+  // Можно тратить — остатки расходных статей и «Свободно» (накопления не трогаем)
   const totalLeft = plan.items.reduce((s, i) => s + (i.kind === "spend" || i.kind === "free" ? Number(i.remaining) : 0), 0);
 
   content.innerHTML = `
@@ -129,16 +131,17 @@ async function renderPlanTab() {
     </div>
     <div class="card plan-summary">
       <div>${incomeLine}</div>
-      <div class="hint-text">Распределено ${pctText(plan.percent_total)} · свободно ${pctText(free.percent)} · можно тратить ${fmtMoney(totalLeft)}</div>
+      <div class="hint-text">Можно тратить <b>${fmtMoney(totalLeft)}</b> · распределено ${pctText(plan.percent_total)}</div>
       <button class="link-btn" id="plan-settings">Месяц плана начинается ${plan.start_day}-го числа</button>
     </div>
     ${items.length === 0
       ? '<div class="empty-state">Статей пока нет.<br>Нажмите «+» и задайте, какой процент от каждого поступления идёт на еду, отпуск, кредитки и т.д. Остаток достаётся «Свободно».</div>'
       : ""}
-    ${items.map((i) => itemCardHtml(i, isCurrent)).join("")}
-    ${itemCardHtml(free, isCurrent)}
-    <div class="hint-text" style="margin: 4px 4px 16px;">В конце месяца плана статьи обнуляются: остатки и перерасходы переходят в «Свободно».</div>
-    ${obligationsHtml(obligations)}`;
+    <div class="card plan-list">
+      ${sortedItems(items).map(itemRowHtml).join("")}
+      ${itemRowHtml(free)}
+    </div>
+    <div class="hint-text" style="margin: 4px 4px 16px;">В конце месяца плана статьи обнуляются: остатки и перерасходы переходят в «Свободно».</div>`;
 
   content.querySelectorAll(".month-picker button").forEach((b) => {
     b.addEventListener("click", async () => {
@@ -148,30 +151,107 @@ async function renderPlanTab() {
     });
   });
   content.querySelector("#plan-settings").addEventListener("click", () => openPlanSettings(plan));
-  content.querySelectorAll(".plan-item[data-id]").forEach((el) => {
-    if (!el.dataset.id) return;
-    el.addEventListener("click", () => openPlanItemModal(items.find((i) => i.id === Number(el.dataset.id)), plan));
+  content.querySelectorAll(".plan-row").forEach((el) => {
+    el.addEventListener("click", () => {
+      haptic("selection");
+      const it = el.dataset.key === "free" ? free : items.find((i) => i.id === Number(el.dataset.key));
+      openItemSheet(it, plan, isCurrent);
+    });
   });
-  content.querySelectorAll("[data-save]").forEach((btn) => {
-    btn.addEventListener("click", async (ev) => {
-      ev.stopPropagation();
-      btn.disabled = true;
+}
+
+/* Статья: цифры, «Отложил», на что ушли деньги, изменить. */
+function openItemSheet(it, plan, isCurrent) {
+  const level = itemLevel(it);
+  const remaining = Number(it.remaining);
+  const notes = [];
+  if (it.kind === "spend") notes.push(it.categories.map(escapeHtml).join(", "));
+  if (it.kind === "goal" && it.goal_title) {
+    notes.push(`🐷 ${escapeHtml(it.goal_title)}: ${fmtMoney(it.goal_saved)} из ${fmtMoney(it.goal_target)}`);
+  }
+  if (it.kind === "goal" && !it.goal_title) notes.push("Цель удалена — выберите другую");
+  if (it.kind === "free") {
+    const carried = Number(it.carried);
+    if (carried) notes.push(`${carried > 0 ? "Перенесено" : "Перерасход"} с прошлых месяцев: ${fmtMoney(Math.abs(carried))}`);
+    notes.push("Сюда списываются траты без статьи");
+  }
+  const canSave = it.kind === "goal" && it.goal_title && remaining > 0 && isCurrent;
+  const overlay = openSheet(`
+    <div class="sheet-title">${itemIcon(it)} ${escapeHtml(it.title)} <span class="plan-pct">${pctText(it.percent)}</span></div>
+    <div class="ob-summary plan-figures">
+      <div><div class="hint-text">Выделено</div><b>${fmtMoney(it.allocated)}</b></div>
+      <div><div class="hint-text">${it.kind === "goal" ? "Отложено" : "Потрачено"}</div><b>${fmtMoney(it.spent)}</b></div>
+      <div><div class="hint-text">${remaining < 0 ? "Минус" : "Осталось"}</div><b class="${remaining < 0 ? "plan-minus" : ""}">${fmtMoney(Math.abs(remaining))}</b></div>
+    </div>
+    <div class="budget-bar"><div class="budget-fill ${level}" style="width:${usedWidth(it)}%"></div></div>
+    ${notes.map((n) => `<div class="hint-text plan-note">${n}</div>`).join("")}
+    ${canSave ? `<button class="btn" id="pi-save" style="margin-top:14px;">✅ Отложил ${fmtMoney(remaining)}</button>` : ""}
+    <button class="btn secondary" id="pi-entries" style="margin-top:${canSave ? 10 : 14}px;">🧾 На что ушли деньги</button>
+    <div id="pi-entries-list"></div>
+    ${it.kind === "free" ? "" : '<button class="btn secondary" id="pi-edit" style="margin-top:10px;">✏️ Изменить статью</button>'}`);
+
+  const saveBtn = overlay.querySelector("#pi-save");
+  if (saveBtn) {
+    saveBtn.addEventListener("click", async () => {
+      saveBtn.disabled = true;
       try {
-        await api(`/chats/${planChatId()}/plan/items/${btn.dataset.save}/save`, { method: "POST" });
+        await api(`/chats/${planChatId()}/plan/items/${it.id}/save`, { method: "POST" });
         haptic("notification", "success");
+        closeSheet(overlay);
         await renderPlanTab();
       } catch (e) {
         toast(e.message);
-        btn.disabled = false;
+        saveBtn.disabled = false;
       }
     });
+  }
+  const entriesBtn = overlay.querySelector("#pi-entries");
+  const list = overlay.querySelector("#pi-entries-list");
+  entriesBtn.addEventListener("click", async () => {
+    haptic("selection");
+    if (list.dataset.loaded) {
+      const open = list.style.display === "none";
+      list.style.display = open ? "" : "none";
+      entriesBtn.textContent = open ? "🧾 Скрыть траты" : "🧾 На что ушли деньги";
+      return;
+    }
+    entriesBtn.disabled = true;
+    try {
+      const query = `date=${plan.start}${it.id ? `&item_id=${it.id}` : ""}`;
+      list.innerHTML = entriesHtml(await api(`/chats/${planChatId()}/plan/entries?${query}`));
+      list.dataset.loaded = "1";
+      entriesBtn.textContent = "🧾 Скрыть траты";
+    } catch (e) {
+      toast(e.message);
+    } finally {
+      entriesBtn.disabled = false;
+    }
   });
-  content.querySelectorAll(".obligation-row").forEach((el) => {
-    el.addEventListener("click", () => {
-      const item = obligations.items.find((o) => o.payment_id === Number(el.dataset.id));
-      openPaymentSheet(item, renderPlanTab);
+  const editBtn = overlay.querySelector("#pi-edit");
+  if (editBtn) {
+    editBtn.addEventListener("click", () => {
+      closeSheet(overlay);
+      openPlanItemModal(it, plan);
     });
-  });
+  }
+}
+
+const SOURCE_NOTE = { card: "платёж по карте", deposit: "отложено" };
+
+function entriesHtml(entries) {
+  if (!entries.length) return '<div class="hint-text plan-entries-empty">В этом месяце плана списаний не было.</div>';
+  return `
+    <div class="plan-entries">
+      ${entries.map((e) => {
+        const note = SOURCE_NOTE[e.source] || (e.subcategory ? e.subcategory : e.category !== e.title ? e.category : "");
+        return `
+          <div class="plan-entry">
+            <span class="plan-entry-date hint-text">${shortDate(e.date)}</span>
+            <span class="plan-entry-title">${escapeHtml(e.title)}${note ? ` <span class="hint-text">· ${escapeHtml(note)}</span>` : ""}</span>
+            <span class="plan-entry-amount">${fmtMoney(e.amount)}</span>
+          </div>`;
+      }).join("")}
+    </div>`;
 }
 
 function openPlanSettings(plan) {
@@ -206,29 +286,25 @@ function openPlanSettings(plan) {
 
 async function openPlanItemModal(existing, plan) {
   const isEdit = !!existing;
-  let goals = [], recurring = [];
+  let goals = [];
   try {
-    [goals, recurring] = await Promise.all([
-      api(`/chats/${planChatId()}/goals`),
-      api(`/chats/${planChatId()}/recurring`),
-    ]);
+    goals = await api(`/chats/${planChatId()}/goals`);
   } catch (e) {
     toast(e.message);
     return;
   }
   goals = goals.filter((g) => !g.is_archived || (existing && existing.goal_id === g.id));
-  const debts = recurring.filter((r) => r.kind === "card" || r.kind === "loan");
   const otherItems = (plan ? plan.items : []).filter((i) => i.kind !== "free" && (!existing || i.id !== existing.id));
   const takenCats = new Map();
   otherItems.filter((i) => i.kind === "spend").forEach((i) => i.categories.forEach((c) => takenCats.set(c, i.title)));
   function catChipHtml(key, label) {
     const owner = takenCats.get(key);
-    return `<span class="chip ${cats.has(key) ? "selected" : ""} ${owner ? "disabled" : ""}" data-cat="${escapeHtml(key)}" style="padding:6px 12px;${owner ? "opacity:.45;" : ""}" ${owner ? `title="Уже в «${escapeHtml(owner)}»"` : ""}>${label}</span>`;
+    return `<span class="chip ${owner ? "disabled" : ""}" data-cat="${escapeHtml(key)}" style="padding:6px 12px;${owner ? "opacity:.45;" : ""}" ${owner ? `title="Уже в «${escapeHtml(owner)}»"` : ""}>${label}</span>`;
   }
   const freePct = 100 - otherItems.reduce((s, i) => s + Number(i.percent), 0);
-  const kind = existing ? existing.kind : "spend";
+  const kind = existing && KIND_LABELS[existing.kind] ? existing.kind : "spend";
   const cats = new Set(existing ? existing.categories : []);
-  const recIds = new Set(existing ? existing.recurring_ids : []);
+  const catList = planCategories();
 
   const overlay = openSheet(`
     <div class="sheet-title">${isEdit ? "Статья плана" : "Новая статья"}</div>
@@ -253,10 +329,10 @@ async function openPlanItemModal(existing, plan) {
     <div class="hint-text" style="margin:-4px 0 12px;">Можно распределить ещё ${pctText(freePct)}.</div>
     <div class="field" data-for="spend">
       <label>Категории трат</label>
-      <div class="hint-text" style="margin-bottom:8px;">Отметьте категорию целиком или нажмите ▸ и выберите только нужные подкатегории.</div>
+      <div class="hint-text" style="margin-bottom:8px;">Категория отмечается со всеми подкатегориями, в том числе с будущими. Нажмите ▸ и снимите лишние, если нужны не все.</div>
       <div id="pi-cats">
-        ${planCategories().map((c) => {
-          const open = c.subcategories.some((sub) => cats.has(c.name + SUB_SEP + sub));
+        ${catList.map((c) => {
+          const open = cats.has(c.name) || c.subcategories.some((sub) => cats.has(c.name + SUB_SEP + sub));
           return `
             <div class="plan-cat-row">
               <div class="plan-cat-head">
@@ -277,13 +353,6 @@ async function openPlanItemModal(existing, plan) {
         ? `<select id="pi-goal">${goals.map((g) => `<option value="${g.id}" ${existing && existing.goal_id === g.id ? "selected" : ""}>${escapeHtml(g.title)}</option>`).join("")}</select>`
         : '<div class="hint-text">Целей пока нет — сначала создайте цель во вкладке «Цели».</div>'}
     </div>
-    <div class="field" data-for="debt">
-      <label>Кредитки и кредиты</label>
-      ${debts.length
-        ? `<div class="chip-row" id="pi-debts">${debts.map((r) => `
-            <span class="chip ${recIds.has(r.id) ? "selected" : ""}" data-rec="${r.id}" style="padding:6px 12px;">${r.kind === "card" ? "💳" : "🏦"} ${escapeHtml(r.title)}</span>`).join("")}</div>`
-        : '<div class="hint-text">Добавьте кредитку или кредит во вкладке «Платежи».</div>'}
-    </div>
     <div class="error-text" id="pi-error" style="display:none;"></div>
     <button class="btn" id="pi-submit">${isEdit ? "Сохранить" : "Добавить статью"}</button>
     ${isEdit ? '<button class="btn danger" id="pi-delete" style="margin-top:10px;">Удалить статью</button>' : ""}
@@ -299,13 +368,57 @@ async function openPlanItemModal(existing, plan) {
   overlay.querySelectorAll("#pi-kind .chip").forEach((chip) => {
     chip.addEventListener("click", () => { haptic("selection"); currentKind = chip.dataset.kind; showKind(); });
   });
+  /* Категория целиком = все её подкатегории отмечены. Сняли одну подкатегорию — в статье
+     остаются остальные; отметили все — снова вся категория. Подкатегории, занятые другой
+     статьёй, не трогаем: трата по ним всё равно идёт в ту статью. */
+  function freeSubs(c) {
+    return c.subcategories.filter((sub) => !takenCats.has(c.name + SUB_SEP + sub));
+  }
+  function refreshChips() {
+    catList.forEach((c) => {
+      const whole = cats.has(c.name);
+      overlay.querySelectorAll(`[data-cat="${CSS.escape(c.name)}"], [data-cat^="${CSS.escape(c.name + SUB_SEP)}"]`).forEach((chip) => {
+        const key = chip.dataset.cat;
+        const isSub = key !== c.name;
+        const on = !chip.classList.contains("disabled") && (whole || (isSub && cats.has(key)));
+        chip.classList.toggle("selected", on);
+      });
+    });
+  }
+  function toggleCategory(c) {
+    const subsOn = c.subcategories.some((sub) => cats.has(c.name + SUB_SEP + sub));
+    const on = !cats.has(c.name) && !subsOn;
+    c.subcategories.forEach((sub) => cats.delete(c.name + SUB_SEP + sub));
+    if (on) cats.add(c.name); else cats.delete(c.name);
+    if (on && c.subcategories.length) {
+      overlay.querySelector(`[data-subs="${CSS.escape(c.name)}"]`).style.display = "";
+      overlay.querySelector(`[data-toggle="${CSS.escape(c.name)}"]`).textContent = "▾";
+    }
+  }
+  function toggleSub(c, key) {
+    if (cats.has(c.name)) {
+      cats.delete(c.name);
+      freeSubs(c).forEach((sub) => { if (c.name + SUB_SEP + sub !== key) cats.add(c.name + SUB_SEP + sub); });
+    } else if (cats.has(key)) {
+      cats.delete(key);
+    } else {
+      cats.add(key);
+      const all = freeSubs(c).every((sub) => cats.has(c.name + SUB_SEP + sub));
+      if (all && !takenCats.has(c.name)) {
+        c.subcategories.forEach((sub) => cats.delete(c.name + SUB_SEP + sub));
+        cats.add(c.name);
+      }
+    }
+  }
+  refreshChips();
   overlay.querySelectorAll("#pi-cats .chip").forEach((chip) => {
     chip.addEventListener("click", () => {
       if (chip.classList.contains("disabled")) { toast(chip.getAttribute("title")); return; }
       haptic("selection");
-      const name = chip.dataset.cat;
-      if (cats.has(name)) cats.delete(name); else cats.add(name);
-      chip.classList.toggle("selected", cats.has(name));
+      const key = chip.dataset.cat;
+      const c = catList.find((x) => x.name === key || key.startsWith(x.name + SUB_SEP));
+      if (key === c.name) toggleCategory(c); else toggleSub(c, key);
+      refreshChips();
       // Одна категория — подставим её название, если название ещё не задано
       const titleEl = overlay.querySelector("#pi-title");
       if (!titleEl.value.trim() && cats.size === 1) titleEl.value = [...cats][0].split(SUB_SEP).pop();
@@ -317,14 +430,6 @@ async function openPlanItemModal(existing, plan) {
       const open = subs.style.display === "none";
       subs.style.display = open ? "" : "none";
       btn.textContent = open ? "▾" : "▸";
-    });
-  });
-  overlay.querySelectorAll("#pi-debts .chip").forEach((chip) => {
-    chip.addEventListener("click", () => {
-      haptic("selection");
-      const id = Number(chip.dataset.rec);
-      if (recIds.has(id)) recIds.delete(id); else recIds.add(id);
-      chip.classList.toggle("selected", recIds.has(id));
     });
   });
 
@@ -340,7 +445,6 @@ async function openPlanItemModal(existing, plan) {
       title, kind: currentKind, percent,
       categories: [...cats],
       goal_id: goalEl ? Number(goalEl.value) : null,
-      recurring_ids: [...recIds],
     };
     if (tg && tg.MainButton) tg.MainButton.showProgress(false);
     try {

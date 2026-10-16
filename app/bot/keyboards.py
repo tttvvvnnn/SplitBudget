@@ -16,10 +16,20 @@ def open_app_keyboard_group(bot_username: str, chat_id: int) -> InlineKeyboardMa
         inline_keyboard=[[InlineKeyboardButton(text="💸 Открыть учёт трат", url=url)]]
     )
 
-def payment_keyboard(bot_username: str, payment_id: int, chat_id: int) -> InlineKeyboardMarkup:
+def payment_keyboard(
+    bot_username: str, payment_id: int, chat_id: int, ask_amount: bool = False
+) -> InlineKeyboardMarkup:
     """Кнопки под вопросом «Оплачено?» об обязательном платеже. «Другая сумма» открывает
-    вкладку «Лимиты» нужного пространства (суффикс _pay в startapp, см. webapp/js/app.js)."""
+    платежи месяца нужного пространства (суффикс _pay в startapp, см. webapp/js/app.js).
+    У платежа без суммы (ask_amount) вместо «Оплачено» — «Внести сумму»."""
     url = f"https://t.me/{bot_username}?startapp={chat_id}_pay"
+    if ask_amount:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="✍️ Внести сумму", url=url)],
+                [InlineKeyboardButton(text="⏭ Не в этом месяце", callback_data=f"rp:skip:{payment_id}")],
+            ]
+        )
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [

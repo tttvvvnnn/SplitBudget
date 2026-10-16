@@ -375,8 +375,9 @@ class PlanItem(Base):
     """Статья плана распределения дохода в «Моих финансах» (app/shared/plan.py).
 
     kind: spend — расходная, к ней привязаны категории трат (categories);
-          goal — накопительная, деньги откладываются на цель goal_id;
-          debt — долговая, её закрывают платежи обязательных платежей recurring_ids.
+          goal — накопительная, деньги откладываются на цель goal_id.
+    Кредиты — обычные расходные статьи по категории «Кредиты». recurring_ids остался от
+    бывших долговых статей и не используется.
     Статья «Свободно» не хранится: ей достаётся остаток процентов и остатки статей за
     прошлые месяцы."""
 
@@ -389,7 +390,7 @@ class PlanItem(Base):
     percent: Mapped[Decimal] = mapped_column(Numeric(5, 2))
     categories: Mapped[str] = mapped_column(String(1024), default="[]")  # JSON-список категорий
     goal_id: Mapped[int | None] = mapped_column(ForeignKey("goals.id", ondelete="SET NULL"), nullable=True)
-    recurring_ids: Mapped[str] = mapped_column(String(255), default="[]")  # JSON-список id платежей
+    recurring_ids: Mapped[str] = mapped_column(String(255), default="[]")  # не используется
     position: Mapped[int] = mapped_column(default=0)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
 

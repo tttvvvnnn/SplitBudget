@@ -1,6 +1,7 @@
 """Обязательные платежи: аренда, кредиты, кредитные карты, подписки.
 
-Шаблон — RecurringExpense (день месяца, сумма, кто платит и как делится). На каждый месяц
+Шаблон — RecurringExpense (день месяца, сумма, кто платит и как делится). Сумма может быть
+нулевой: тогда это только напоминание, а сколько внесли, указывают при оплате. На каждый месяц
 заводится RecurringPayment: в день платежа бот спрашивает «Оплачено?», и только после
 подтверждения платёж записывается обычной тратой (Expense). Платёж по кредитной карте
 тратой не считается: покупки по карте записываются отдельно, он только уменьшает долг.
@@ -171,7 +172,7 @@ def _scale_custom(
     template_amount: Decimal, amount: Decimal, pairs: list[tuple[int, Decimal]]
 ) -> list[tuple[int, Decimal]]:
     """Доли «вручную» пересчитываются пропорционально, если оплачена другая сумма."""
-    if amount == template_amount:
+    if amount == template_amount or not template_amount:
         return pairs
     scaled = [(mid, (share * amount / template_amount).quantize(CENT)) for mid, share in pairs]
     diff = amount - sum((s for _, s in scaled), ZERO)
@@ -210,6 +211,8 @@ async def pay(
         raise ValueError("Платёж уже отмечен оплаченным")
     recurring = await session.get(RecurringExpense, payment.recurring_id)
     amount = amount if amount is not None else recurring.amount
+    if not amount or amount <= 0:
+        raise ValueError("Укажите, сколько внесли")
     expense_id = None
     if counts_as_expense(recurring):
         shares = await template_shares(session, recurring, amount)
@@ -372,10 +375,9 @@ def payment_text(recurring: RecurringExpense, chat: Chat, payment: RecurringPaym
     prefix = "Мои финансы · " if chat.is_personal else ""
     days = (payment.due_date - today).days
     when = "Сегодня" if days == 0 else ("Просрочен" if days < 0 else _days_label(days).capitalize())
-    text = (
-        f"{icon} {prefix}{when} ({_date_label(payment.due_date)}) платёж «{recurring.title}» — "
-        f"<b>{fmt_amount(recurring.amount, chat.currency)}</b>"
-    )
+    text = f"{icon} {prefix}{when} ({_date_label(payment.due_date)}) платёж «{recurring.title}»"
+    if recurring.amount:
+        text += f" — <b>{fmt_amount(recurring.amount, chat.currency)}</b>"
     if recurring.kind == "card" and recurring.debt is not None:
         text += f"\nДолг по карте: {fmt_amount(recurring.debt, chat.currency)}"
     return text
@@ -391,6 +393,7 @@ class Notice:
     # с этим startapp-параметром (например, доходы — app/shared/income.py)
     buttons: list[list[tuple[str, str]]] | None = None
     app_param: str | None = None
+    ask_amount: bool = False  # у платежа нет суммы — вместо «Оплачено» кнопка «Внести сумму»
 
 
 async def due_notices(session: AsyncSession, today: dt.date) -> list[Notice]:
@@ -414,9 +417,11 @@ async def due_notices(session: AsyncSession, today: dt.date) -> list[Notice]:
             if days <= 0:
                 if not payment.asked:
                     payment.asked = True
+                    question = "\nОплачено?" if recurring.amount else "\nСколько внесли?"
                     notices.append(
-                        Notice(chat.id, payment_text(recurring, chat, payment, today) + "\nОплачено?",
-                               ask_payment_id=payment.id, chat_link_id=chat.id)
+                        Notice(chat.id, payment_text(recurring, chat, payment, today) + question,
+                               ask_payment_id=payment.id, chat_link_id=chat.id,
+                               ask_amount=not recurring.amount)
                     )
                 continue
             sent = {int(d) for d in payment.reminders_sent.split(",") if d}

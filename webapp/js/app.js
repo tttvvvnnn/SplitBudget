@@ -101,8 +101,9 @@ async function loadMeAndRender() {
     await loadCategories();
     await returnHiddenChat();
     if (state.chat.is_personal && state.tab === "balance") state.tab = "expenses";
-    // «Другая сумма» под вопросом о платеже ведёт на «Лимиты», а в «Моих финансах» платежи — в «Плане»
-    if (state.chat.is_personal && state.tab === "budgets") state.tab = "plan";
+    // «Другая сумма» под вопросом о платеже ведёт на «Лимиты», а в «Моих финансах» платежи
+    // месяца — во вкладке «Платежи»
+    if (state.chat.is_personal && state.tab === "budgets") state.tab = "recurring";
     if (!state.chat.is_personal && PERSONAL_ONLY_TABS.includes(state.tab)) state.tab = "expenses";
     renderShell({ onSwitchSpace: switchSpace });
     loadVersionBadge(); // не блокирует основной рендер — бейдж в углу подтянется чуть позже

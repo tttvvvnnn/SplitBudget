@@ -185,7 +185,7 @@ function obligationsHtml(data) {
               <div class="hint-text">${meta.join(" · ")}</div>
             </div>
             <div class="ob-right">
-              <div class="ob-amount">${fmtMoney(share)}</div>
+              <div class="ob-amount">${amount ? fmtMoney(share) : '<span class="hint-text">без суммы</span>'}</div>
               ${share !== amount ? `<div class="hint-text">из ${fmtMoney(amount)}</div>` : ""}
               ${statusHtml(o)}
             </div>
@@ -200,7 +200,7 @@ function openPaymentSheet(o, rerender = renderBudgetsTab) {
   const lines = [`${kindLabel} · ${shortDate(o.due_date)}`];
   if (o.chat_title) lines.push(`Семейный чат «${escapeHtml(o.chat_title)}», ваша доля ${fmtMoney(o.share)}`);
   if (o.kind === "card") {
-    lines.push("Платёж по карте не считается тратой: покупки по карте записываются отдельно.");
+    lines.push("Платёж по карте не считается тратой (покупки по карте записываются отдельно), но в «Плане» он списывается со статьи по своей категории.");
     if (o.debt !== null) lines.push(`Долг по карте: ${fmtMoney(o.debt)}`);
   }
   if (o.end_month) lines.push(`Последний платёж: ${monthLabel(o.end_month).toLowerCase()}`);
@@ -210,10 +210,10 @@ function openPaymentSheet(o, rerender = renderBudgetsTab) {
     actions = `
       <div class="field">
         <label>Сумма (${escapeHtml(state.chat.currency)})</label>
-        <input type="number" id="p-amount" min="0" step="0.01" value="${Number(o.amount)}">
+        <input type="number" id="p-amount" min="0" step="0.01" value="${Number(o.amount) || ""}" placeholder="сколько внесли">
       </div>
       <div class="error-text" id="p-error" style="display:none;"></div>
-      <button class="btn" id="p-pay">✅ Оплачено</button>
+      <button class="btn" id="p-pay">✅ ${Number(o.amount) ? "Оплачено" : "Внёс"}</button>
       <button class="btn secondary" id="p-skip" style="margin-top:10px;">⏭ Не в этом месяце</button>`;
   } else {
     const what = o.status === "paid" ? `Оплачено ${fmtMoney(o.amount)}` : "Пропущен в этом месяце";
@@ -247,7 +247,7 @@ function openPaymentSheet(o, rerender = renderBudgetsTab) {
       if (!amount || amount <= 0) { showFormError(overlay.querySelector("#p-error"), "Укажите сумму больше нуля"); return; }
       run("pay", { amount });
     });
-    useMainButtonFor(overlay, payBtn, "✅ Оплачено");
+    useMainButtonFor(overlay, payBtn, Number(o.amount) ? "✅ Оплачено" : "✅ Внёс");
     overlay.querySelector("#p-skip").addEventListener("click", () => run("skip"));
   }
   const resetBtn = overlay.querySelector("#p-reset");
