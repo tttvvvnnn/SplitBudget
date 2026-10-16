@@ -453,3 +453,49 @@ class SubscriptionHintOut(BaseModel):
 
 class SubscriptionHintAction(BaseModel):
     keyword: str = Field(min_length=1, max_length=255)
+
+
+class PlanItemIn(BaseModel):
+    title: str = Field(min_length=1, max_length=255)
+    kind: str = Field(default="spend", pattern="^(spend|goal|debt)$")
+    percent: Decimal = Field(gt=0, le=100)
+    categories: list[str] = Field(default_factory=list)  # для spend: «Категория» или «Категория › Подкатегория»
+    goal_id: int | None = None  # для goal
+    recurring_ids: list[int] = Field(default_factory=list)  # для debt
+
+
+class PlanItemOut(BaseModel):
+    id: int | None  # None — «Свободно»
+    title: str
+    kind: str  # spend | goal | debt | free
+    percent: Decimal
+    allocated: Decimal
+    spent: Decimal
+    remaining: Decimal
+    categories: list[str] = []
+    goal_id: int | None = None
+    goal_title: str | None = None
+    goal_saved: Decimal | None = None
+    goal_target: Decimal | None = None
+    recurring_ids: list[int] = []
+    debt_left: Decimal | None = None
+    carried: Decimal = Decimal("0")
+
+
+class PlanOut(BaseModel):
+    start: dt.date
+    end: dt.date  # последний день месяца плана, включительно
+    start_day: int
+    income: Decimal
+    incomes_count: int
+    carried: Decimal
+    percent_total: Decimal
+    items: list[PlanItemOut]
+
+
+class PlanSettingsIn(BaseModel):
+    start_day: int = Field(ge=1, le=28)
+
+
+class PlanOrderIn(BaseModel):
+    ids: list[int]

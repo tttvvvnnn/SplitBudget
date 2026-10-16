@@ -12,6 +12,7 @@ import { renderBudgetsTab, openBudgetModal } from "./tabs/budgets.js";
 import { renderRecurringTab, openRecurringModal } from "./tabs/recurring.js";
 import { renderIncomeTab, openIncomeModal } from "./tabs/income.js";
 import { renderGoalsTab, openGoalModal } from "./tabs/goals.js";
+import { renderPlanTab, openNewPlanItem } from "./tabs/plan.js";
 
 /* Версия/сборка в правом верхнем углу шапки — чтобы после пересборки контейнера на стенде
    было видно на глаз, старый код сейчас открыт или уже новый. /healthz отдаётся без
@@ -55,6 +56,7 @@ const TAB_ICONS = {
   recurring: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/>',
   income: '<path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/>',
   goals: '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><path d="M4 22v-7"/>',
+  plan: '<path d="M21 12c.552 0 1.005-.449.95-.998a10 10 0 0 0-8.953-8.951c-.55-.055-.998.398-.998.95v8a1 1 0 0 0 1 1z"/><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/>',
 };
 
 function tabIconSvg(id) {
@@ -66,13 +68,16 @@ const TABS = [
   { id: "balance", label: "Баланс" },
   { id: "stats", label: "Статистика" },
   { id: "budgets", label: "Лимиты" },
+  { id: "plan", label: "План" },
   { id: "recurring", label: "Платежи" },
   { id: "income", label: "Доходы" },
   { id: "goals", label: "Цели" },
 ];
 
 // Только личные вкладки — в семейном чате их нет
-const PERSONAL_ONLY_TABS = ["income", "goals"];
+const PERSONAL_ONLY_TABS = ["income", "goals", "plan"];
+// В «Моих финансах» вместо лимитов — план распределения дохода (там же платежи месяца)
+const FAMILY_ONLY_TABS = ["balance", "budgets"];
 
 /* Переключатель «👤 Мои финансы | 🏠 семейные чаты» под заголовком. */
 function spaceSwitcherHtml() {
@@ -146,7 +151,7 @@ function openHiddenChats(onSwitchSpace) {
 function renderShell({ onSwitchSpace } = {}) {
   const app = document.getElementById("app");
   let tabs = TABS;
-  if (isPersonal()) tabs = TABS.filter((t) => t.id !== "balance");
+  if (isPersonal()) tabs = TABS.filter((t) => !FAMILY_ONLY_TABS.includes(t.id));
   else tabs = TABS.filter((t) => !PERSONAL_ONLY_TABS.includes(t.id));
   let sub;
   if (isPersonal()) sub = "Личное + ваша доля в семейных · видно только вам";
@@ -193,6 +198,7 @@ function renderShell({ onSwitchSpace } = {}) {
     else if (state.tab === "budgets") openBudgetModal(null);
     else if (state.tab === "income") openIncomeModal(null);
     else if (state.tab === "goals") openGoalModal(null);
+    else if (state.tab === "plan") openNewPlanItem();
     else openExpenseModal(null);
   });
 }
@@ -229,6 +235,7 @@ async function renderTab() {
   else if (state.tab === "recurring") await renderRecurringTab();
   else if (state.tab === "income") await renderIncomeTab();
   else if (state.tab === "goals") await renderGoalsTab();
+  else if (state.tab === "plan") await renderPlanTab();
 }
 
-export { loadVersionBadge, renderShell, switchTab, renderTab, hideCurrentChat, PERSONAL_ONLY_TABS };
+export { loadVersionBadge, renderShell, switchTab, renderTab, hideCurrentChat, PERSONAL_ONLY_TABS, FAMILY_ONLY_TABS };

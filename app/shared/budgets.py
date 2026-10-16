@@ -93,7 +93,14 @@ def _fmt(amount: Decimal, currency: str) -> str:
 
 async def collect_alerts(session: AsyncSession, chat: Chat, month: str) -> list[str]:
     """Тексты новых уведомлений о лимитах в чате за месяц; отправленные помечаются в
-    BudgetAlert (их нужно закоммитить вызывающему), чтобы не повторяться."""
+    BudgetAlert (их нужно закоммитить вызывающему), чтобы не повторяться. В «Моих финансах»
+    с планом распределения дохода вместо лимитов следим за статьями плана."""
+    from app.shared import plan  # plan импортирует модели, а budgets импортируют отовсюду
+
+    if chat.is_personal:
+        plan_messages = await plan.collect_alerts(session, chat, dt.date.today())
+        if plan_messages is not None:
+            return plan_messages
     messages = []
     for status in await budgets_status(session, chat, month):
         budget = status.budget

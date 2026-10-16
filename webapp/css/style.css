@@ -1198,6 +1198,59 @@ button:active, .expense-card:active, .budget-card:active, .obligation-row:active
 .budget-pct.warn { color: var(--warning); }
 .budget-pct.over { color: var(--danger); }
 
+/* Вкладка «План» (tabs/plan.js): статьи распределения дохода */
+.plan-summary {
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+
+.plan-summary .link-btn {
+  margin-top: 6px;
+  padding: 0;
+}
+
+.plan-pct {
+  color: var(--hint);
+  font-weight: 500;
+}
+
+.plan-minus {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.plan-note {
+  margin-top: 4px;
+  font-size: 12.5px;
+}
+
+.plan-save {
+  margin-top: 10px;
+}
+
+.plan-cat-row {
+  margin-bottom: 8px;
+}
+
+.plan-cat-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.plan-cat-toggle {
+  padding: 4px 10px;
+  font-size: 16px;
+}
+
+.plan-subs {
+  margin: 6px 0 4px 18px;
+}
+
+.plan-free {
+  border: 1px dashed var(--border);
+}
+
 /* Обязательные платежи во вкладке «Лимиты» */
 .obligations-card {
   padding: 12px 14px 4px;

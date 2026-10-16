@@ -18,6 +18,7 @@ const state = {
   categoryTree: [], // [{name, icon, subcategories}] — GET /categories
   tab: "expenses",
   month: todayMonth(),
+  planDate: null, // любой день открытого месяца плана (вкладка «План»); null — текущий
   expenses: [],
   expenseCategory: "",
   filters: { search: "", category: "", payer: "" },
