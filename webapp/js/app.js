@@ -15,6 +15,7 @@ import { tg } from "./telegram.js";
 import { state } from "./state.js";
 import { escapeHtml } from "./format.js";
 import { api } from "./api.js";
+import { loadCategories } from "./categories.js";
 import { loadVersionBadge, renderShell, renderTab, PERSONAL_ONLY_TABS } from "./shell.js";
 import { initTheme } from "./brand.js";
 
@@ -97,6 +98,7 @@ async function loadMeAndRender() {
     state.member = me.member;
     state.members = me.members;
     state.categories = me.categories;
+    await loadCategories();
     await returnHiddenChat();
     if (state.chat.is_personal && state.tab === "balance") state.tab = "expenses";
     // «Другая сумма» под вопросом о платеже ведёт на «Лимиты», а в «Моих финансах» платежи — в «Плане»

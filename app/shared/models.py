@@ -405,3 +405,21 @@ class PlanAlert(Base):
     period: Mapped[str] = mapped_column(String(10))  # дата начала периода, 'YYYY-MM-DD'
     level: Mapped[int] = mapped_column()  # 80 | 100
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class CustomCategory(Base):
+    """Свои категории и подкатегории пространства (app/shared/custom_categories.py).
+
+    parent=None — категория, иначе — подкатегория категории parent (своей или базовой).
+    is_builtin=True — строка только скрывает базовую категорию/подкатегорию из дерева."""
+
+    __tablename__ = "custom_categories"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[int] = mapped_column(ForeignKey("chats.id", ondelete="CASCADE"))
+    parent: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    name: Mapped[str] = mapped_column(String(64))
+    icon: Mapped[str] = mapped_column(String(16), default="🏷️")
+    is_builtin: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_hidden: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)

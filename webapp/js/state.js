@@ -15,7 +15,8 @@ const state = {
   member: null,
   members: [],
   categories: [],
-  categoryTree: [], // [{name, icon, subcategories}] — GET /categories
+  categoryTree: [], // [{name, icon, subcategories}] — видимые категории пространства для выбора
+  categoryNodes: [], // всё дерево пространства, со своими и скрытыми (GET /chats/{id}/categories)
   tab: "expenses",
   month: todayMonth(),
   planDate: null, // любой день открытого месяца плана (вкладка «План»); null — текущий

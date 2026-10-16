@@ -9,13 +9,11 @@ from sqlalchemy import select
 
 from app.api.dependencies import ChatContext, get_chat_context
 from app.shared import plan
-from app.shared.categories import CATEGORY_NAMES, CATEGORY_TREE
+from app.shared.custom_categories import plan_keys, tree_for
 from app.shared.models import Goal, GoalDeposit, PlanItem, RecurringExpense
 from app.shared.schemas import PlanItemIn, PlanItemOut, PlanOrderIn, PlanOut, PlanSettingsIn
 
 router = APIRouter(tags=["plan"])
-
-SUBCATEGORIES = {name: subs for name, _, subs in CATEGORY_TREE}
 
 
 def _personal(ctx: ChatContext) -> None:
@@ -75,9 +73,9 @@ async def _validate(ctx: ChatContext, payload: PlanItemIn, item_id: int | None) 
     if payload.kind == "spend":
         if not payload.categories:
             raise HTTPException(status_code=400, detail="Выберите хотя бы одну категорию трат")
+        known = plan_keys(await tree_for(ctx.session, ctx.chat))
         for key in payload.categories:
-            category, _, sub = key.partition(plan.SUB_SEP)
-            if category not in CATEGORY_NAMES or (sub and sub not in SUBCATEGORIES.get(category, [])):
+            if key not in known:
                 raise HTTPException(status_code=400, detail=f"Нет такой категории: {key}")
         for other in others:
             if other.kind == "spend":

@@ -33,6 +33,14 @@ function shiftISO(iso, days) {
   return date.toISOString().slice(0, 10);
 }
 
+/* Что можно положить в статью: видимые категории «Моих финансов» и свои категории семейных
+   чатов (траты по ним тоже попадают в личный бюджет вашей долей). */
+function planCategories() {
+  return state.categoryNodes
+    .filter((n) => !n.hidden)
+    .map((n) => ({ name: n.name, icon: n.icon, family: n.family, subcategories: [...n.subcategories, ...n.family_subcategories] }));
+}
+
 function planChatId() {
   return state.personalChatId;
 }
@@ -247,12 +255,12 @@ async function openPlanItemModal(existing, plan) {
       <label>Категории трат</label>
       <div class="hint-text" style="margin-bottom:8px;">Отметьте категорию целиком или нажмите ▸ и выберите только нужные подкатегории.</div>
       <div id="pi-cats">
-        ${state.categoryTree.map((c) => {
+        ${planCategories().map((c) => {
           const open = c.subcategories.some((sub) => cats.has(c.name + SUB_SEP + sub));
           return `
             <div class="plan-cat-row">
               <div class="plan-cat-head">
-                ${catChipHtml(c.name, `${c.icon} ${escapeHtml(c.name)}`)}
+                ${catChipHtml(c.name, `${c.icon} ${escapeHtml(c.name)}${c.family ? ` <span class="hint-text">🏠 ${escapeHtml(c.family)}</span>` : ""}`)}
                 ${c.subcategories.length ? `<button class="link-btn plan-cat-toggle" data-toggle="${escapeHtml(c.name)}" aria-label="Подкатегории">${open ? "▾" : "▸"}</button>` : ""}
               </div>
               ${c.subcategories.length ? `
