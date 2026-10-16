@@ -194,7 +194,7 @@ function obligationsHtml(data) {
     </div>`;
 }
 
-function openPaymentSheet(o) {
+function openPaymentSheet(o, rerender = renderBudgetsTab) {
   const [icon, kindLabel] = KIND_INFO[o.kind] || KIND_INFO.other;
   const base = `/chats/${o.chat_id}/payments/${o.payment_id}`;
   const lines = [`${kindLabel} · ${shortDate(o.due_date)}`];
@@ -235,7 +235,7 @@ function openPaymentSheet(o) {
       await api(`${base}/${path}`, { method: "POST", body });
       haptic("notification", "success");
       closeSheet(overlay);
-      await renderBudgetsTab();
+      await rerender();
     } catch (e) {
       showFormError(errorEl, e.message);
     }
@@ -343,4 +343,4 @@ function openBudgetModal(existing) {
   }
 }
 
-export { renderBudgetsTab, openBudgetModal };
+export { renderBudgetsTab, openBudgetModal, obligationsHtml, openPaymentSheet };

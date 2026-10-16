@@ -1,20 +1,32 @@
 """Кнопки «✅ Оплачено» и «⏭ Не в этом месяце» под вопросом об обязательном платеже и
-«✅ Пришла» / «⏳ Ещё нет» под вопросом о регулярном доходе."""
+«✅ Пришла» / «⏳ Ещё нет» под вопросом о регулярном доходе. После «Пришла» — сколько
+отложить на цели по плану распределения дохода и кнопка «✅ Отложил»."""
 from __future__ import annotations
 
 import datetime as dt
 import logging
+from html import escape
 
 from aiogram import F, Router
-from aiogram.types import CallbackQuery
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from sqlalchemy import delete, select
 
 from app.bot.notify import notify_budget_alerts
 from app.shared import obligations as ob
+from app.shared import plan
 from app.shared.budgets import alerts_after_expense, month_range
 from app.shared.database import async_session_maker
 from app.shared.income import record_income, source_date
-from app.shared.models import Chat, Income, IncomeAsk, IncomeSource, Member, RecurringExpense, RecurringPayment
+from app.shared.models import (
+    Chat,
+    GoalDeposit,
+    Income,
+    IncomeAsk,
+    IncomeSource,
+    Member,
+    RecurringExpense,
+    RecurringPayment,
+)
 
 logger = logging.getLogger(__name__)
 router = Router(name="payments")
@@ -92,6 +104,7 @@ async def on_income_button(callback: CallbackQuery) -> None:
     except (ValueError, IndexError):
         await callback.answer()
         return
+    markup = None
     async with async_session_maker() as session:
         source = await session.get(IncomeSource, source_id)
         if source is None or source.chat_id != callback.from_user.id:
@@ -110,8 +123,16 @@ async def on_income_button(callback: CallbackQuery) -> None:
             today = dt.date.today()
             # Подтвердили за другой месяц (ответили на вопрос с опозданием) — пишем в тот месяц
             date = today if ob.month_of(today) == month else source_date(source, month)
-            await record_income(session, chat, source.title, source.amount, date, source.id)
+            income = await record_income(session, chat, source.title, source.amount, date, source.id)
             text = f"✅ Записал доход «{source.title}» — {ob.fmt_amount(source.amount, chat.currency)}"
+            savings = await plan.savings_for_income(session, income)
+            if savings:
+                text += "\n\n🐷 По плану отложить:\n" + "\n".join(
+                    f"• {escape(goal.title)} — {ob.fmt_amount(amount, chat.currency)}" for _, goal, amount in savings
+                )
+                markup = InlineKeyboardMarkup(
+                    inline_keyboard=[[InlineKeyboardButton(text="✅ Отложил", callback_data=f"plan:save:{income.id}")]]
+                )
         else:
             # Спросим ещё раз на следующей ежедневной проверке
             await session.execute(
@@ -120,7 +141,38 @@ async def on_income_button(callback: CallbackQuery) -> None:
             text = f"⏳ «{source.title}» ещё не пришла — спрошу завтра"
         await session.commit()
     try:
-        await callback.message.edit_text(text)
+        await callback.message.edit_text(text, **({"reply_markup": markup} if markup else {}))
     except Exception:  # noqa: BLE001
         logger.warning("Не удалось обновить сообщение о доходе", exc_info=True)
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("plan:save:"))
+async def on_plan_save_button(callback: CallbackQuery) -> None:
+    """«✅ Отложил» — пополнения целей с этого поступления по процентам плана."""
+    try:
+        income_id = int(callback.data.split(":")[2])
+    except (ValueError, IndexError):
+        await callback.answer()
+        return
+    async with async_session_maker() as session:
+        income = await session.get(Income, income_id)
+        if income is None or income.chat_id != callback.from_user.id:
+            await callback.answer("Доход не найден", show_alert=True)
+            return
+        chat = await session.get(Chat, income.chat_id)
+        if await plan.income_saved(session, income.id):
+            await callback.answer("Уже отложено")
+            return
+        savings = await plan.savings_for_income(session, income)
+        for _, goal, amount in savings:
+            session.add(GoalDeposit(goal_id=goal.id, amount=amount, deposit_date=dt.date.today(), income_id=income.id))
+        await session.commit()
+    text = callback.message.html_text if callback.message.text else ""
+    lines = [text.split("\n\n")[0]] if text else []
+    lines.append("🐷 Отложил: " + ", ".join(f"{escape(goal.title)} {ob.fmt_amount(amount, chat.currency)}" for _, goal, amount in savings))
+    try:
+        await callback.message.edit_text("\n\n".join(lines))
+    except Exception:  # noqa: BLE001
+        logger.warning("Не удалось обновить сообщение об отложенном", exc_info=True)
+    await callback.answer("Отложено")

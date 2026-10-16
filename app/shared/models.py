@@ -41,6 +41,8 @@ class Chat(Base):
     # совпадает с tg_user_id владельца (как id личного чата с ботом в Telegram), единственный
     # участник — сам владелец. Id групп в Telegram всегда отрицательные, так что не пересекаются.
     is_personal: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    # С какого числа начинается месяц плана распределения дохода (app/shared/plan.py)
+    plan_start_day: Mapped[int] = mapped_column(default=1, server_default="1")
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
 
     members: Mapped[list["Member"]] = relationship(back_populates="chat", cascade="all, delete-orphan")
@@ -361,5 +363,45 @@ class GoalDeposit(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     goal_id: Mapped[int] = mapped_column(ForeignKey("goals.id", ondelete="CASCADE"))
     amount: Mapped[Decimal] = mapped_column(MoneyType)
+    # Отложено по плану с этого поступления (кнопка «Отложил» в боте) — чтобы не отложить дважды
+    income_id: Mapped[int | None] = mapped_column(
+        ForeignKey("incomes.id", ondelete="SET NULL"), nullable=True
+    )
     deposit_date: Mapped[dt.date] = mapped_column(Date, default=dt.date.today)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class PlanItem(Base):
+    """Статья плана распределения дохода в «Моих финансах» (app/shared/plan.py).
+
+    kind: spend — расходная, к ней привязаны категории трат (categories);
+          goal — накопительная, деньги откладываются на цель goal_id;
+          debt — долговая, её закрывают платежи обязательных платежей recurring_ids.
+    Статья «Свободно» не хранится: ей достаётся остаток процентов и остатки статей за
+    прошлые месяцы."""
+
+    __tablename__ = "plan_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[int] = mapped_column(ForeignKey("chats.id", ondelete="CASCADE"))
+    title: Mapped[str] = mapped_column(String(255))
+    kind: Mapped[str] = mapped_column(String(16), default="spend")
+    percent: Mapped[Decimal] = mapped_column(Numeric(5, 2))
+    categories: Mapped[str] = mapped_column(String(1024), default="[]")  # JSON-список категорий
+    goal_id: Mapped[int | None] = mapped_column(ForeignKey("goals.id", ondelete="SET NULL"), nullable=True)
+    recurring_ids: Mapped[str] = mapped_column(String(255), default="[]")  # JSON-список id платежей
+    position: Mapped[int] = mapped_column(default=0)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class PlanAlert(Base):
+    """Какие уведомления «статья почти исчерпана / превышена» уже отправлены в периоде."""
+
+    __tablename__ = "plan_alerts"
+    __table_args__ = (UniqueConstraint("item_id", "period", "level", name="uq_plan_alert"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    item_id: Mapped[int] = mapped_column(ForeignKey("plan_items.id", ondelete="CASCADE"))
+    period: Mapped[str] = mapped_column(String(10))  # дата начала периода, 'YYYY-MM-DD'
+    level: Mapped[int] = mapped_column()  # 80 | 100
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)

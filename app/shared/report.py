@@ -19,6 +19,7 @@ from app.shared.categories import CATEGORY_TREE
 from app.shared.goals import goals_status
 from app.shared.models import Chat, Expense, Income, Member, MonthlyReport
 from app.shared.obligations import fmt_amount, month_of, obligations
+from app.shared.plan import items_of
 
 ZERO = Decimal("0")
 MONTHS = (
@@ -102,6 +103,8 @@ async def build_report(session: AsyncSession, chat: Chat, month: str, partial: b
             lines.append(f"\n📈 Сильнее всего выросло: {_icon(cat)} {escape(cat)} +{money(diff)}")
 
     statuses = [s for s in await budgets_status(session, chat, month) if s.budget.amount > 0]
+    if chat.is_personal and await items_of(session, chat.id):
+        statuses = []  # в «Моих финансах» с планом распределения дохода лимиты не показываем
     if statuses:
         over = [s for s in statuses if s.spent > s.budget.amount]
         lines.append("")
