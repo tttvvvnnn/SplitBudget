@@ -1047,6 +1047,25 @@ button:active, .expense-card:active, .budget-card:active, .obligation-row:active
   margin-top: 10px;
 }
 
+.plan-cat-row {
+  margin-bottom: 8px;
+}
+
+.plan-cat-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.plan-cat-toggle {
+  padding: 4px 10px;
+  font-size: 16px;
+}
+
+.plan-subs {
+  margin: 6px 0 4px 18px;
+}
+
 .plan-free {
   border: 1px dashed var(--border);
 }

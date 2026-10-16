@@ -9,11 +9,13 @@ from sqlalchemy import select
 
 from app.api.dependencies import ChatContext, get_chat_context
 from app.shared import plan
-from app.shared.categories import CATEGORY_NAMES
+from app.shared.categories import CATEGORY_NAMES, CATEGORY_TREE
 from app.shared.models import Goal, GoalDeposit, PlanItem, RecurringExpense
 from app.shared.schemas import PlanItemIn, PlanItemOut, PlanOrderIn, PlanOut, PlanSettingsIn
 
 router = APIRouter(tags=["plan"])
+
+SUBCATEGORIES = {name: subs for name, _, subs in CATEGORY_TREE}
 
 
 def _personal(ctx: ChatContext) -> None:
@@ -73,16 +75,17 @@ async def _validate(ctx: ChatContext, payload: PlanItemIn, item_id: int | None) 
     if payload.kind == "spend":
         if not payload.categories:
             raise HTTPException(status_code=400, detail="Выберите хотя бы одну категорию трат")
-        unknown = [c for c in payload.categories if c not in CATEGORY_NAMES]
-        if unknown:
-            raise HTTPException(status_code=400, detail=f"Нет такой категории: {unknown[0]}")
+        for key in payload.categories:
+            category, _, sub = key.partition(plan.SUB_SEP)
+            if category not in CATEGORY_NAMES or (sub and sub not in SUBCATEGORIES.get(category, [])):
+                raise HTTPException(status_code=400, detail=f"Нет такой категории: {key}")
         for other in others:
             if other.kind == "spend":
                 taken = set(payload.categories) & {str(c) for c in plan.loads(other.categories)}
                 if taken:
                     raise HTTPException(
                         status_code=400,
-                        detail=f"Категория «{sorted(taken)[0]}» уже в статье «{other.title}»",
+                        detail=f"«{sorted(taken)[0]}» уже в статье «{other.title}»",
                     )
     elif payload.kind == "goal":
         goal = await ctx.session.get(Goal, payload.goal_id) if payload.goal_id else None
@@ -111,7 +114,7 @@ def _apply(item: PlanItem, payload: PlanItemIn) -> None:
     item.title = payload.title.strip()[:255]
     item.kind = payload.kind
     item.percent = payload.percent
-    item.categories = json.dumps(payload.categories if payload.kind == "spend" else [], ensure_ascii=False)
+    item.categories = json.dumps(list(dict.fromkeys(payload.categories)) if payload.kind == "spend" else [], ensure_ascii=False)
     item.goal_id = payload.goal_id if payload.kind == "goal" else None
     item.recurring_ids = json.dumps(sorted(set(payload.recurring_ids)) if payload.kind == "debt" else [])
 

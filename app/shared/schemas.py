@@ -447,7 +447,7 @@ class PlanItemIn(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     kind: str = Field(default="spend", pattern="^(spend|goal|debt)$")
     percent: Decimal = Field(gt=0, le=100)
-    categories: list[str] = Field(default_factory=list)  # для spend
+    categories: list[str] = Field(default_factory=list)  # для spend: «Категория» или «Категория › Подкатегория»
     goal_id: int | None = None  # для goal
     recurring_ids: list[int] = Field(default_factory=list)  # для debt
 

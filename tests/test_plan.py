@@ -32,13 +32,12 @@ def _personal(client, seeded_chat, auth_header):
     return pid, me, h
 
 
-def _expense(client, pid, me, h, amount, category, date=TODAY):
-    r = client.post(
-        f"/api/chats/{pid}/expenses",
-        headers=h,
-        data={"title": category, "amount": str(amount), "category": category, "expense_date": date.isoformat(),
-              "payer_member_id": str(me), "split_type": "equal", "participant_ids": f"[{me}]"},
-    )
+def _expense(client, pid, me, h, amount, category, date=TODAY, subcategory=None):
+    data = {"title": category, "amount": str(amount), "category": category, "expense_date": date.isoformat(),
+            "payer_member_id": str(me), "split_type": "equal", "participant_ids": f"[{me}]"}
+    if subcategory:
+        data["subcategory"] = subcategory
+    r = client.post(f"/api/chats/{pid}/expenses", headers=h, data=data)
     assert r.status_code == 201, r.text
 
 
@@ -84,6 +83,25 @@ def test_each_income_is_split_by_percent(client, seeded_chat, auth_header):
     assert float(_by_title(data)["Отпуск"]["remaining"]) == 0.0
     assert float(_by_title(data)["Отпуск"]["goal_saved"]) == 1100.0
     assert client.post(f"/api/chats/{pid}/plan/items/{goal_item}/save", headers=h).status_code == 400
+
+
+def test_subcategory_wins_over_category(client, seeded_chat, auth_header):
+    pid, me, h = _personal(client, seeded_chat, auth_header)
+    _item(client, pid, h, title="Транспорт", kind="spend", percent=10, categories=["Транспорт"])
+    _item(client, pid, h, title="Машина", kind="spend", percent=10, categories=["Транспорт › Топливо"])
+    _item(client, pid, h, title="Кофе", kind="spend", percent=5, categories=["Кафе и рестораны › Кофе"])
+    _expense(client, pid, me, h, 3000, "Транспорт", subcategory="Топливо")
+    _expense(client, pid, me, h, 500, "Транспорт", subcategory="Такси")
+    _expense(client, pid, me, h, 200, "Кафе и рестораны", subcategory="Кофе")
+    _expense(client, pid, me, h, 900, "Кафе и рестораны", subcategory="Рестораны")  # не в статье
+    items = _by_title(client.get(f"/api/chats/{pid}/plan", headers=h).json())
+    assert float(items["Машина"]["spent"]) == 3000.0
+    assert float(items["Транспорт"]["spent"]) == 500.0
+    assert float(items["Кофе"]["spent"]) == 200.0
+    assert float(items["Свободно"]["spent"]) == 900.0
+    r = client.post(f"/api/chats/{pid}/plan/items", headers=h,
+                    json={"title": "X", "kind": "spend", "percent": 1, "categories": ["Транспорт › Ракета"]})
+    assert r.status_code == 400
 
 
 def test_validation(client, seeded_chat, auth_header):

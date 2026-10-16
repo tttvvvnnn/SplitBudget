@@ -17,6 +17,9 @@ const KIND_LABELS = {
   debt: ["💳", "Долги", "Статью закрывают платежи по выбранным кредиткам и кредитам."],
 };
 
+// «Категория › Подкатегория» в списке категорий статьи (app/shared/plan.py, SUB_SEP)
+const SUB_SEP = " › ";
+
 const MONTHS_GEN = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
 
 function shortDate(iso) {
@@ -40,7 +43,7 @@ function pctText(value) {
 
 function itemIcon(it) {
   if (it.kind === "free") return "🪙";
-  if (it.kind === "spend" && it.categories.length === 1) return categoryIcon(it.categories[0]);
+  if (it.kind === "spend" && it.categories.length === 1) return categoryIcon(it.categories[0].split(SUB_SEP)[0]);
   return KIND_LABELS[it.kind][0];
 }
 
@@ -210,6 +213,10 @@ async function openPlanItemModal(existing, plan) {
   const otherItems = (plan ? plan.items : []).filter((i) => i.kind !== "free" && (!existing || i.id !== existing.id));
   const takenCats = new Map();
   otherItems.filter((i) => i.kind === "spend").forEach((i) => i.categories.forEach((c) => takenCats.set(c, i.title)));
+  function catChipHtml(key, label) {
+    const owner = takenCats.get(key);
+    return `<span class="chip ${cats.has(key) ? "selected" : ""} ${owner ? "disabled" : ""}" data-cat="${escapeHtml(key)}" style="padding:6px 12px;${owner ? "opacity:.45;" : ""}" ${owner ? `title="Уже в «${escapeHtml(owner)}»"` : ""}>${label}</span>`;
+  }
   const freePct = 100 - otherItems.reduce((s, i) => s + Number(i.percent), 0);
   const kind = existing ? existing.kind : "spend";
   const cats = new Set(existing ? existing.categories : []);
@@ -238,10 +245,21 @@ async function openPlanItemModal(existing, plan) {
     <div class="hint-text" style="margin:-4px 0 12px;">Можно распределить ещё ${pctText(freePct)}.</div>
     <div class="field" data-for="spend">
       <label>Категории трат</label>
-      <div class="chip-row" id="pi-cats">
+      <div class="hint-text" style="margin-bottom:8px;">Отметьте категорию целиком или нажмите ▸ и выберите только нужные подкатегории.</div>
+      <div id="pi-cats">
         ${state.categoryTree.map((c) => {
-          const owner = takenCats.get(c.name);
-          return `<span class="chip ${cats.has(c.name) ? "selected" : ""} ${owner ? "disabled" : ""}" data-cat="${escapeHtml(c.name)}" style="padding:6px 12px;${owner ? "opacity:.45;" : ""}" ${owner ? `title="Уже в «${escapeHtml(owner)}»"` : ""}>${c.icon} ${escapeHtml(c.name)}</span>`;
+          const open = c.subcategories.some((sub) => cats.has(c.name + SUB_SEP + sub));
+          return `
+            <div class="plan-cat-row">
+              <div class="plan-cat-head">
+                ${catChipHtml(c.name, `${c.icon} ${escapeHtml(c.name)}`)}
+                ${c.subcategories.length ? `<button class="link-btn plan-cat-toggle" data-toggle="${escapeHtml(c.name)}" aria-label="Подкатегории">${open ? "▾" : "▸"}</button>` : ""}
+              </div>
+              ${c.subcategories.length ? `
+                <div class="chip-row plan-subs" data-subs="${escapeHtml(c.name)}" style="${open ? "" : "display:none;"}">
+                  ${c.subcategories.map((sub) => catChipHtml(c.name + SUB_SEP + sub, escapeHtml(sub))).join("")}
+                </div>` : ""}
+            </div>`;
         }).join("")}
       </div>
     </div>
@@ -282,7 +300,15 @@ async function openPlanItemModal(existing, plan) {
       chip.classList.toggle("selected", cats.has(name));
       // Одна категория — подставим её название, если название ещё не задано
       const titleEl = overlay.querySelector("#pi-title");
-      if (!titleEl.value.trim() && cats.size === 1) titleEl.value = [...cats][0];
+      if (!titleEl.value.trim() && cats.size === 1) titleEl.value = [...cats][0].split(SUB_SEP).pop();
+    });
+  });
+  overlay.querySelectorAll("[data-toggle]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const subs = overlay.querySelector(`[data-subs="${CSS.escape(btn.dataset.toggle)}"]`);
+      const open = subs.style.display === "none";
+      subs.style.display = open ? "" : "none";
+      btn.textContent = open ? "▾" : "▸";
     });
   });
   overlay.querySelectorAll("#pi-debts .chip").forEach((chip) => {

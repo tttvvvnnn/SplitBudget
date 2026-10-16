@@ -4,8 +4,10 @@
 остаток процентов. По статье видно: выделено, потрачено, осталось.
 
 Виды статей (PlanItem.kind):
-- spend — расходная: к ней привязаны категории трат, траты этих категорий (личные и твоя
-  доля семейных) списываются с неё;
+- spend — расходная: к ней привязаны категории или отдельные подкатегории трат
+  («Транспорт › Топливо»), траты этих категорий (личные и твоя доля семейных) списываются
+  с неё. Если категория в одной статье, а её подкатегория в другой — трата идёт в статью
+  с подкатегорией;
 - goal — накопительная: выделенное откладывается на цель по кнопке «Отложил»;
 - debt — долговая: её закрывают оплаченные обязательные платежи (кредитка, кредит).
 Траты без статьи и пополнения целей без статьи списываются со «Свободно».
@@ -41,6 +43,7 @@ from app.shared.models import (
 
 KINDS = ("spend", "goal", "debt")
 FREE_TITLE = "Свободно"
+SUB_SEP = " › "  # «Категория › Подкатегория» в списке категорий статьи
 ALERT_LEVELS = (100, 80)
 ZERO = Decimal("0")
 CENT = Decimal("0.01")
@@ -119,7 +122,7 @@ class _Flows:
     """Все движения денег плана в диапазоне дат."""
 
     incomes: list[tuple[dt.date, Decimal]]
-    expenses: list[tuple[dt.date, str, Decimal]]  # без платежей, привязанных к долговым статьям
+    expenses: list[tuple[dt.date, str, str | None, Decimal]]  # без платежей долговых статей
     deposits: list[tuple[dt.date, int, Decimal]]
     payments: list[tuple[dt.date, int, Decimal]]  # оплаченные платежи долговых статей
 
@@ -142,7 +145,7 @@ async def _flows(session: AsyncSession, chat: Chat, start: dt.date, end: dt.date
     # Как и во вкладке «Траты» «Моих финансов»: личные траты и доля владельца в семейных
     expenses = (
         await session.execute(
-            select(Expense.expense_date, Expense.category, Expense.recurring_id, ExpenseShare.amount)
+            select(Expense.expense_date, Expense.category, Expense.subcategory, Expense.recurring_id, ExpenseShare.amount)
             .join(ExpenseShare, ExpenseShare.expense_id == Expense.id)
             .join(Member, Member.id == ExpenseShare.member_id)
             .where(Member.tg_user_id == chat.id, Expense.expense_date >= start, Expense.expense_date < end)
@@ -171,7 +174,7 @@ async def _flows(session: AsyncSession, chat: Chat, start: dt.date, end: dt.date
     return _Flows(
         incomes=[(d, a) for d, a in incomes],
         # Платёж долговой статьи (кредит записывается тратой) считается в ней, а не в категории
-        expenses=[(d, c, a) for d, c, rid, a in expenses if rid is None or rid not in debt_ids],
+        expenses=[(d, c, sub, a) for d, c, sub, rid, a in expenses if rid is None or rid not in debt_ids],
         deposits=[(d, g, a) for d, g, a in deposits],
         payments=payments,
     )
@@ -179,7 +182,7 @@ async def _flows(session: AsyncSession, chat: Chat, start: dt.date, end: dt.date
 
 def _outflow(flows: _Flows) -> Decimal:
     return (
-        sum((a for _, _, a in flows.expenses), ZERO)
+        sum((a for *_, a in flows.expenses), ZERO)
         + sum((a for _, _, a in flows.deposits), ZERO)
         + sum((a for _, _, a in flows.payments), ZERO)
     )
@@ -227,8 +230,20 @@ async def summary(session: AsyncSession, chat: Chat, date: dt.date) -> PlanSumma
         ).scalars().all()
         recurrings = {r.id: r for r in rows}
 
+    # Куда идёт трата: «Категория › Подкатегория» точнее, чем вся категория
+    by_key: dict[str, int] = {}
+    for item in items:
+        if item.kind == "spend":
+            for key in loads(item.categories):
+                by_key.setdefault(str(key), item.id)
+
+    def item_for(category: str, subcategory: str | None) -> int | None:
+        if subcategory and f"{category}{SUB_SEP}{subcategory}" in by_key:
+            return by_key[f"{category}{SUB_SEP}{subcategory}"]
+        return by_key.get(category)
+
+    expense_items = [(item_for(c, sub), a) for _, c, sub, a in flows.expenses]
     statuses: list[ItemStatus] = []
-    matched_categories: set[str] = set()
     matched_goals: set[int] = set()
     for item in items:
         st = ItemStatus(
@@ -241,9 +256,7 @@ async def summary(session: AsyncSession, chat: Chat, date: dt.date) -> PlanSumma
         )
         if item.kind == "spend":
             st.categories = [str(c) for c in loads(item.categories)]
-            cats = set(st.categories)
-            matched_categories |= cats
-            st.spent = sum((a for _, c, a in flows.expenses if c in cats), ZERO)
+            st.spent = sum((a for i, a in expense_items if i == item.id), ZERO)
         elif item.kind == "goal":
             st.goal_id = item.goal_id
             if item.goal_id in goals:
@@ -267,7 +280,7 @@ async def summary(session: AsyncSession, chat: Chat, date: dt.date) -> PlanSumma
         percent=free_percent,
         # Остаток от округления долей статей тоже достаётся «Свободно»
         allocated=income - sum((s.allocated for s in statuses), ZERO) + carried,
-        spent=sum((a for _, c, a in flows.expenses if c not in matched_categories), ZERO)
+        spent=sum((a for i, a in expense_items if i is None), ZERO)
         + sum((a for _, g, a in flows.deposits if g not in matched_goals), ZERO),
         carried=carried,
     )
