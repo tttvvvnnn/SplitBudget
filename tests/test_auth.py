@@ -29,7 +29,7 @@ def test_unknown_chat_rejected(client, seeded_chat, auth_header):
 def test_static_webapp_served(client):
     r = client.get("/")
     assert r.status_code == 200
-    assert "Семейные траты" in r.text
+    assert "<title>SplitBudget</title>" in r.text
 
 
 def test_webapp_js_modules_served_as_javascript(client):

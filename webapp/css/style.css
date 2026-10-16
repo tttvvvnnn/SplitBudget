@@ -1,32 +1,133 @@
 * { box-sizing: border-box; }
 
+/* Своя светлая и тёмная тема на цветах бренда (brand/README.md) вместо цветов темы
+   Telegram. Какую показать, решает Telegram: app.js ставит <html data-theme> по
+   tg.colorScheme и обновляет его на themeChanged. Без Telegram — по системной теме.
+
+   Основной стиль — «жидкое стекло»: полупрозрачные слои с размытием поверх фона с
+   мягким свечением бренда (body::before). Без свечения стекло на однотонном фоне
+   выглядело бы просто серым. */
 :root {
-  --bg: var(--tg-theme-bg-color, #ffffff);
-  --secondary-bg: var(--tg-theme-secondary-bg-color, #f2f2f7);
-  --text: var(--tg-theme-text-color, #1c1c1e);
-  --hint: var(--tg-theme-hint-color, #8e8e93);
-  --link: var(--tg-theme-link-color, #2481cc);
-  --button: var(--tg-theme-button-color, #2481cc);
-  --button-text: var(--tg-theme-button-text-color, #ffffff);
-  --border: rgba(120, 120, 128, 0.2);
+  --brand: #2481cc;
+  --brand-2: #6cc1ff;
   --danger: #ff3b30;
   --success: #34c759;
-  /* отдельный контраст для полей ввода — иначе они сливаются с фоном шторки (оба были
-     var(--bg)): чуть заметный залив + более плотная граница, чтобы поле читалось
-     как поле, а не просто текст на фоне */
-  --field-bg: var(--tg-theme-secondary-bg-color, #f2f2f7);
-  --field-border: rgba(120, 120, 128, 0.35);
-  /* «Сгруппированный» вид, как настройки самого Telegram: страница — secondary_bg,
-     карточки — section_bg (в старых клиентах его нет → обычный bg). Шапка и
-     таббар — того же цвета, что страница/карточки соответственно. */
-  --page-bg: var(--secondary-bg);
-  --card-bg: var(--tg-theme-section-bg-color, var(--bg));
   --warning: #ff9500;
-  /* мягкая подсветка акцентом темы — фон иконок, активной вкладки и т.п. */
-  --accent-soft: rgba(36, 129, 204, 0.12);
-  --accent-soft: color-mix(in srgb, var(--link) 12%, transparent);
-  --radius-card: 16px;
+  --radius-card: 20px;
   --tabbar-h: 58px;
+  --glass-blur: blur(22px) saturate(180%);
+  --glass-blur-strong: blur(30px) saturate(190%);
+
+  /* светлая тема */
+  --page-bg: #edf3fa;
+  --bg: #ffffff;
+  --text: #0f1b2d;
+  --hint: #66768c;
+  --link: #1c72bb;
+  --button: #2481cc;
+  --button-text: #ffffff;
+  --border: rgba(15, 40, 80, 0.09);
+  --field-bg: rgba(255, 255, 255, 0.62);
+  --field-border: rgba(15, 40, 80, 0.16);
+  --card-bg: rgba(255, 255, 255, 0.58);
+  --card-solid: #f6f9fd;
+  --glass-strong: rgba(255, 255, 255, 0.72);
+  --sheet-bg: rgba(250, 252, 255, 0.9);
+  --glass-edge: rgba(255, 255, 255, 0.75);
+  --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  --glass-shadow: 0 8px 28px rgba(24, 74, 130, 0.09), 0 1px 3px rgba(24, 74, 130, 0.06);
+  --aura-1: rgba(108, 193, 255, 0.55);
+  --aura-2: rgba(36, 129, 204, 0.28);
+  --aura-3: rgba(143, 208, 255, 0.35);
+  --accent-soft: rgba(36, 129, 204, 0.12);
+  --mark-a: #2481cc;
+  --mark-b: #6cc1ff;
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --page-bg: #08111e;
+  --bg: #111c2c;
+  --text: #eaf1fa;
+  --hint: #8b9bb3;
+  --link: #6cb8f5;
+  --button: #2a8ae0;
+  --border: rgba(255, 255, 255, 0.08);
+  --field-bg: rgba(255, 255, 255, 0.06);
+  --field-border: rgba(255, 255, 255, 0.14);
+  --card-bg: rgba(30, 45, 68, 0.5);
+  --card-solid: #172437;
+  --glass-strong: rgba(20, 32, 50, 0.72);
+  --sheet-bg: rgba(17, 28, 44, 0.9);
+  --glass-edge: rgba(255, 255, 255, 0.09);
+  --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  --glass-shadow: 0 10px 30px rgba(0, 0, 0, 0.35), 0 1px 3px rgba(0, 0, 0, 0.25);
+  --aura-1: rgba(36, 129, 204, 0.5);
+  --aura-2: rgba(62, 155, 232, 0.22);
+  --aura-3: rgba(108, 193, 255, 0.14);
+  --accent-soft: rgba(108, 184, 245, 0.14);
+  --mark-a: #3e9be8;
+  --mark-b: #8fd0ff;
+  color-scheme: dark;
+}
+
+/* Вне Telegram (браузер, превью) data-theme может не стоять — берём системную тему */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --page-bg: #08111e; --bg: #111c2c; --text: #eaf1fa; --hint: #8b9bb3; --link: #6cb8f5;
+    --button: #2a8ae0; --border: rgba(255, 255, 255, 0.08); --field-bg: rgba(255, 255, 255, 0.06);
+    --field-border: rgba(255, 255, 255, 0.14); --card-bg: rgba(30, 45, 68, 0.5); --card-solid: #172437;
+    --glass-strong: rgba(20, 32, 50, 0.72); --sheet-bg: rgba(17, 28, 44, 0.9); --glass-edge: rgba(255, 255, 255, 0.09);
+    --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+    --glass-shadow: 0 10px 30px rgba(0, 0, 0, 0.35), 0 1px 3px rgba(0, 0, 0, 0.25);
+    --aura-1: rgba(36, 129, 204, 0.5); --aura-2: rgba(62, 155, 232, 0.22); --aura-3: rgba(108, 193, 255, 0.14);
+    --accent-soft: rgba(108, 184, 245, 0.14); --mark-a: #3e9be8; --mark-b: #8fd0ff;
+    color-scheme: dark;
+  }
+}
+
+/* Фон под стеклом: свечение бренда, закреплённое за экраном (а не background-attachment:
+   fixed — он в iOS WebView не работает). Один статичный слой, перерисовки при скролле нет. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(60% 40% at 15% 0%, var(--aura-1), transparent 70%),
+    radial-gradient(50% 35% at 100% 18%, var(--aura-2), transparent 70%),
+    radial-gradient(70% 45% at 50% 105%, var(--aura-3), transparent 70%),
+    var(--page-bg);
+}
+
+/* Стеклянные поверхности. Карточки — лёгкое стекло, плавающие панели (шапка, таббар,
+   шторки) — плотнее и с сильнее размытием, чтобы текст под ними не мешал читать. */
+.card, .chart-wrap, .share-toggle, .balance-banner.neutral, .space-switcher button,
+.btn.secondary, .month-picker button, .split-toggle, .chip {
+  background: var(--card-bg);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-edge);
+  box-shadow: var(--glass-highlight), var(--glass-shadow);
+}
+
+/* Где размытие не поддерживается, в системе включено «уменьшить прозрачность» или
+   Telegram пометил устройство как слабое (app.js ставит .glass-lite) — стекло становится
+   плотной заливкой того же оттенка: выглядит почти так же, но ничего не размывается. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root { --card-bg: var(--card-solid); --glass-strong: var(--card-solid); --sheet-bg: var(--card-solid); --field-bg: var(--bg); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  :root { --card-bg: var(--card-solid) !important; --glass-strong: var(--card-solid) !important; }
+  * { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+}
+.glass-lite { --card-bg: var(--card-solid); }
+.glass-lite .card, .glass-lite .chart-wrap, .glass-lite .chip, .glass-lite .space-switcher button,
+.glass-lite .month-picker button, .glass-lite .btn.secondary, .glass-lite .split-toggle,
+.glass-lite .share-toggle, .glass-lite .balance-banner.neutral {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 
 html, body {
@@ -81,13 +182,54 @@ button:active, .expense-card:active, .budget-card:active, .obligation-row:active
 }
 
 .header {
-  padding: 14px 16px 10px;
-  border-bottom: 1px solid var(--border);
-  background: var(--page-bg);
+  padding: 12px 16px 10px;
+  border-bottom: 1px solid var(--glass-edge);
+  /* шапка, как и шторка, плотнее таббара: под ней прокручиваются суммы, и сквозь
+     полупрозрачный слой они читались бы поверх названия */
+  background: var(--sheet-bg);
+  -webkit-backdrop-filter: var(--glass-blur-strong);
+  backdrop-filter: var(--glass-blur-strong);
   position: sticky;
   top: 0;
   z-index: 5;
 }
+
+/* Строка бренда над названием пространства: знак «монета пополам» + SplitBudget.
+   Знак — inline SVG из brand/logo-mark.svg, половинки красятся --mark-a/--mark-b,
+   поэтому в тёмной теме сами берут светлые оттенки из brand/logo-mark-dark.svg. */
+.brand-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: -0.2px;
+}
+.brand-row .wordmark .split { color: var(--mark-a); }
+.brand-mark { width: 20px; height: 20px; flex-shrink: 0; }
+.brand-mark .half-a { fill: var(--mark-a); }
+.brand-mark .half-b { fill: var(--mark-b); }
+
+/* Экран загрузки: знак, название и мягкая пульсация */
+.splash {
+  min-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  color: var(--hint);
+}
+.splash .brand-mark {
+  width: 72px;
+  height: 72px;
+  filter: drop-shadow(0 10px 24px rgba(36, 129, 204, 0.35));
+  animation: splash-pulse 1.6s ease-in-out infinite;
+}
+.splash .wordmark { font-size: 24px; font-weight: 800; letter-spacing: -0.5px; color: var(--text); }
+.splash .wordmark .split { color: var(--mark-a); }
+@keyframes splash-pulse { 50% { transform: scale(0.94); opacity: 0.8; } }
 
 .header h1 {
   font-size: 22px;
@@ -120,8 +262,6 @@ button:active, .expense-card:active, .budget-card:active, .obligation-row:active
   min-height: 34px;
   padding: 6px 14px;
   border-radius: 17px;
-  border: 1px solid var(--border);
-  background: var(--card-bg);
   color: var(--text);
   font-size: 14px;
   font-weight: 500;
@@ -132,7 +272,8 @@ button:active, .expense-card:active, .budget-card:active, .obligation-row:active
 .space-switcher button.active {
   background: var(--button);
   color: var(--button-text);
-  border-color: var(--button);
+  border-color: transparent;
+  box-shadow: 0 4px 14px rgba(36, 129, 204, 0.35);
 }
 
 /* Версия/сборка в правом верхнем углу шапки — см. loadVersionBadge() в app.js. Нужна,
@@ -174,9 +315,7 @@ button:active, .expense-card:active, .budget-card:active, .obligation-row:active
 }
 
 .balance-banner.neutral {
-  background: var(--card-bg);
   color: var(--hint);
-  border: 1px solid var(--border);
 }
 
 .balance-banner .chevron {
@@ -200,8 +339,6 @@ button:active, .expense-card:active, .budget-card:active, .obligation-row:active
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  background: var(--accent-soft);
-  border: none;
   color: var(--link);
   font-size: 24px;
   line-height: 1;
@@ -222,10 +359,7 @@ button:active, .expense-card:active, .budget-card:active, .obligation-row:active
 }
 
 .card {
-  background: var(--card-bg);
-  /* в некоторых темах Telegram secondary_bg_color почти не отличается от основного фона —
-     без границы карточки трат в такой теме визуально сливались со страницей */
-  border: 1px solid var(--border);
+  /* фон, рамка и тень — общие стеклянные, см. начало файла */
   border-radius: var(--radius-card);
   padding: 12px 14px;
   margin-bottom: 8px;
@@ -333,7 +467,7 @@ button:active, .expense-card:active, .budget-card:active, .obligation-row:active
   font-size: 7.5px;
   /* Рамка цвета фона карточки — иначе перекрывающиеся кружки визуально сливаются в одно
      пятно вместо читаемой "стопки" аватарок */
-  border: 1.5px solid var(--card-bg);
+  border: 1.5px solid var(--card-solid);
   margin-left: -6px;
 }
 
@@ -399,14 +533,19 @@ button:active, .expense-card:active, .budget-card:active, .obligation-row:active
 }
 
 .tabbar {
+  /* плавающая стеклянная панель, как в iOS 26: отступ от краёв и скругление */
   position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
+  bottom: calc(8px + env(safe-area-inset-bottom));
+  left: 10px;
+  right: 10px;
   display: flex;
-  background: var(--card-bg);
-  border-top: 1px solid var(--border);
-  padding: 4px 4px env(safe-area-inset-bottom);
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: var(--glass-blur-strong);
+  backdrop-filter: var(--glass-blur-strong);
+  border: 1px solid var(--glass-edge);
+  border-radius: 26px;
+  box-shadow: var(--glass-highlight), var(--glass-shadow);
+  padding: 2px 4px;
   z-index: 10;
 }
 
@@ -450,18 +589,18 @@ button:active, .expense-card:active, .budget-card:active, .obligation-row:active
 .fab {
   position: fixed;
   right: 16px;
-  bottom: calc(var(--tabbar-h) + 22px + env(safe-area-inset-bottom));
+  bottom: calc(var(--tabbar-h) + 26px + env(safe-area-inset-bottom));
   width: 56px;
   height: 56px;
   border-radius: 18px;
-  background: var(--button);
+  background: linear-gradient(145deg, var(--brand-2) -20%, var(--brand) 60%);
   color: var(--button-text);
-  border: none;
+  border: 1px solid rgba(255, 255, 255, 0.35);
   /* display задаётся из updateFab() (flex/none) — центрирование иконки ниже */
   align-items: center;
   justify-content: center;
   padding: 0;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22), 0 2px 6px rgba(0, 0, 0, 0.12);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 8px 24px rgba(36, 129, 204, 0.45), 0 2px 6px rgba(0, 0, 0, 0.12);
   cursor: pointer;
   z-index: 8;
 }
@@ -476,7 +615,7 @@ button:active, .expense-card:active, .budget-card:active, .obligation-row:active
   background: var(--button);
   color: var(--button-text);
   border: none;
-  border-radius: 12px;
+  border-radius: 14px;
   padding: 12px 18px;
   font-size: 15px;
   font-weight: 600;
@@ -486,11 +625,7 @@ button:active, .expense-card:active, .budget-card:active, .obligation-row:active
 }
 
 .btn.secondary {
-  background: var(--card-bg);
   color: var(--text);
-  /* без границы кнопка сливалась с соседними полями/фоном — тот же приём контраста,
-     что и у .field */
-  border: 1.5px solid var(--field-border);
 }
 
 .btn.danger {
@@ -674,8 +809,6 @@ button:active, .expense-card:active, .budget-card:active, .obligation-row:active
   gap: 6px;
   padding: 6px 12px 6px 6px;
   border-radius: 20px;
-  background: var(--field-bg);
-  border: 1px solid var(--border);
   font-size: 13.5px;
   cursor: pointer;
   user-select: none;
@@ -691,7 +824,7 @@ button:active, .expense-card:active, .budget-card:active, .obligation-row:active
 .chip.selected {
   background: var(--button);
   color: var(--button-text);
-  border-color: var(--button);
+  border-color: transparent;
 }
 
 /* Чип «+ Добавить» в конце списка участников — открывает форму добавления участника без
@@ -702,6 +835,7 @@ button:active, .expense-card:active, .budget-card:active, .obligation-row:active
   color: var(--link);
   border: 1px dashed var(--field-border);
   background: transparent;
+  box-shadow: none;
 }
 
 /* Сегмент-контрол переключения режима сплита — единый "трек" с плавающей активной
@@ -711,8 +845,6 @@ button:active, .expense-card:active, .budget-card:active, .obligation-row:active
   gap: 3px;
   padding: 3px;
   border-radius: 12px;
-  background: var(--field-bg);
-  border: 1.5px solid var(--field-border);
 }
 
 .split-toggle div {
@@ -761,10 +893,22 @@ button:active, .expense-card:active, .budget-card:active, .obligation-row:active
 .sheet { animation: sheet-in 0.26s cubic-bezier(0.2, 0.9, 0.3, 1); }
 
 @keyframes overlay-in { from { background: rgba(0,0,0,0); } }
+
+/* Стекло затемнения: страница под шторкой слегка размывается */
+.sheet-overlay {
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+.glass-lite .sheet-overlay { -webkit-backdrop-filter: none; backdrop-filter: none; }
 @keyframes sheet-in { from { transform: translateY(40%); opacity: 0.4; } }
 
 .sheet {
-  background: var(--bg);
+  /* плотнее, чем таббар: в шторке формы, и просвечивающий список мешал бы их читать */
+  background: var(--sheet-bg);
+  -webkit-backdrop-filter: var(--glass-blur-strong);
+  backdrop-filter: var(--glass-blur-strong);
+  border-top: 1px solid var(--glass-edge);
+  box-shadow: var(--glass-highlight);
   width: 100%;
   /* 96vh, а не 90 — форма трата рассчитана помещаться без прокрутки на большинстве
      экранов; overflow-y остаётся как страховка для маленьких экранов/чатов с
@@ -774,7 +918,7 @@ button:active, .expense-card:active, .budget-card:active, .obligation-row:active
   /* страховка от горизонтальной прокрутки, если какой-то ряд внутри формы всё же не
      впишется по ширине — обрезаем, а не даём утянуть страницу вбок */
   overflow-x: hidden;
-  border-radius: 20px 20px 0 0;
+  border-radius: 26px 26px 0 0;
   padding: 8px 16px calc(16px + env(safe-area-inset-bottom));
 }
 
@@ -930,8 +1074,6 @@ button:active, .expense-card:active, .budget-card:active, .obligation-row:active
 }
 
 .chart-wrap {
-  background: var(--card-bg);
-  border: 1px solid var(--border);
   border-radius: var(--radius-card);
   padding: 14px;
   margin-bottom: 10px;
@@ -1111,7 +1253,10 @@ button:active, .expense-card:active, .budget-card:active, .obligation-row:active
 }
 .space-switcher button.hidden-chip {
   background: none;
-  border-style: dashed;
+  border: 1px dashed var(--field-border);
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
   color: var(--hint);
 }
 .hidden-chat-row {
@@ -1131,8 +1276,6 @@ button:active, .expense-card:active, .budget-card:active, .obligation-row:active
   margin: 0 auto 4px;
   padding: 3px;
   border-radius: 18px;
-  background: var(--card-bg);
-  border: 1px solid var(--border);
 }
 .share-toggle button {
   min-height: 32px;
