@@ -1,17 +1,21 @@
 import { state, isPersonal, hideFamilyOnly } from "../state.js";
 import { api } from "../api.js";
 import { tg, haptic, toast, confirmAction } from "../telegram.js";
-import { fmtMoney, escapeHtml } from "../format.js";
+import { fmtMoney, escapeHtml, todayMonth } from "../format.js";
 import { memberLabel } from "../members.js";
 import { openSheet, closeSheet, useMainButtonFor, showFormError } from "../sheet.js";
 import { openAddMemberModal } from "../member-modals.js";
+import { obligationsHtml, openPaymentSheet } from "./budgets.js";
 import { categoryFieldsHtml, bindCategoryFields, readCategoryFields, categoryBadgeHtml, setCategory } from "../category-fields.js";
 
 /* ---------------- Вкладка «Платежи» (обязательные платежи) ----------------
    Аренда, кредиты, кредитные карты, подписки. За 7, 3 и 1 день бот напоминает, в день
    платежа спрашивает «Оплачено?», и только после подтверждения записывает трату
    (app/shared/obligations.py). Платёж по кредитной карте тратой не считается — он уменьшает
-   долг по карте. */
+   долг по карте, а в «Плане» списывается со статьи по своей категории. Сумма необязательна:
+   без неё платёж — только напоминание, а сколько внесли, указывают при оплате.
+
+   В «Моих финансах» сверху — платежи этого месяца (в семейном чате они во вкладке «Лимиты»). */
 
 const KIND_INFO = {
   rent: ["🏠", "Аренда"],
@@ -25,16 +29,19 @@ const KIND_INFO = {
 const KIND_CATEGORY = {
   rent: ["Дом", "Аренда"],
   loan: ["Кредиты", "Кредит"],
+  card: ["Кредиты", "Кредитная карта"],
   subscription: ["Подписки", ""],
 };
 
 async function renderRecurringTab() {
   const content = document.getElementById("content");
   let hints = [];
+  let month = null;
   try {
-    [state.recurring, hints] = await Promise.all([
+    [state.recurring, hints, month] = await Promise.all([
       api(`/chats/${state.chatId}/recurring`),
       api(`/chats/${state.chatId}/subscription-hints`).catch(() => []),
+      isPersonal() ? api(`/chats/${state.chatId}/obligations?month=${todayMonth()}`) : null,
     ]);
   } catch (e) {
     content.innerHTML = `<div class="empty-state">${escapeHtml(e.message)}</div>`;
@@ -43,8 +50,9 @@ async function renderRecurringTab() {
 
   content.innerHTML = `
     <div class="hint-text" style="margin: 8px 4px 14px;">
-      За 7, 3 и 1 день до платежа бот напомнит, а в день платежа спросит «Оплачено?»${isPersonal() ? " в личке" : " в чате"}. После подтверждения платёж запишется тратой. Отметить оплату можно и во вкладке ${isPersonal() ? "«План»" : "«🎯 Лимиты»"}.
+      За 7, 3 и 1 день до платежа бот напомнит, а в день платежа спросит «Оплачено?»${isPersonal() ? " в личке" : " в чате"}. После подтверждения платёж запишется тратой. Сумму можно не указывать — тогда бот просто напомнит и спросит, сколько внесли.${isPersonal() ? "" : " Отметить оплату можно и во вкладке «🎯 Лимиты»."}
     </div>
+    ${month && month.items.length ? obligationsHtml(month) : ""}
     ${hintsHtml(hints)}
     ${state.recurring.length === 0 ? '<div class="empty-state">Обязательных платежей пока нет.<br>Нажмите «+», чтобы добавить аренду, кредит, карту или подписку.</div>' : state.recurring.map((r) => {
       const [icon] = KIND_INFO[r.kind] || KIND_INFO.other;
@@ -57,17 +65,22 @@ async function renderRecurringTab() {
         <div class="expense-main">
           <div class="expense-title">${escapeHtml(r.title)}</div>
           <div class="expense-meta">
-            ${r.kind === "card" ? "" : categoryBadgeHtml(r.category, r.subcategory)}
+            ${categoryBadgeHtml(r.category, r.subcategory)}
             каждое ${r.day_of_month} число${isPersonal() ? "" : ` · ${escapeHtml(memberLabel(r.payer_member_id))}`}
             ${extra.length ? ` · ${extra.join(" · ")}` : ""}
             ${r.is_active ? "" : " · остановлено"}
           </div>
         </div>
-        <div class="expense-amount">${fmtMoney(r.amount)}</div>
+        <div class="expense-amount">${Number(r.amount) ? fmtMoney(r.amount) : '<span class="hint-text">без суммы</span>'}</div>
       </div>`;
     }).join("")}
   `;
 
+  content.querySelectorAll(".obligation-row").forEach((el) => {
+    el.addEventListener("click", () => {
+      openPaymentSheet(month.items.find((o) => o.payment_id === Number(el.dataset.id)), renderRecurringTab);
+    });
+  });
   content.querySelectorAll(".expense-card").forEach((el) => {
     el.addEventListener("click", () => {
       const r = state.recurring.find((x) => x.id === Number(el.dataset.id));
@@ -140,12 +153,13 @@ function openRecurringModal(existing) {
     </div>
     <div class="field">
       <label id="r-amount-label">Сумма в месяц (${escapeHtml(state.chat.currency)})</label>
-      <input type="number" id="r-amount" min="0" step="0.01" value="${existing ? existing.amount : ""}">
+      <input type="number" id="r-amount" min="0" step="0.01" value="${existing && Number(existing.amount) ? existing.amount : ""}" placeholder="необязательно">
+      <div class="hint-text">Без суммы — только напоминание: в день платежа бот спросит, сколько внесли.</div>
     </div>
     <div class="field" id="r-debt-field">
       <label>Общий долг по карте (${escapeHtml(state.chat.currency)})</label>
       <input type="number" id="r-debt" min="0" step="0.01" value="${existing && existing.debt !== null ? existing.debt : ""}" placeholder="необязательно">
-      <div class="hint-text">Платёж по карте не считается тратой (покупки по карте записываются отдельно), он уменьшает долг.</div>
+      <div class="hint-text">Платёж по карте не считается тратой (покупки по карте записываются отдельно), он уменьшает долг. В «Плане» он списывается со статьи по категории ниже.</div>
     </div>
     <div id="r-category-wrap">
       ${categoryFieldsHtml("r", existing && existing.category, existing && existing.subcategory)}
@@ -184,7 +198,6 @@ function openRecurringModal(existing) {
 
   function applyKind() {
     overlay.querySelector("#r-debt-field").style.display = kind === "card" ? "block" : "none";
-    overlay.querySelector("#r-category-wrap").style.display = kind === "card" ? "none" : "block";
     overlay.querySelector("#r-end-field").style.display = ["loan", "card", "other"].includes(kind) ? "block" : "none";
     overlay.querySelector("#r-amount-label").textContent =
       `${kind === "card" ? "Платёж в месяц" : "Сумма в месяц"} (${state.chat.currency})`;
@@ -285,7 +298,8 @@ function openRecurringModal(existing) {
     const payerId = Number(overlay.querySelector("#r-payer").value);
 
     if (!title) { showFormError(errorEl, "Укажите название"); return; }
-    if (!amount || amount <= 0) { showFormError(errorEl, "Укажите сумму больше нуля"); return; }
+    if (amount < 0) { showFormError(errorEl, "Сумма не может быть меньше нуля"); return; }
+    if (!amount && splitType === "custom") { showFormError(errorEl, "Без суммы платёж можно делить только поровну"); return; }
     if (!day || day < 1 || day > 28) { showFormError(errorEl, "День месяца должен быть от 1 до 28"); return; }
 
     let participants;

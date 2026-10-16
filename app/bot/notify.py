@@ -107,7 +107,9 @@ async def notify_obligations(notices: list[Notice]) -> None:
     for notice in notices:
         markup = None
         if notice.ask_payment_id is not None:
-            markup = payment_keyboard(me.username, notice.ask_payment_id, notice.chat_link_id or notice.chat_id)
+            markup = payment_keyboard(
+                me.username, notice.ask_payment_id, notice.chat_link_id or notice.chat_id, notice.ask_amount
+            )
         elif notice.buttons:
             markup = buttons_keyboard(me.username, notice.buttons, notice.app_param)
         try:

@@ -252,7 +252,7 @@ class RecurringParticipantIn(BaseModel):
 
 class RecurringCreate(BaseModel):
     title: str = Field(min_length=1, max_length=255)
-    amount: Decimal = Field(gt=0)
+    amount: Decimal = Field(ge=0)  # 0 — без суммы: только напоминание, сколько внёс — при оплате
     category: str = "Другое"
     subcategory: str | None = None
     payer_member_id: int
@@ -276,7 +276,7 @@ class RecurringCreate(BaseModel):
 
 class RecurringUpdate(BaseModel):
     title: str | None = None
-    amount: Decimal | None = Field(default=None, gt=0)
+    amount: Decimal | None = Field(default=None, ge=0)
     category: str | None = None
     subcategory: str | None = None  # "" — убрать подкатегорию
     payer_member_id: int | None = None
@@ -457,17 +457,16 @@ class SubscriptionHintAction(BaseModel):
 
 class PlanItemIn(BaseModel):
     title: str = Field(min_length=1, max_length=255)
-    kind: str = Field(default="spend", pattern="^(spend|goal|debt)$")
+    kind: str = Field(default="spend", pattern="^(spend|goal)$")
     percent: Decimal = Field(gt=0, le=100)
     categories: list[str] = Field(default_factory=list)  # для spend: «Категория» или «Категория › Подкатегория»
     goal_id: int | None = None  # для goal
-    recurring_ids: list[int] = Field(default_factory=list)  # для debt
 
 
 class PlanItemOut(BaseModel):
     id: int | None  # None — «Свободно»
     title: str
-    kind: str  # spend | goal | debt | free
+    kind: str  # spend | goal | free
     percent: Decimal
     allocated: Decimal
     spent: Decimal
@@ -477,8 +476,6 @@ class PlanItemOut(BaseModel):
     goal_title: str | None = None
     goal_saved: Decimal | None = None
     goal_target: Decimal | None = None
-    recurring_ids: list[int] = []
-    debt_left: Decimal | None = None
     carried: Decimal = Decimal("0")
 
 
@@ -491,6 +488,17 @@ class PlanOut(BaseModel):
     carried: Decimal
     percent_total: Decimal
     items: list[PlanItemOut]
+
+
+class PlanEntryOut(BaseModel):
+    """Списание статьи плана: трата (твоя доля), платёж по кредитке или пополнение цели."""
+
+    date: dt.date
+    title: str
+    amount: Decimal
+    source: str  # expense | card | deposit
+    category: str | None = None
+    subcategory: str | None = None
 
 
 class PlanSettingsIn(BaseModel):

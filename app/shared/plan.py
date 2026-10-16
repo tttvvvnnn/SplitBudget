@@ -8,9 +8,11 @@
   («Транспорт › Топливо»), траты этих категорий (личные и твоя доля семейных) списываются
   с неё. Если категория в одной статье, а её подкатегория в другой — трата идёт в статью
   с подкатегорией;
-- goal — накопительная: выделенное откладывается на цель по кнопке «Отложил»;
-- debt — долговая: её закрывают оплаченные обязательные платежи (кредитка, кредит).
-Траты без статьи и пополнения целей без статьи списываются со «Свободно».
+- goal — накопительная: выделенное откладывается на цель по кнопке «Отложил».
+Кредиты и кредитки — обычные расходные статьи с категорией «Кредиты»: платёж по кредиту
+записывается тратой, а оплаченный платёж по кредитной карте (он тратой не считается)
+попадает в статью по категории своего шаблона. Траты без статьи и пополнения целей без
+статьи списываются со «Свободно».
 
 Месяц плана начинается с chat.plan_start_day (по умолчанию 1-го). В конце месяца статьи
 обнуляются: всё, что осталось (или ушло в минус), переходит в «Свободно» следующего месяца.
@@ -41,7 +43,7 @@ from app.shared.models import (
     RecurringPayment,
 )
 
-KINDS = ("spend", "goal", "debt")
+KINDS = ("spend", "goal")
 FREE_TITLE = "Свободно"
 SUB_SEP = " › "  # «Категория › Подкатегория» в списке категорий статьи
 ALERT_LEVELS = (100, 80)
@@ -83,7 +85,7 @@ def share_of(amount: Decimal, percent: Decimal) -> Decimal:
 class ItemStatus:
     id: int | None  # None — «Свободно»
     title: str
-    kind: str  # spend | goal | debt | free
+    kind: str  # spend | goal | free
     percent: Decimal
     allocated: Decimal
     spent: Decimal
@@ -92,8 +94,6 @@ class ItemStatus:
     goal_title: str | None = None
     goal_saved: Decimal | None = None
     goal_target: Decimal | None = None
-    recurring_ids: list[int] = field(default_factory=list)
-    debt_left: Decimal | None = None
     carried: Decimal = ZERO  # только у «Свободно»: остатки статей прошлых месяцев
 
     @property
@@ -118,13 +118,24 @@ class PlanSummary:
 
 
 @dataclass
+class Entry:
+    """Списание плана: трата (твоя доля), платёж по кредитной карте или пополнение цели."""
+
+    date: dt.date
+    title: str
+    amount: Decimal
+    source: str  # expense | card | deposit
+    category: str | None = None
+    subcategory: str | None = None
+    goal_id: int | None = None
+
+
+@dataclass
 class _Flows:
     """Все движения денег плана в диапазоне дат."""
 
     incomes: list[tuple[dt.date, Decimal]]
-    expenses: list[tuple[dt.date, str, str | None, Decimal]]  # без платежей долговых статей
-    deposits: list[tuple[dt.date, int, Decimal]]
-    payments: list[tuple[dt.date, int, Decimal]]  # оплаченные платежи долговых статей
+    outflows: list[Entry]
 
 
 async def items_of(session: AsyncSession, chat_id: int) -> list[PlanItem]:
@@ -134,7 +145,7 @@ async def items_of(session: AsyncSession, chat_id: int) -> list[PlanItem]:
     return list(result.scalars().all())
 
 
-async def _flows(session: AsyncSession, chat: Chat, start: dt.date, end: dt.date, debt_ids: set[int]) -> _Flows:
+async def _flows(session: AsyncSession, chat: Chat, start: dt.date, end: dt.date) -> _Flows:
     incomes = (
         await session.execute(
             select(Income.income_date, Income.amount).where(
@@ -142,59 +153,52 @@ async def _flows(session: AsyncSession, chat: Chat, start: dt.date, end: dt.date
             )
         )
     ).all()
+    out: list[Entry] = []
     # Как и во вкладке «Траты» «Моих финансов»: личные траты и доля владельца в семейных
     expenses = (
         await session.execute(
-            select(Expense.expense_date, Expense.category, Expense.subcategory, Expense.recurring_id, ExpenseShare.amount)
+            select(Expense.expense_date, Expense.title, Expense.category, Expense.subcategory, ExpenseShare.amount)
             .join(ExpenseShare, ExpenseShare.expense_id == Expense.id)
             .join(Member, Member.id == ExpenseShare.member_id)
             .where(Member.tg_user_id == chat.id, Expense.expense_date >= start, Expense.expense_date < end)
         )
     ).all()
+    out += [Entry(d, t, a, "expense", c, sub) for d, t, c, sub, a in expenses]
+    # Платёж по кредитной карте тратой не записывается, но деньги из плана уходят
+    cards = (
+        await session.execute(
+            select(RecurringPayment, RecurringExpense)
+            .join(RecurringExpense, RecurringExpense.id == RecurringPayment.recurring_id)
+            .where(
+                RecurringExpense.chat_id == chat.id,
+                RecurringExpense.kind == "card",
+                RecurringPayment.status == "paid",
+                RecurringPayment.expense_id.is_(None),
+            )
+        )
+    ).all()
+    for p, r in cards:
+        date = p.paid_at.date() if p.paid_at else p.due_date
+        if start <= date < end and p.amount:
+            out.append(Entry(date, r.title, p.amount, "card", r.category, r.subcategory))
     deposits = (
         await session.execute(
-            select(GoalDeposit.deposit_date, GoalDeposit.goal_id, GoalDeposit.amount)
+            select(GoalDeposit.deposit_date, Goal.title, GoalDeposit.goal_id, GoalDeposit.amount)
             .join(Goal, Goal.id == GoalDeposit.goal_id)
             .where(Goal.chat_id == chat.id, GoalDeposit.deposit_date >= start, GoalDeposit.deposit_date < end)
         )
     ).all()
-    payments: list[tuple[dt.date, int, Decimal]] = []
-    if debt_ids:
-        rows = (
-            await session.execute(
-                select(RecurringPayment).where(
-                    RecurringPayment.recurring_id.in_(debt_ids), RecurringPayment.status == "paid"
-                )
-            )
-        ).scalars().all()
-        for p in rows:
-            date = p.paid_at.date() if p.paid_at else p.due_date
-            if start <= date < end:
-                payments.append((date, p.recurring_id, p.amount or ZERO))
-    return _Flows(
-        incomes=[(d, a) for d, a in incomes],
-        # Платёж долговой статьи (кредит записывается тратой) считается в ней, а не в категории
-        expenses=[(d, c, sub, a) for d, c, sub, rid, a in expenses if rid is None or rid not in debt_ids],
-        deposits=[(d, g, a) for d, g, a in deposits],
-        payments=payments,
-    )
+    out += [Entry(d, t, a, "deposit", goal_id=g) for d, t, g, a in deposits]
+    return _Flows(incomes=[(d, a) for d, a in incomes], outflows=out)
 
 
-def _outflow(flows: _Flows) -> Decimal:
-    return (
-        sum((a for *_, a in flows.expenses), ZERO)
-        + sum((a for _, _, a in flows.deposits), ZERO)
-        + sum((a for _, _, a in flows.payments), ZERO)
-    )
-
-
-async def summary(session: AsyncSession, chat: Chat, date: dt.date) -> PlanSummary:
-    """План на месяц плана, в который попадает date."""
+async def _compute(session: AsyncSession, chat: Chat, date: dt.date) -> tuple[PlanSummary, dict[int | None, list[Entry]]]:
+    """План на месяц плана, в который попадает date, и списания каждой статьи
+    (ключ None — «Свободно»)."""
     start_day = chat.plan_start_day or 1
     start = period_start(start_day, date)
     end = period_end(start)
     items = await items_of(session, chat.id)
-    debt_ids = {int(r) for i in items if i.kind == "debt" for r in loads(i.recurring_ids)}
 
     started = None
     carried = ZERO
@@ -203,13 +207,13 @@ async def summary(session: AsyncSession, chat: Chat, date: dt.date) -> PlanSumma
         started = period_start(start_day, first)
         if started < start:
             # Все остатки прошлых месяцев переходят в «Свободно»: доходы минус все списания
-            past = await _flows(session, chat, started, start, debt_ids)
-            carried = sum((a for _, a in past.incomes), ZERO) - _outflow(past)
+            past = await _flows(session, chat, started, start)
+            carried = sum((a for _, a in past.incomes), ZERO) - sum((e.amount for e in past.outflows), ZERO)
 
-    flows = await _flows(session, chat, start, end, debt_ids)
+    flows = await _flows(session, chat, start, end)
     income = sum((a for _, a in flows.incomes), ZERO)
 
-    goal_ids = {i.goal_id for i in items if i.goal_id}
+    goal_ids = {i.goal_id for i in items if i.kind == "goal" and i.goal_id}
     goals = {}
     if goal_ids:
         rows = (await session.execute(select(Goal).where(Goal.id.in_(goal_ids)))).scalars().all()
@@ -223,28 +227,31 @@ async def summary(session: AsyncSession, chat: Chat, date: dt.date) -> PlanSumma
             ).all()
         )
         goals = {g.id: (g, Decimal(saved.get(g.id, 0))) for g in rows}
-    recurrings = {}
-    if debt_ids:
-        rows = (
-            await session.execute(select(RecurringExpense).where(RecurringExpense.id.in_(debt_ids)))
-        ).scalars().all()
-        recurrings = {r.id: r for r in rows}
 
     # Куда идёт трата: «Категория › Подкатегория» точнее, чем вся категория
     by_key: dict[str, int] = {}
+    by_goal: dict[int, int] = {}
     for item in items:
         if item.kind == "spend":
             for key in loads(item.categories):
                 by_key.setdefault(str(key), item.id)
+        elif item.kind == "goal" and item.goal_id in goals:
+            by_goal.setdefault(item.goal_id, item.id)
 
-    def item_for(category: str, subcategory: str | None) -> int | None:
-        if subcategory and f"{category}{SUB_SEP}{subcategory}" in by_key:
-            return by_key[f"{category}{SUB_SEP}{subcategory}"]
-        return by_key.get(category)
+    def item_for(e: Entry) -> int | None:
+        if e.source == "deposit":
+            return by_goal.get(e.goal_id)
+        if e.subcategory and f"{e.category}{SUB_SEP}{e.subcategory}" in by_key:
+            return by_key[f"{e.category}{SUB_SEP}{e.subcategory}"]
+        return by_key.get(e.category or "")
 
-    expense_items = [(item_for(c, sub), a) for _, c, sub, a in flows.expenses]
+    entries: dict[int | None, list[Entry]] = {}
+    for e in flows.outflows:
+        entries.setdefault(item_for(e), []).append(e)
+    for lst in entries.values():
+        lst.sort(key=lambda e: e.date, reverse=True)
+
     statuses: list[ItemStatus] = []
-    matched_goals: set[int] = set()
     for item in items:
         st = ItemStatus(
             id=item.id,
@@ -252,24 +259,15 @@ async def summary(session: AsyncSession, chat: Chat, date: dt.date) -> PlanSumma
             kind=item.kind,
             percent=item.percent,
             allocated=share_of(income, item.percent),
-            spent=ZERO,
+            spent=sum((e.amount for e in entries.get(item.id, [])), ZERO),
         )
         if item.kind == "spend":
             st.categories = [str(c) for c in loads(item.categories)]
-            st.spent = sum((a for i, a in expense_items if i == item.id), ZERO)
         elif item.kind == "goal":
             st.goal_id = item.goal_id
             if item.goal_id in goals:
                 goal, saved = goals[item.goal_id]
-                matched_goals.add(goal.id)
                 st.goal_title, st.goal_saved, st.goal_target = goal.title, saved, goal.target
-                st.spent = sum((a for _, g, a in flows.deposits if g == goal.id), ZERO)
-        elif item.kind == "debt":
-            st.recurring_ids = [int(r) for r in loads(item.recurring_ids)]
-            ids = set(st.recurring_ids)
-            st.spent = sum((a for _, r, a in flows.payments if r in ids), ZERO)
-            debts = [recurrings[r].debt for r in ids if r in recurrings and recurrings[r].debt is not None]
-            st.debt_left = sum(debts, ZERO) if debts else None
         statuses.append(st)
 
     free_percent = max(HUNDRED - sum((i.percent for i in items), ZERO), ZERO)
@@ -280,12 +278,11 @@ async def summary(session: AsyncSession, chat: Chat, date: dt.date) -> PlanSumma
         percent=free_percent,
         # Остаток от округления долей статей тоже достаётся «Свободно»
         allocated=income - sum((s.allocated for s in statuses), ZERO) + carried,
-        spent=sum((a for i, a in expense_items if i is None), ZERO)
-        + sum((a for _, g, a in flows.deposits if g not in matched_goals), ZERO),
+        spent=sum((e.amount for e in entries.get(None, [])), ZERO),
         carried=carried,
     )
     statuses.append(free)
-    return PlanSummary(
+    summary_ = PlanSummary(
         start=start,
         end=end,
         start_day=start_day,
@@ -295,6 +292,17 @@ async def summary(session: AsyncSession, chat: Chat, date: dt.date) -> PlanSumma
         items=statuses,
         started=started,
     )
+    return summary_, entries
+
+
+async def summary(session: AsyncSession, chat: Chat, date: dt.date) -> PlanSummary:
+    """План на месяц плана, в который попадает date."""
+    return (await _compute(session, chat, date))[0]
+
+
+async def item_entries(session: AsyncSession, chat: Chat, date: dt.date, item_id: int | None) -> list[Entry]:
+    """На что ушли деньги статьи (None — «Свободно») в месяце плана, свежие сверху."""
+    return (await _compute(session, chat, date))[1].get(item_id, [])
 
 
 async def savings_for_income(session: AsyncSession, income: Income) -> list[tuple[PlanItem, Goal, Decimal]]:

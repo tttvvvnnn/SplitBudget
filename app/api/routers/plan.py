@@ -5,13 +5,12 @@ import datetime as dt
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
 
 from app.api.dependencies import ChatContext, get_chat_context
 from app.shared import plan
 from app.shared.custom_categories import plan_keys, tree_for
-from app.shared.models import Goal, GoalDeposit, PlanItem, RecurringExpense
-from app.shared.schemas import PlanItemIn, PlanItemOut, PlanOrderIn, PlanOut, PlanSettingsIn
+from app.shared.models import Goal, GoalDeposit, PlanItem
+from app.shared.schemas import PlanEntryOut, PlanItemIn, PlanItemOut, PlanOrderIn, PlanOut, PlanSettingsIn
 
 router = APIRouter(tags=["plan"])
 
@@ -44,8 +43,6 @@ def _out(s: plan.PlanSummary) -> PlanOut:
                 goal_title=i.goal_title,
                 goal_saved=i.goal_saved,
                 goal_target=i.goal_target,
-                recurring_ids=i.recurring_ids,
-                debt_left=i.debt_left,
                 carried=i.carried,
             )
             for i in s.items
@@ -91,21 +88,6 @@ async def _validate(ctx: ChatContext, payload: PlanItemIn, item_id: int | None) 
             raise HTTPException(status_code=400, detail="Выберите цель")
         if any(o.kind == "goal" and o.goal_id == goal.id for o in others):
             raise HTTPException(status_code=400, detail=f"Цель «{goal.title}» уже в другой статье")
-    else:
-        if not payload.recurring_ids:
-            raise HTTPException(status_code=400, detail="Выберите кредитку или кредит")
-        rows = (
-            await ctx.session.execute(
-                select(RecurringExpense.id).where(
-                    RecurringExpense.id.in_(payload.recurring_ids), RecurringExpense.chat_id == ctx.chat.id
-                )
-            )
-        ).scalars().all()
-        if len(set(rows)) != len(set(payload.recurring_ids)):
-            raise HTTPException(status_code=400, detail="Платёж не найден")
-        for other in others:
-            if other.kind == "debt" and set(payload.recurring_ids) & {int(r) for r in plan.loads(other.recurring_ids)}:
-                raise HTTPException(status_code=400, detail=f"Этот платёж уже в статье «{other.title}»")
 
 
 def _apply(item: PlanItem, payload: PlanItemIn) -> None:
@@ -114,7 +96,7 @@ def _apply(item: PlanItem, payload: PlanItemIn) -> None:
     item.percent = payload.percent
     item.categories = json.dumps(list(dict.fromkeys(payload.categories)) if payload.kind == "spend" else [], ensure_ascii=False)
     item.goal_id = payload.goal_id if payload.kind == "goal" else None
-    item.recurring_ids = json.dumps(sorted(set(payload.recurring_ids)) if payload.kind == "debt" else [])
+    item.recurring_ids = "[]"
 
 
 @router.get("/chats/{chat_id}/plan", response_model=PlanOut)
@@ -122,6 +104,22 @@ async def get_plan(date: dt.date | None = None, ctx: ChatContext = Depends(get_c
     """date — любой день нужного месяца плана (по умолчанию сегодня)."""
     _personal(ctx)
     return await _summary(ctx, date)
+
+
+@router.get("/chats/{chat_id}/plan/entries", response_model=list[PlanEntryOut])
+async def get_entries(
+    item_id: int | None = None, date: dt.date | None = None, ctx: ChatContext = Depends(get_chat_context)
+) -> list[PlanEntryOut]:
+    """На что ушли деньги статьи в месяце плана; без item_id — «Свободно»."""
+    _personal(ctx)
+    if item_id is not None:
+        await _item(ctx, item_id)
+    entries = await plan.item_entries(ctx.session, ctx.chat, date or dt.date.today(), item_id)
+    return [
+        PlanEntryOut(date=e.date, title=e.title, amount=e.amount, source=e.source,
+                     category=e.category, subcategory=e.subcategory)
+        for e in entries
+    ]
 
 
 @router.post("/chats/{chat_id}/plan/items", response_model=PlanOut, status_code=201)

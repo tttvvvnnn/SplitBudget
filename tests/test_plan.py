@@ -227,3 +227,61 @@ def test_savings_for_income_uses_percent(client, seeded_chat, auth_header):
             return [(g.title, float(a)) for _, g, a in await plan.savings_for_income(session, obj)]
 
     assert asyncio.run(run()) == [("Отпуск", 125.0)]
+
+
+def _card(client, pid, me, h, amount=0):
+    r = client.post(f"/api/chats/{pid}/recurring", headers=h, json={
+        "title": "Кредитка Тбанк", "amount": amount, "payer_member_id": me, "day_of_month": 1,
+        "participants": [{"member_id": me}], "kind": "card",
+        "category": "Кредиты", "subcategory": "Кредитная карта"})
+    assert r.status_code == 201, r.text
+    rid = r.json()["id"]
+
+    async def backdate():
+        from app.shared.models import RecurringExpense
+        async with async_session_maker() as session:
+            await session.execute(update(RecurringExpense).where(RecurringExpense.id == rid)
+                                  .values(created_at=dt.datetime(2020, 1, 1)))
+            await session.commit()
+
+    asyncio.run(backdate())
+    month = TODAY.strftime("%Y-%m")
+    item = next(o for o in client.get(f"/api/chats/{pid}/obligations?month={month}", headers=h).json()["items"]
+                if o["recurring_id"] == rid)
+    return item["payment_id"]
+
+
+def test_card_payment_goes_to_item_by_category(client, seeded_chat, auth_header):
+    """Кредит — обычная статья с категорией; платёж по карте без суммы вносится при оплате."""
+    pid, me, h = _personal(client, seeded_chat, auth_header)
+    _item(client, pid, h, title="Кредитки", kind="spend", percent=30, categories=["Кредиты"])
+    _income(client, pid, h, 100000)
+    payment_id = _card(client, pid, me, h)
+    # Суммы у платежа нет — оплатить можно, только указав, сколько внесли
+    assert client.post(f"/api/chats/{pid}/payments/{payment_id}/pay", headers=h, json={}).status_code == 400
+    assert client.post(f"/api/chats/{pid}/payments/{payment_id}/pay", headers=h, json={"amount": 12000}).status_code == 204
+    _expense(client, pid, me, h, 3000, "Кредиты", subcategory="Кредит")
+    items = _by_title(client.get(f"/api/chats/{pid}/plan", headers=h).json())
+    assert float(items["Кредитки"]["spent"]) == 15000.0
+    assert float(items["Свободно"]["spent"]) == 0.0
+
+    entries = client.get(f"/api/chats/{pid}/plan/entries?item_id={items['Кредитки']['id']}", headers=h).json()
+    assert sorted((e["title"], e["source"], float(e["amount"])) for e in entries) == [
+        ("Кредитка Тбанк", "card", 12000.0), ("Кредиты", "expense", 3000.0)]
+    assert client.post(f"/api/chats/{pid}/plan/items", headers=h, json={
+        "title": "Долг", "kind": "debt", "percent": 1}).status_code == 422
+
+
+def test_entries_of_free_and_goal(client, seeded_chat, auth_header):
+    pid, me, h = _personal(client, seeded_chat, auth_header)
+    goal = client.post(f"/api/chats/{pid}/goals", headers=h, json={"title": "Отпуск", "target": 100000}).json()
+    item = _item(client, pid, h, title="Отпуск", kind="goal", percent=10, goal_id=goal["id"])
+    goal_item = _by_title(item)["Отпуск"]["id"]
+    _income(client, pid, h, 10000)
+    _expense(client, pid, me, h, 300, "Другое")
+    client.post(f"/api/chats/{pid}/plan/items/{goal_item}/save", headers=h)
+    free = client.get(f"/api/chats/{pid}/plan/entries", headers=h).json()
+    assert [(e["title"], float(e["amount"])) for e in free] == [("Другое", 300.0)]
+    saved = client.get(f"/api/chats/{pid}/plan/entries?item_id={goal_item}", headers=h).json()
+    assert [(e["source"], float(e["amount"])) for e in saved] == [("deposit", 1000.0)]
+    assert client.get(f"/api/chats/{pid}/plan/entries?item_id=999999", headers=h).status_code == 404
