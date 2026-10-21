@@ -5,7 +5,8 @@
 
 Виды статей (PlanItem.kind):
 - spend — расходная: к ней привязаны категории или отдельные подкатегории трат
-  («Транспорт › Топливо»), траты этих категорий (личные и твоя доля семейных) списываются
+  («Транспорт › Топливо»), траты этих категорий (личные и семейные — сколько потратил ты)
+  списываются
   с неё. Если категория в одной статье, а её подкатегория в другой — трата идёт в статью
   с подкатегорией;
 - goal — накопительная: выделенное откладывается на цель по кнопке «Отложил».
@@ -31,17 +32,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.shared.models import (
     Chat,
-    Expense,
-    ExpenseShare,
     Goal,
     GoalDeposit,
     Income,
-    Member,
     PlanAlert,
     PlanItem,
     RecurringExpense,
     RecurringPayment,
 )
+from app.shared.my_spending import my_expenses
 
 KINDS = ("spend", "goal")
 FREE_TITLE = "Свободно"
@@ -154,16 +153,12 @@ async def _flows(session: AsyncSession, chat: Chat, start: dt.date, end: dt.date
         )
     ).all()
     out: list[Entry] = []
-    # Как и во вкладке «Траты» «Моих финансов»: личные траты и доля владельца в семейных
-    expenses = (
-        await session.execute(
-            select(Expense.expense_date, Expense.title, Expense.category, Expense.subcategory, ExpenseShare.amount)
-            .join(ExpenseShare, ExpenseShare.expense_id == Expense.id)
-            .join(Member, Member.id == ExpenseShare.member_id)
-            .where(Member.tg_user_id == chat.id, Expense.expense_date >= start, Expense.expense_date < end)
-        )
-    ).all()
-    out += [Entry(d, t, a, "expense", c, sub) for d, t, c, sub, a in expenses]
+    # Как и во вкладке «Траты» «Моих финансов»: сколько владелец потратил сам (app/shared/my_spending.py)
+    out += [
+        Entry(m.expense.expense_date, m.expense.title, m.amount, "expense", m.expense.category, m.expense.subcategory)
+        for m in await my_expenses(session, chat.id, start, end)
+        if m.amount
+    ]
     # Платёж по кредитной карте тратой не записывается, но деньги из плана уходят
     cards = (
         await session.execute(
