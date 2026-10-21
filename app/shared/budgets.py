@@ -2,8 +2,9 @@
 
 Что считается тратой:
 - семейный чат — полные суммы трат этого чата;
-- личное пространство («Мои финансы») — доля владельца во всех его тратах: личных и
-  семейных (как во вкладке «Траты» «Моих финансов»), потому что это и есть его личный расход.
+- личное пространство («Мои финансы») — сколько владелец на самом деле потратил во всех
+  своих тратах, личных и семейных (как во вкладке «Траты» «Моих финансов»,
+  см. app/shared/my_spending.py).
 """
 from __future__ import annotations
 
@@ -11,7 +12,7 @@ import datetime as dt
 from dataclasses import dataclass
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.shared.models import Budget, BudgetAlert, Chat, Expense, ExpenseShare, Member
@@ -29,20 +30,20 @@ def month_range(month: str) -> tuple[dt.date, dt.date]:
 async def spending_rows(
     session: AsyncSession, chat: Chat, month: str, exclude_recurring: bool = False
 ) -> list[tuple[str, str | None, Decimal]]:
-    """Траты за месяц строками (категория, подкатегория, сумма). В «Моих финансах» — доля
-    владельца. exclude_recurring — без записанных обязательных платежей."""
+    """Траты за месяц строками (категория, подкатегория, сумма). В «Моих финансах» — сколько
+    потратил владелец. exclude_recurring — без записанных обязательных платежей."""
+    from app.shared.my_spending import my_expenses  # my_spending импортирует модели, как и plan
+
     start, end = month_range(month)
     if chat.is_personal:
-        query = (
-            select(Expense.category, Expense.subcategory, ExpenseShare.amount)
-            .join(ExpenseShare, ExpenseShare.expense_id == Expense.id)
-            .join(Member, Member.id == ExpenseShare.member_id)
-            .where(Member.tg_user_id == chat.id, Expense.expense_date >= start, Expense.expense_date < end)
-        )
-    else:
-        query = select(Expense.category, Expense.subcategory, Expense.amount).where(
-            Expense.chat_id == chat.id, Expense.expense_date >= start, Expense.expense_date < end
-        )
+        return [
+            (m.expense.category, m.expense.subcategory, m.amount)
+            for m in await my_expenses(session, chat.id, start, end)
+            if m.amount and not (exclude_recurring and m.expense.recurring_id is not None)
+        ]
+    query = select(Expense.category, Expense.subcategory, Expense.amount).where(
+        Expense.chat_id == chat.id, Expense.expense_date >= start, Expense.expense_date < end
+    )
     if exclude_recurring:
         query = query.where(Expense.recurring_id.is_(None))
     return [tuple(row) for row in (await session.execute(query)).all()]
@@ -142,10 +143,12 @@ async def alerts_after_expense(session: AsyncSession, expense_id: int) -> list[t
     if chat is not None:
         chats.append(chat)
     if chat is not None and not chat.is_personal:
+        # Участники с долей и плативший: на нём вся сумма, даже если сам он в трате не участвует
+        shared = select(ExpenseShare.member_id).where(ExpenseShare.expense_id == expense.id)
         result = await session.execute(
-            select(Member.tg_user_id)
-            .join(ExpenseShare, ExpenseShare.member_id == Member.id)
-            .where(ExpenseShare.expense_id == expense.id, Member.tg_user_id.is_not(None))
+            select(Member.tg_user_id).where(
+                or_(Member.id.in_(shared), Member.id == expense.payer_member_id), Member.tg_user_id.is_not(None)
+            )
         )
         for tg_user_id in result.scalars().all():
             personal = await session.get(Chat, tg_user_id)

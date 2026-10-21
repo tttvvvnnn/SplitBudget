@@ -105,7 +105,7 @@ def test_hide_builtin(client, seeded_chat, auth_header):
 
 
 def test_family_category_in_personal_plan(client, seeded_chat, auth_header):
-    """«Дача» из семейного чата видна в «Моих финансах» и считается в статье плана по доле."""
+    """«Дача» из семейного чата видна в «Моих финансах» и считается в статье плана."""
     h = auth_header(seeded_chat.alice_init_data)
     cid = seeded_chat.chat_id
     client.post(f"/api/chats/{cid}/categories", headers=h, json={"name": "Дача", "icon": "🏡"})
@@ -123,4 +123,4 @@ def test_family_category_in_personal_plan(client, seeded_chat, auth_header):
     _expense(client, cid, h, a, [a, b], 3000, "Дача")
     _expense(client, cid, h, a, [a, b], 1000, "Дом", "Ремонт крыши")
     item = next(i for i in client.get(f"/api/chats/{pid}/plan", headers=ph).json()["items"] if i["title"] == "Дача")
-    assert float(item["spent"]) == 2000.0  # доля Алисы
+    assert float(item["spent"]) == 4000.0  # платила Алиса, Боб ещё не вернул свою долю

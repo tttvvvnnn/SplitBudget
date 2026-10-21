@@ -83,14 +83,21 @@ def test_personal_budget_counts_family_share_and_dms_owner(client, seeded_chat, 
     alice_h = auth_header(seeded_chat.alice_init_data)
     personal = client.get("/api/personal", headers=alice_h).json()["id"]
     assert personal == seeded_chat.alice_tg_id
-    client.post(f"/api/chats/{personal}/budgets", headers=alice_h, json={"category": "Кафе и рестораны", "amount": "1000"})
+    client.post(f"/api/chats/{personal}/budgets", headers=alice_h, json={"category": "Кафе и рестораны", "amount": "2000"})
 
     both = [seeded_chat.alice_member_id, seeded_chat.bob_member_id]
-    # Семейная трата 1800 на двоих — доля Алисы 900 = 90% её личного лимита → в личку Алисе
-    _expense(client, seeded_chat.chat_id, auth_header(seeded_chat.bob_init_data),
-             seeded_chat.bob_member_id, both, 1800, "Кафе и рестораны")
+    # Семейная трата 1800 на двоих, платила Алиса: пока Боб не вернул, все 1800 на ней —
+    # 90% её личного лимита → в личку Алисе
+    _expense(client, seeded_chat.chat_id, alice_h,
+             seeded_chat.alice_member_id, both, 1800, "Кафе и рестораны")
     assert sent and sent[0][0] == seeded_chat.alice_tg_id
     assert "Мои финансы" in sent[0][1] and "90%" in sent[0][1]
+    assert float(_budgets(client, personal, alice_h)["Кафе и рестораны"]["spent"]) == 1800.0
+
+    # Боб вернул свою долю — у Алисы остаются её 900
+    r = client.post(f"/api/chats/{seeded_chat.chat_id}/settlements", headers=alice_h, json={
+        "from_member_id": seeded_chat.bob_member_id, "to_member_id": seeded_chat.alice_member_id, "amount": "900"})
+    assert r.status_code == 201, r.text
     assert float(_budgets(client, personal, alice_h)["Кафе и рестораны"]["spent"]) == 900.0
 
 
