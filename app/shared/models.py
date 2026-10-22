@@ -15,6 +15,7 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
     false,
+    true,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -43,6 +44,8 @@ class Chat(Base):
     is_personal: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     # С какого числа начинается месяц плана распределения дохода (app/shared/plan.py)
     plan_start_day: Mapped[int] = mapped_column(default=1, server_default="1")
+    # Подсказки категорий от ИИ (app/shared/ai_category.py); можно выключить в настройках
+    ai_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true())
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
 
     members: Mapped[list["Member"]] = relationship(back_populates="chat", cascade="all, delete-orphan")
@@ -233,6 +236,25 @@ class CategoryRule(Base):
     category: Mapped[str] = mapped_column(String(64))
     subcategory: Mapped[str | None] = mapped_column(String(64), nullable=True)
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class AiGuess(Base):
+    """Ответ ИИ про категорию траты с таким названием в этом чате (app/shared/ai_category.py).
+    Кэш: пока дерево категорий не поменялось (tree_hash), повторно провайдера не спрашиваем.
+    По created_at считаем дневной лимит обращений."""
+
+    __tablename__ = "ai_guesses"
+    __table_args__ = (UniqueConstraint("chat_id", "keyword", name="uq_ai_guess_chat_keyword"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[int] = mapped_column(ForeignKey("chats.id", ondelete="CASCADE"))
+    keyword: Mapped[str] = mapped_column(String(255))  # нормализованное название траты
+    tree_hash: Mapped[str] = mapped_column(String(16))
+    action: Mapped[str] = mapped_column(String(16))  # existing | new_subcategory | new_category | unknown
+    category: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    subcategory: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    icon: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
 
 
 class Budget(Base):

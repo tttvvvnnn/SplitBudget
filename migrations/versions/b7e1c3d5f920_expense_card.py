@@ -4,7 +4,7 @@
 стартовый долг, платежи, проценты, сверки) плюс сумма таких трат.
 
 Revision ID: b7e1c3d5f920
-Revises: f4c8e2a6b910
+Revises: a3d9f1b7c520
 Create Date: 2026-10-22 19:00:00.000000
 """
 from __future__ import annotations
@@ -17,7 +17,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'b7e1c3d5f920'
-down_revision: Union[str, None] = 'f4c8e2a6b910'
+down_revision: Union[str, None] = 'a3d9f1b7c520'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

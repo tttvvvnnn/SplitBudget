@@ -548,8 +548,12 @@ function bindCardField(overlay, existing) {
 
 /* Автоподбор категории по названию (GET .../category-suggestion): пока пользователь печатает
    название новой траты, подставляем категорию — выученную по прошлым тратам этого чата или
-   из словаря магазинов. Как только категорию выбрали руками — больше не трогаем. При
-   редактировании существующей траты не подбираем: категория у неё уже есть. */
+   из словаря магазинов. Если они молчат — после паузы подольше спрашиваем ИИ (ai=1): он
+   медленнее и считается в дневной лимит, поэтому не на каждую букву. Как только категорию
+   выбрали руками — больше не трогаем. При редактировании существующей траты не подбираем. */
+const AI_DELAY_MS = 900;
+const HINTS = { learned: "🪄 Как в прошлый раз", dictionary: "🪄 Подобрано по названию", ai: "✨ Подобрал ИИ — проверьте" };
+
 function bindAutoCategory(overlay, isEdit) {
   let touched = isEdit;
   bindCategoryFields(overlay, "f", () => { touched = true; });
@@ -557,19 +561,33 @@ function bindAutoCategory(overlay, isEdit) {
 
   const titleInput = overlay.querySelector("#f-title");
   let timer = null;
+  let aiTimer = null;
   let lastQuery = "";
+  const ask = async (title, ai) => {
+    const q = `title=${encodeURIComponent(title)}${ai ? "&ai=1" : ""}`;
+    const s = await api(`/chats/${state.chatId}/category-suggestion?${q}`);
+    if (touched || titleInput.value.trim() !== title) return undefined; // пока ждали ответ, всё поменялось
+    if (s) {
+      setCategory(overlay, "f", s.category, s.subcategory || "");
+      showCategoryHint(overlay, "f", HINTS[s.source] || HINTS.dictionary);
+    } else {
+      showCategoryHint(overlay, "f", "");
+    }
+    return s;
+  };
   titleInput.addEventListener("input", () => {
     clearTimeout(timer);
+    clearTimeout(aiTimer);
     timer = setTimeout(async () => {
       const title = titleInput.value.trim();
       if (touched || !title || title === lastQuery) return;
       lastQuery = title;
       try {
-        const s = await api(`/chats/${state.chatId}/category-suggestion?title=${encodeURIComponent(title)}`);
-        if (touched || titleInput.value.trim() !== title) return; // пока ждали ответ, всё поменялось
-        if (!s) { showCategoryHint(overlay, "f", ""); return; }
-        setCategory(overlay, "f", s.category, s.subcategory || "");
-        showCategoryHint(overlay, "f", s.source === "learned" ? "🪄 Как в прошлый раз" : "🪄 Подобрано по названию");
+        const s = await ask(title, false);
+        if (s !== null || title.length < 3) return;
+        aiTimer = setTimeout(() => {
+          if (!touched && titleInput.value.trim() === title) ask(title, true).catch(() => {});
+        }, AI_DELAY_MS);
       } catch (e) {
         // подсказка необязательна — без неё форма работает как обычно
       }
