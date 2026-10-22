@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.shared.categories import OTHER
 from app.shared.merchants import MERCHANTS
 from app.shared.models import CategoryRule
 
@@ -73,7 +74,11 @@ async def suggest_category(session: AsyncSession, chat_id: int, title: str) -> S
 async def learn_category(
     session: AsyncSession, chat_id: int, title: str, category: str, subcategory: str | None
 ) -> None:
-    """Запомнить, что трата с таким названием в этом чате — category › subcategory."""
+    """Запомнить, что трата с таким названием в этом чате — category › subcategory.
+
+    «Другое» без подкатегории не запоминаем — это «не знаю», а не выбор: иначе быстрый ввод,
+    не угадав «вейп», навсегда закрепил бы его в «Другом» и словарь больше не спрашивался бы.
+    Если раньше было выучено что-то другое, правило просто забываем."""
     normalized = normalize(title)[:255]
     if not normalized:
         return
@@ -81,6 +86,10 @@ async def learn_category(
         select(CategoryRule).where(CategoryRule.chat_id == chat_id, CategoryRule.keyword == normalized)
     )
     rule = result.scalar_one_or_none()
+    if category == OTHER and not subcategory:
+        if rule is not None:
+            await session.delete(rule)
+        return
     if rule is None:
         session.add(
             CategoryRule(chat_id=chat_id, keyword=normalized, category=category, subcategory=subcategory)
