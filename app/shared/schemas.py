@@ -699,3 +699,36 @@ class AiProposalAcceptedOut(BaseModel):
     category: str
     subcategory: str | None
     categories: list[CategoryTreeNodeOut]
+
+
+class TidyItemOut(BaseModel):
+    """Группа трат в «Другом» с одинаковым названием и подсказка, куда их переложить."""
+
+    title: str
+    count: int
+    total: Decimal
+    category: str | None
+    subcategory: str | None
+    source: str
+    proposal: AiProposalOut | None = None
+
+
+class TidyOut(BaseModel):
+    items: list[TidyItemOut]
+    more: bool  # не всё успели разобрать — можно запросить ещё
+
+
+class TidyApplyItem(BaseModel):
+    title: str = Field(min_length=1, max_length=255)
+    category: str | None = None
+    subcategory: str | None = None
+    create: bool = False  # создать предложенную ИИ категорию (proposal)
+
+
+class TidyApplyIn(BaseModel):
+    items: list[TidyApplyItem] = Field(max_length=200)
+
+
+class TidyApplyOut(BaseModel):
+    moved: int
+    categories: list[CategoryTreeNodeOut]

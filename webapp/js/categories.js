@@ -1,7 +1,7 @@
 import { state } from "./state.js";
 import { api } from "./api.js";
 import { haptic, toast, confirmAction } from "./telegram.js";
-import { escapeHtml } from "./format.js";
+import { escapeHtml, fmtMoney, categoryIcon } from "./format.js";
 import { openSheet, closeSheet, openTextPromptModal } from "./sheet.js";
 
 /* Свои категории и подкатегории пространства (app/shared/custom_categories.py).
@@ -72,6 +72,7 @@ function openCategoriesSheet(onChange) {
           <span>✨ Подсказки ИИ<br><span class="hint-text">Если категорию не угадать по прошлым тратам и словарю, название траты (без суммы) отправляется ИИ. Он подберёт категорию или предложит создать новую.</span></span>
         </label>` : ""}
       <button class="btn secondary" id="cat-add">➕ Своя категория</button>
+      ${state.aiAvailable && state.chat.ai_enabled ? `<button class="btn secondary" id="cat-tidy" style="margin-top:8px;">✨ Разобрать «Другое»</button>` : ""}
       <div class="cat-list">
         ${nodes.map((n) => {
           const open = expanded.has(n.name);
@@ -105,12 +106,15 @@ function openCategoriesSheet(onChange) {
 
   function bind() {
     overlay.querySelector("#cat-add").addEventListener("click", () => promptNewCategory(null, () => changed()));
+    const tidyBtn = overlay.querySelector("#cat-tidy");
+    if (tidyBtn) tidyBtn.addEventListener("click", () => openTidySheet((nodes) => changed(nodes)));
     const aiBox = overlay.querySelector("#cat-ai");
     if (aiBox) {
       aiBox.addEventListener("change", async () => {
         try {
           state.chat = await api(`/chats/${state.chatId}/ai`, { method: "PUT", body: { ai_enabled: aiBox.checked } });
           haptic("selection");
+          render(); // показать/спрятать «Разобрать «Другое»»
         } catch (e) {
           aiBox.checked = !aiBox.checked;
           toast(e.message);
@@ -198,6 +202,78 @@ function openCategoriesSheet(onChange) {
 
   overlay = openSheet(`<div id="cat-content"></div>`);
   render();
+}
+
+/* «Разобрать «Другое»»: траты из «Другого», сгруппированные по названию, и куда их, похоже,
+   переложить (выученное, словарь, ИИ). Отмеченные перекладываются и запоминаются; новые
+   категории, предложенные ИИ, создаются только для отмеченных. ИИ отвечает не мгновенно —
+   за раз разбираем сколько успеем, остальное по «Найти ещё». */
+function openTidySheet(onChange) {
+  const sheet = openSheet(`<div class="sheet-title">Разобрать «Другое»</div><div id="tidy-content"><div class="hint-text">✨ Смотрю траты в «Другом»…</div></div>`);
+  const content = sheet.querySelector("#tidy-content");
+  let items = [];
+  const seen = new Set();
+
+  function label(i) {
+    if (i.proposal) {
+      const p = i.proposal;
+      const where = [p.category, p.subcategory].filter(Boolean).join(" › ");
+      return `${p.action === "new_category" ? `${escapeHtml(p.icon || "🏷️")} ` : `${categoryIcon(p.category)} `}${escapeHtml(where)} <span class="hint-text">· новая</span>`;
+    }
+    return `${categoryIcon(i.category)} ${escapeHtml([i.category, i.subcategory].filter(Boolean).join(" › "))}`;
+  }
+
+  function render(more) {
+    if (!items.length) {
+      content.innerHTML = `<div class="hint-text">Нечего разбирать: для трат в «Другом» подходящей категории не нашлось.</div>`;
+      return;
+    }
+    content.innerHTML = `
+      <div class="hint-text" style="margin-bottom:10px;">Отметьте, что переложить. Бот запомнит и в следующий раз подставит сам.</div>
+      ${items.map((i, n) => `
+        <label class="cat-row" style="gap:8px; justify-content:flex-start;">
+          <input type="checkbox" data-n="${n}" checked>
+          <span><b>${escapeHtml(i.title)}</b>${i.count > 1 ? ` ×${i.count}` : ""} · ${fmtMoney(i.total)}<br>→ ${label(i)}</span>
+        </label>`).join("")}
+      ${more ? `<button class="btn secondary" id="tidy-more" style="margin-top:10px;">Найти ещё</button>` : ""}
+      <button class="btn" id="tidy-apply" style="margin-top:10px;">Переложить</button>`;
+    const moreBtn = content.querySelector("#tidy-more");
+    if (moreBtn) moreBtn.addEventListener("click", () => { moreBtn.disabled = true; moreBtn.textContent = "✨ Ищу…"; load(); });
+    content.querySelector("#tidy-apply").addEventListener("click", apply);
+  }
+
+  async function load() {
+    try {
+      const r = await api(`/chats/${state.chatId}/tidy-other`);
+      for (const i of r.items) {
+        if (!seen.has(i.title.toLowerCase())) { seen.add(i.title.toLowerCase()); items.push(i); }
+      }
+      render(r.more);
+    } catch (e) {
+      content.innerHTML = `<div class="error-text">${escapeHtml(e.message)}</div>`;
+    }
+  }
+
+  async function apply() {
+    const picked = [...content.querySelectorAll("input[data-n]:checked")].map((el) => items[Number(el.dataset.n)]);
+    if (!picked.length) { closeSheet(sheet); return; }
+    const body = {
+      items: picked.map((i) => (i.proposal
+        ? { title: i.title, create: true }
+        : { title: i.title, category: i.category, subcategory: i.subcategory })),
+    };
+    try {
+      const r = await api(`/chats/${state.chatId}/tidy-other`, { method: "POST", body });
+      closeSheet(sheet);
+      haptic("notification", "success");
+      toast(`Переложил трат: ${r.moved}`);
+      if (onChange) onChange(r.categories);
+    } catch (e) {
+      toast(e.message);
+    }
+  }
+
+  load();
 }
 
 export { loadCategories, setCategoryNodes, promptNewCategory, openCategoriesSheet };

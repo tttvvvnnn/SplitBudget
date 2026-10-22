@@ -17,6 +17,10 @@ def test_dictionary():
     # самый длинный ключ важнее: «метрополитен» — транспорт, а не супермаркет «Метро»
     assert suggest_from_dictionary(normalize("Метрополитен")).category == "Транспорт"
     assert suggest_from_dictionary(normalize("что-то непонятное")) is None
+    # маркетплейсы — не продукты
+    for title in ("Озон", "Wildberries", "Мегамаркет"):
+        s = suggest_from_dictionary(normalize(title))
+        assert (s.category, s.subcategory) == ("Покупки", "Маркетплейсы")
 
 
 def _suggest(client, seeded_chat, headers, title):

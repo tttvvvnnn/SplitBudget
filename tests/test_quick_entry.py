@@ -236,14 +236,15 @@ def test_quick_ai_proposal_buttons(client, seeded_chat, bot, monkeypatch):
     from app.shared.ai_category import AiAnswer
     from app.shared.config import settings
 
-    async def _ask(title, tree, examples):
-        return {
+    async def _ask_many(titles, tree, examples):
+        known = {
             "вейп": AiAnswer("new_category", "Табак", "Вейпы", "🚬"),
             "кальян": AiAnswer("new_category", "Табак", "Кальян", "🚬"),
-        }[title.lower()]
+        }
+        return [known[t.lower()] for t in titles]
 
     monkeypatch.setattr(settings, "AI_API_KEY", "test-key")
-    monkeypatch.setattr(ai_category, "ask_provider", _ask)
+    monkeypatch.setattr(ai_category, "ask_provider_many", _ask_many)
     uid = seeded_chat.alice_tg_id
 
     # Новая категория — трата пока в «Другом», под ней «✨ Создать»
