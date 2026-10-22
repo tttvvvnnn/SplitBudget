@@ -7,7 +7,7 @@ import httpx
 import pytest
 
 from app.shared import ai_category
-from app.shared.ai_category import AiAnswer, _parse, resolve
+from app.shared.ai_category import AiAnswer, _parse_many, resolve
 from app.shared.config import settings
 
 TREE = [
@@ -37,10 +37,12 @@ def test_resolve_against_tree(answer, expected):
 
 def test_parse_plain_and_fenced_json():
     raw = '{"action": "existing", "category": "Подарки", "subcategory": null, "icon": null}'
-    assert _parse(raw) == AiAnswer("existing", "Подарки")
-    assert _parse(f"```json\n{raw}\n```") == AiAnswer("existing", "Подарки")
+    assert _parse_many(f'{{"items": [{raw}]}}', 1) == [AiAnswer("existing", "Подарки")]
+    assert _parse_many(f'```json\n{{"items": [{raw}, {raw}]}}\n```', 2) == [AiAnswer("existing", "Подарки")] * 2
     with pytest.raises(ValueError):
-        _parse('{"action": "delete_everything"}')
+        _parse_many('{"items": [{"action": "delete_everything"}]}', 1)
+    with pytest.raises(ValueError):
+        _parse_many(f'{{"items": [{raw}]}}', 2)  # ответов меньше, чем трат
 
 
 @pytest.fixture()
@@ -49,16 +51,37 @@ def fake_ai(monkeypatch):
     calls: list[tuple[str, str, list[str]]] = []
     answers: dict[str, AiAnswer | Exception] = {}
 
-    async def _ask(title, tree, examples):
-        calls.append((title, tree, examples))
-        answer = answers.get(title.lower(), AiAnswer("unknown"))
-        if isinstance(answer, Exception):
-            raise answer
-        return answer
+    async def _ask_many(titles, tree, examples):
+        out = []
+        for title in titles:
+            calls.append((title, tree, examples))
+            answer = answers.get(title.lower(), AiAnswer("unknown"))
+            if isinstance(answer, Exception):
+                raise answer
+            out.append(answer)
+        return out
 
     monkeypatch.setattr(settings, "AI_API_KEY", "test-key")
-    monkeypatch.setattr(ai_category, "ask_provider", _ask)
+    monkeypatch.setattr(ai_category, "ask_provider_many", _ask_many)
     return calls, answers
+
+
+def _create(client, seeded_chat, headers, title, category="Другое"):
+    r = client.post(
+        f"/api/chats/{seeded_chat.chat_id}/expenses",
+        headers=headers,
+        data={
+            "title": title,
+            "amount": "100",
+            "category": category,
+            "subcategory": "",
+            "expense_date": "2026-08-05",
+            "payer_member_id": str(seeded_chat.alice_member_id),
+            "split_type": "equal",
+            "participant_ids": json.dumps([seeded_chat.alice_member_id]),
+        },
+    )
+    assert r.status_code == 201, r.text
 
 
 def _suggest(client, seeded_chat, headers, title, ai=True):
@@ -196,7 +219,7 @@ def test_ai_off_without_key(client, seeded_chat, auth_header, monkeypatch):
     async def _boom(*args):
         raise AssertionError("провайдер не должен вызываться")
 
-    monkeypatch.setattr(ai_category, "ask_provider", _boom)
+    monkeypatch.setattr(ai_category, "ask_provider_many", _boom)
     headers = auth_header(seeded_chat.alice_init_data)
     assert _suggest(client, seeded_chat, headers, "Зубной") is None
 
@@ -209,7 +232,11 @@ def test_ask_provider_request_shape(monkeypatch):
         seen["url"] = str(request.url)
         seen["auth"] = request.headers["Authorization"]
         seen["body"] = json.loads(request.content)
-        content = json.dumps({"action": "existing", "category": "Подарки", "subcategory": None, "icon": None})
+        if len(seen.setdefault("attempts", [])) == 0:
+            seen["attempts"].append(429)
+            return httpx.Response(429, headers={"retry-after": "0.01"}, json={"error": "rate limit"})
+        answer = {"action": "existing", "category": "Подарки", "subcategory": None, "icon": None}
+        content = json.dumps({"items": [answer, answer]})
         return httpx.Response(200, json={"choices": [{"message": {"content": content}}]})
 
     real_client = httpx.AsyncClient
@@ -221,11 +248,55 @@ def test_ask_provider_request_shape(monkeypatch):
 
     import asyncio
 
-    answer = asyncio.run(ai_category.ask_provider("Цветы", "- 🎁 Подарки: —", ["роза → Подарки"]))
-    assert answer == AiAnswer("existing", "Подарки")
+    answers = asyncio.run(ai_category.ask_provider_many(["Цветы", "Торт"], "- 🎁 Подарки: —", ["роза → Подарки"]))
+    assert answers == [AiAnswer("existing", "Подарки")] * 2
+    assert seen["attempts"] == [429]  # на 429 подождали и повторили
     assert seen["url"] == "https://api.example.com/v1/chat/completions"
     assert seen["auth"] == "Bearer k"
     body = seen["body"]
     assert body["model"] == settings.AI_MODEL
     assert body["response_format"]["json_schema"]["strict"] is True
-    assert "роза → Подарки" in body["messages"][1]["content"] and "«Цветы»" in body["messages"][1]["content"]
+    assert "роза → Подарки" in body["messages"][1]["content"] and "2. «Торт»" in body["messages"][1]["content"]
+
+
+def test_tidy_other(client, seeded_chat, auth_header, fake_ai):
+    calls, answers = fake_ai
+    headers = auth_header(seeded_chat.alice_init_data)
+    answers["вейп"] = AiAnswer("new_category", "Табак", "Вейпы", "🚬")
+    answers["зубной"] = AiAnswer("existing", "Здоровье", "Врачи")
+    for title in ("Вейп", "вейп", "Зубной", "Перевод Саше", "Пятёрочка"):
+        _create(client, seeded_chat, headers, title)
+
+    r = client.get(f"/api/chats/{seeded_chat.chat_id}/tidy-other", headers=headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["more"] is False
+    by_title = {i["title"].lower(): i for i in body["items"]}
+    assert set(by_title) == {"вейп", "зубной", "пятёрочка"}  # «перевод саше» ИИ не понял
+    assert by_title["вейп"]["count"] == 2 and by_title["вейп"]["proposal"]["category"] == "Табак"
+    assert by_title["пятёрочка"]["source"] == "dictionary"
+
+    r = client.post(
+        f"/api/chats/{seeded_chat.chat_id}/tidy-other",
+        headers=headers,
+        json={"items": [
+            {"title": by_title["вейп"]["title"], "create": True},
+            {"title": "Зубной", "category": "Здоровье", "subcategory": "Врачи"},
+        ]},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["moved"] == 3
+    assert any(n["name"] == "Табак" for n in r.json()["categories"])
+    expenses = client.get(f"/api/chats/{seeded_chat.chat_id}/expenses", headers=headers).json()
+    cats = sorted((e["title"], e["category"], e["subcategory"]) for e in expenses)
+    assert ("Зубной", "Здоровье", "Врачи") in cats and ("вейп", "Табак", "Вейпы") in cats
+    assert ("Перевод Саше", "Другое", None) in cats
+    # Запомнил: новый «вейп» сразу в Табак › Вейпы
+    assert _suggest(client, seeded_chat, headers, "Вейп", ai=False)["category"] == "Табак"
+
+    r = client.post(
+        f"/api/chats/{seeded_chat.chat_id}/tidy-other",
+        headers=headers,
+        json={"items": [{"title": "Перевод Саше", "category": "Несуществующая"}]},
+    )
+    assert r.status_code == 400

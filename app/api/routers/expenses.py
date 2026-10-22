@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies import ChatContext, get_chat_context
 from app.api.routers.categories import nodes_out
 from app.bot.notify import notify_budget_alerts, notify_expense_deleted, notify_new_expense
-from app.shared.ai_category import apply_proposal, cached_proposal, decline, suggest_with_ai
+from app.shared.ai_category import apply_proposal, apply_tidy, cached_proposal, decline, suggest_with_ai, tidy_other
 from app.shared.autocategory import learn_category, suggest_category
 from app.shared.budgets import alerts_after_expense
 from app.shared.config import settings
@@ -22,7 +22,17 @@ from app.shared.crud import build_custom_shares, build_equal_shares
 from app.shared.credits import own_card
 from app.shared.custom_categories import tree_for
 from app.shared.models import CreditCard, Expense, ExpenseShare, Member
-from app.shared.schemas import AiProposalAcceptedOut, AiProposalOut, CategorySuggestionOut, ExpenseOut, ShareOut
+from app.shared.schemas import (
+    AiProposalAcceptedOut,
+    AiProposalOut,
+    CategorySuggestionOut,
+    ExpenseOut,
+    ShareOut,
+    TidyApplyIn,
+    TidyApplyOut,
+    TidyItemOut,
+    TidyOut,
+)
 
 router = APIRouter(tags=["expenses"])
 
@@ -243,6 +253,14 @@ async def _check_budgets(ctx: ChatContext, expense_id: int) -> None:
         await notify_budget_alerts(alerts)
 
 
+def _proposal_out(proposal) -> AiProposalOut | None:
+    if proposal is None:
+        return None
+    return AiProposalOut(
+        action=proposal.action, category=proposal.category, subcategory=proposal.subcategory, icon=proposal.icon
+    )
+
+
 @router.get("/chats/{chat_id}/category-suggestion", response_model=CategorySuggestionOut | None)
 async def category_suggestion(title: str, ai: bool = False, ctx: ChatContext = Depends(get_chat_context)):
     """Подсказка категории по названию траты — мини-апп подставляет её в форму, пока
@@ -262,9 +280,7 @@ async def category_suggestion(title: str, ai: bool = False, ctx: ChatContext = D
         category=suggestion.category,
         subcategory=suggestion.subcategory,
         source=suggestion.source,
-        proposal=AiProposalOut(
-            action=proposal.action, category=proposal.category, subcategory=proposal.subcategory, icon=proposal.icon
-        ) if proposal else None,
+        proposal=_proposal_out(proposal),
     )
 
 
@@ -283,6 +299,47 @@ async def accept_category_proposal(title: str, ctx: ChatContext = Depends(get_ch
     return AiProposalAcceptedOut(
         category=category, subcategory=subcategory, categories=nodes_out(await tree_for(ctx.session, ctx.chat))
     )
+
+
+@router.get("/chats/{chat_id}/tidy-other", response_model=TidyOut)
+async def tidy_other_list(ctx: ChatContext = Depends(get_chat_context)):
+    """Разобрать старое «Другое»: группы трат по названию и куда их, похоже, переложить.
+    ИИ спрашиваем не дольше ~20 с за раз; more=true — можно запросить ещё."""
+    if not ctx.chat.ai_enabled:
+        raise HTTPException(status_code=400, detail="Подсказки ИИ выключены в этом пространстве")
+    items, more = await tidy_other(ctx.session, ctx.chat)
+    await ctx.session.commit()  # кэш ответов ИИ
+    return TidyOut(
+        items=[
+            TidyItemOut(
+                title=i.title,
+                count=i.count,
+                total=i.total,
+                category=i.suggestion.category,
+                subcategory=i.suggestion.subcategory,
+                source=i.suggestion.source,
+                proposal=_proposal_out(i.suggestion.proposal),
+            )
+            for i in items
+        ],
+        more=more,
+    )
+
+
+@router.post("/chats/{chat_id}/tidy-other", response_model=TidyApplyOut)
+async def tidy_other_apply(payload: TidyApplyIn, ctx: ChatContext = Depends(get_chat_context)):
+    """Переложить отмеченные группы из «Другого» (и запомнить на будущее)."""
+    moved = 0
+    try:
+        for item in payload.items:
+            moved += await apply_tidy(
+                ctx.session, ctx.chat, item.title, item.category, item.subcategory, item.create
+            )
+    except ValueError as exc:
+        await ctx.session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await ctx.session.commit()
+    return TidyApplyOut(moved=moved, categories=nodes_out(await tree_for(ctx.session, ctx.chat)))
 
 
 @router.post("/chats/{chat_id}/category-suggestion/decline", status_code=204)

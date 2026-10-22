@@ -73,13 +73,18 @@ def _build(rows: list[CustomCategory]) -> list[Node]:
             sub_row = hidden.get((name, sub))
             node.subs.append(SubNode(sub, hidden=bool(sub_row and sub_row.is_hidden), id=sub_row.id if sub_row else None))
         nodes.append(node)
+    builtin = {n.name for n in nodes}
     for r in rows:
-        if not r.is_builtin and r.parent is None:
+        # Своя категория, которая потом появилась среди базовых (например, «Покупки»), — не дубль:
+        # её подкатегории просто попадают в базовую
+        if not r.is_builtin and r.parent is None and r.name not in builtin:
             nodes.append(Node(r.name, r.icon or DEFAULT_ICON, custom=True, hidden=r.is_hidden, id=r.id))
     by_name = {n.name: n for n in nodes}
     for r in rows:
         if not r.is_builtin and r.parent is not None and r.parent in by_name:
-            by_name[r.parent].subs.append(SubNode(r.name, custom=True, hidden=r.is_hidden, id=r.id))
+            node = by_name[r.parent]
+            if all(sub.name != r.name for sub in node.subs):
+                node.subs.append(SubNode(r.name, custom=True, hidden=r.is_hidden, id=r.id))
     # «Другое» — всегда последняя
     nodes.sort(key=lambda n: n.name == OTHER)
     return nodes
