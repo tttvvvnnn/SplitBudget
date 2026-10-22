@@ -1,4 +1,4 @@
-import { openCategoriesSheet } from "../categories.js";
+import { openCategoriesSheet, setCategoryNodes } from "../categories.js";
 import { state, isPersonal, hideFamilyOnly } from "../state.js";
 import { api, loadAuthedImage } from "../api.js";
 import { tg, haptic, toast, confirmAction } from "../telegram.js";
@@ -549,42 +549,87 @@ function bindCardField(overlay, existing) {
 /* Автоподбор категории по названию (GET .../category-suggestion): пока пользователь печатает
    название новой траты, подставляем категорию — выученную по прошлым тратам этого чата или
    из словаря магазинов. Если они молчат — после паузы подольше спрашиваем ИИ (ai=1): он
-   медленнее и считается в дневной лимит, поэтому не на каждую букву. Как только категорию
-   выбрали руками — больше не трогаем. При редактировании существующей траты не подбираем. */
+   медленнее и считается в дневной лимит, поэтому не на каждую букву. ИИ может предложить
+   новую категорию или подкатегорию — тогда под полями плашка «Создать / Не надо». Как только
+   категорию выбрали руками — больше не трогаем. При редактировании траты не подбираем. */
 const AI_DELAY_MS = 900;
 const HINTS = { learned: "🪄 Как в прошлый раз", dictionary: "🪄 Подобрано по названию", ai: "✨ Подобрал ИИ — проверьте" };
 
+function proposalLabel(p) {
+  const where = [p.category, p.subcategory].filter(Boolean).join(" › ");
+  return p.action === "new_category" && p.icon ? `${p.icon} ${where}` : where;
+}
+
 function bindAutoCategory(overlay, isEdit) {
   let touched = isEdit;
-  bindCategoryFields(overlay, "f", () => { touched = true; });
+  bindCategoryFields(overlay, "f", () => { touched = true; hideProposal(); });
   if (isEdit) return;
 
   const titleInput = overlay.querySelector("#f-title");
+  const hint = overlay.querySelector("#f-category-hint");
+  const box = document.createElement("div");
+  box.className = "hint-text";
+  box.style.cssText = "display:none; margin: -4px 0 12px;";
+  hint.after(box);
   let timer = null;
   let aiTimer = null;
   let lastQuery = "";
+
+  function hideProposal() {
+    box.style.display = "none";
+    box.innerHTML = "";
+  }
+
+  function showProposal(title, p) {
+    box.innerHTML = `✨ ИИ предлагает ${p.action === "new_category" ? "новую категорию" : "подкатегорию"}
+      <b>${escapeHtml(proposalLabel(p))}</b>
+      <div style="display:flex; gap:8px; margin-top:6px;">
+        <button type="button" class="btn small" data-ai="accept">Создать</button>
+        <button type="button" class="btn small secondary" data-ai="decline">Не надо</button>
+      </div>`;
+    box.style.display = "block";
+    box.querySelector('[data-ai="accept"]').addEventListener("click", async () => {
+      try {
+        const r = await api(`/chats/${state.chatId}/category-suggestion/accept?title=${encodeURIComponent(title)}`, { method: "POST" });
+        setCategoryNodes(r.categories);
+        setCategory(overlay, "f", r.category, r.subcategory || "");
+        showCategoryHint(overlay, "f", "✨ Создал и выбрал");
+        haptic("notification", "success");
+        hideProposal();
+      } catch (e) {
+        toast(e.message);
+      }
+    });
+    box.querySelector('[data-ai="decline"]').addEventListener("click", () => {
+      hideProposal();
+      api(`/chats/${state.chatId}/category-suggestion/decline?title=${encodeURIComponent(title)}`, { method: "POST" }).catch(() => {});
+    });
+  }
+
   const ask = async (title, ai) => {
     const q = `title=${encodeURIComponent(title)}${ai ? "&ai=1" : ""}`;
     const s = await api(`/chats/${state.chatId}/category-suggestion?${q}`);
     if (touched || titleInput.value.trim() !== title) return undefined; // пока ждали ответ, всё поменялось
-    if (s) {
+    if (s && s.category) {
       setCategory(overlay, "f", s.category, s.subcategory || "");
       showCategoryHint(overlay, "f", HINTS[s.source] || HINTS.dictionary);
     } else {
       showCategoryHint(overlay, "f", "");
     }
+    if (s && s.proposal) showProposal(title, s.proposal);
     return s;
   };
   titleInput.addEventListener("input", () => {
     clearTimeout(timer);
     clearTimeout(aiTimer);
+    hideProposal();
     timer = setTimeout(async () => {
       const title = titleInput.value.trim();
       if (touched || !title || title === lastQuery) return;
       lastQuery = title;
       try {
         const s = await ask(title, false);
-        if (s !== null || title.length < 3) return;
+        if (s !== null || title.length < 3 || !state.chat.ai_enabled) return;
         aiTimer = setTimeout(() => {
           if (!touched && titleInput.value.trim() === title) ask(title, true).catch(() => {});
         }, AI_DELAY_MS);

@@ -105,6 +105,7 @@ async function loadMeAndRender() {
     state.member = me.member;
     state.members = me.members;
     state.categories = me.categories;
+    state.aiAvailable = me.ai_available;
     await loadCategories();
     await returnHiddenChat();
     if (state.chat.is_personal && state.tab === "balance") state.tab = "expenses";

@@ -38,6 +38,7 @@ class ChatOut(BaseModel):
     title: str
     currency: str
     is_personal: bool
+    ai_enabled: bool = True  # подсказки категорий от ИИ в этом пространстве
 
     model_config = {"from_attributes": True}
 
@@ -103,10 +104,24 @@ class ForecastOut(BaseModel):
     days_left: int
 
 
-class CategorySuggestionOut(BaseModel):
+class AiProposalOut(BaseModel):
+    """ИИ предлагает создать категорию (new_category) или подкатегорию (new_subcategory)."""
+
+    action: str
     category: str
     subcategory: str | None
+    icon: str | None
+
+
+class CategorySuggestionOut(BaseModel):
+    category: str | None  # None — только предложение новой категории
+    subcategory: str | None
     source: str  # 'learned' — выучено по тратам этого чата, 'dictionary' — словарь магазинов, 'ai' — ИИ
+    proposal: AiProposalOut | None = None
+
+
+class AiSettingsIn(BaseModel):
+    ai_enabled: bool
 
 
 class MeOut(BaseModel):
@@ -114,6 +129,7 @@ class MeOut(BaseModel):
     member: MemberOut
     members: list[MemberOut]
     categories: list[str]
+    ai_available: bool = False  # на сервере настроен ИИ (AI_API_KEY) — показываем выключатель
 
 
 class ShareIn(BaseModel):
@@ -675,3 +691,11 @@ class CreditExtendIn(BaseModel):
 
 class CreditAdjustIn(BaseModel):
     debt: Decimal = Field(ge=0)
+
+
+class AiProposalAcceptedOut(BaseModel):
+    """Создали предложенное ИИ: что выбрать в форме и обновлённое дерево категорий."""
+
+    category: str
+    subcategory: str | None
+    categories: list[CategoryTreeNodeOut]

@@ -33,9 +33,10 @@ def _first_word(normalized: str) -> str:
 
 @dataclass
 class Suggestion:
-    category: str
+    category: str | None  # None — есть только предложение ИИ создать новую категорию
     subcategory: str | None
-    source: str  # 'learned' | 'dictionary'
+    source: str  # 'learned' | 'dictionary' | 'ai'
+    proposal: object | None = None  # ai_category.AiAnswer: создать категорию/подкатегорию
 
 
 def suggest_from_dictionary(normalized: str) -> Suggestion | None:

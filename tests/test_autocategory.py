@@ -52,7 +52,7 @@ def test_suggestion_learns_from_saved_expenses(client, seeded_chat, auth_header)
     headers = auth_header(seeded_chat.alice_init_data)
 
     assert _suggest(client, seeded_chat, headers, "Пятёрочка") == {
-        "category": "Продукты", "subcategory": "Супермаркет", "source": "dictionary",
+        "category": "Продукты", "subcategory": "Супермаркет", "source": "dictionary", "proposal": None,
     }
     assert _suggest(client, seeded_chat, headers, "Шуршик") is None
 
