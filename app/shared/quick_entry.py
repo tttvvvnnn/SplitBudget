@@ -2,7 +2,7 @@
 Плюс перед суммой — доход: «+120000 зарплата», «аванс +40к».
 
 Каждая строка сообщения — отдельная трата в «Моих финансах». Категория подбирается так же,
-как в форме (app/shared/autocategory.py): выученное по прошлым тратам или словарь магазинов.
+как в форме (app/shared/ai_category.py): выученное по прошлым тратам, словарь магазинов, ИИ.
 """
 from __future__ import annotations
 
@@ -14,7 +14,8 @@ from decimal import Decimal, InvalidOperation
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.shared.autocategory import learn_category, suggest_category
+from app.shared.ai_category import suggest_with_ai
+from app.shared.autocategory import learn_category
 from app.shared.categories import OTHER
 from app.shared.crud import build_equal_shares
 from app.shared.models import Chat, Expense, ExpenseShare, Member
@@ -125,7 +126,7 @@ async def add_split_expense(
 ) -> Expense:
     """Записать трату в чат: платит payer, делится поровну между members. Категория —
     автоподбор по этому чату."""
-    suggestion = await suggest_category(session, chat.id, parsed.title)
+    suggestion = await suggest_with_ai(session, chat, parsed.title)
     expense = Expense(
         chat_id=chat.id,
         title=parsed.title,

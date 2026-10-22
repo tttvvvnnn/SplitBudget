@@ -106,7 +106,7 @@ class ForecastOut(BaseModel):
 class CategorySuggestionOut(BaseModel):
     category: str
     subcategory: str | None
-    source: str  # 'learned' — выучено по тратам этого чата, 'dictionary' — словарь магазинов
+    source: str  # 'learned' — выучено по тратам этого чата, 'dictionary' — словарь магазинов, 'ai' — ИИ
 
 
 class MeOut(BaseModel):

@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import ChatContext, get_chat_context
 from app.bot.notify import notify_budget_alerts, notify_expense_deleted, notify_new_expense
+from app.shared.ai_category import suggest_with_ai
 from app.shared.autocategory import learn_category, suggest_category
 from app.shared.budgets import alerts_after_expense
 from app.shared.config import settings
@@ -215,10 +216,15 @@ async def _check_budgets(ctx: ChatContext, expense_id: int) -> None:
 
 
 @router.get("/chats/{chat_id}/category-suggestion", response_model=CategorySuggestionOut | None)
-async def category_suggestion(title: str, ctx: ChatContext = Depends(get_chat_context)):
+async def category_suggestion(title: str, ai: bool = False, ctx: ChatContext = Depends(get_chat_context)):
     """Подсказка категории по названию траты — мини-апп подставляет её в форму, пока
-    пользователь печатает название. null — угадать не получилось."""
-    suggestion = await suggest_category(ctx.session, ctx.chat.id, title)
+    пользователь печатает название. null — угадать не получилось. ai=1 — если выученное и
+    словарь молчат, спросить ИИ (мини-апп делает это реже, после паузы в наборе)."""
+    if ai:
+        suggestion = await suggest_with_ai(ctx.session, ctx.chat, title)
+        await ctx.session.commit()  # кэш ответа ИИ
+    else:
+        suggestion = await suggest_category(ctx.session, ctx.chat.id, title)
     if suggestion is None:
         return None
     return CategorySuggestionOut(
