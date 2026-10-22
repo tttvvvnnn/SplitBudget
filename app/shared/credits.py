@@ -1,6 +1,8 @@
 """Кредиты и кредитные карты «Моих финансов».
 
-Кредитная карта (CreditCard) — счёт с долгом. Долг меняют операции (CreditOperation):
+Кредитная карта (CreditCard) — счёт с долгом. Долг = собственный учёт карты (card.debt) плюс
+покупки — траты, оплаченные картой (Expense.card_id): трату поправили или удалили, и долг
+пересчитался сам. Учёт карты меняют операции (CreditOperation):
 «Внести» уменьшает долг и тратой не считается, «Продлить срок» переносит даты, не трогая
 долг, «Начислили %» записывает трату в категории карты и увеличивает долг, «Сверить с
 банком» правит долг руками. Даты хранятся датами, а не днём месяца: льготный период у банков
@@ -17,7 +19,7 @@ import json
 from dataclasses import dataclass
 from decimal import Decimal
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.shared import obligations as ob
@@ -36,6 +38,41 @@ ZERO = Decimal("0")
 REMINDER_DAYS = (7, 3, 1, 0)
 
 
+async def purchases_total(session: AsyncSession, card_ids: list[int]) -> dict[int, Decimal]:
+    """Сумма покупок по каждой карте."""
+    if not card_ids:
+        return {}
+    result = await session.execute(
+        select(Expense.card_id, func.sum(Expense.amount)).where(Expense.card_id.in_(card_ids)).group_by(Expense.card_id)
+    )
+    return {card_id: Decimal(total) for card_id, total in result.all()}
+
+
+async def debt_of(session: AsyncSession, card: CreditCard) -> Decimal:
+    return card.debt + (await purchases_total(session, [card.id])).get(card.id, ZERO)
+
+
+async def recent_purchases(session: AsyncSession, card_id: int, limit: int) -> list[Expense]:
+    result = await session.execute(
+        select(Expense)
+        .where(Expense.card_id == card_id)
+        .order_by(Expense.expense_date.desc(), Expense.id.desc())
+        .limit(limit)
+    )
+    return list(result.scalars().all())
+
+
+async def own_card(session: AsyncSession, card_id: int, tg_user_id: int | None) -> CreditCard:
+    """Карта, которой можно оплатить трату: своя (из «Моих финансов» пользователя) и не в
+    архиве. ValueError, если нет."""
+    card = await session.get(CreditCard, card_id)
+    if card is None or tg_user_id is None or card.chat_id != tg_user_id:
+        raise ValueError("Карта не найдена")
+    if card.is_archived:
+        raise ValueError("Карта в архиве")
+    return card
+
+
 def deadlines(card: CreditCard) -> list[tuple[dt.date, str]]:
     """Сроки карты по возрастанию: минимальный платёж и конец беспроцентного периода."""
     out = []
@@ -46,9 +83,9 @@ def deadlines(card: CreditCard) -> list[tuple[dt.date, str]]:
     return sorted(out)
 
 
-def next_deadline(card: CreditCard, today: dt.date) -> dt.date | None:
+def next_deadline(card: CreditCard, debt: Decimal, today: dt.date) -> dt.date | None:
     """Ближайший срок, который ещё не прошёл. Без долга сроков нет."""
-    if card.debt <= 0:
+    if debt <= 0:
         return None
     upcoming = [d for d, _ in deadlines(card) if d >= today]
     return upcoming[0] if upcoming else None
@@ -74,8 +111,9 @@ async def pay(session: AsyncSession, card: CreditCard, amount: Decimal, date: dt
     """Внесли деньги на карту: долг уменьшается, тратой это не считается. Внести больше долга
     нельзя — переплата на карте здесь не учитывается."""
     _check_amount(amount)
-    if amount > card.debt:
-        raise ValueError(f"Это больше долга ({ob.fmt_amount(card.debt, '').strip()})")
+    debt = await debt_of(session, card)
+    if amount > debt:
+        raise ValueError(f"Это больше долга ({ob.fmt_amount(debt, '').strip()})")
     card.debt -= amount
     operation = CreditOperation(card_id=card.id, kind="payment", amount=amount, op_date=date or dt.date.today())
     session.add(operation)
@@ -137,8 +175,8 @@ async def adjust(session: AsyncSession, card: CreditCard, debt: Decimal) -> Cred
     """Сверка с банком: долг такой, как в приложении банка."""
     if debt is None or debt < 0:
         raise ValueError("Долг не может быть меньше нуля")
-    delta = debt - card.debt
-    card.debt = debt
+    delta = debt - await debt_of(session, card)
+    card.debt += delta
     operation = CreditOperation(card_id=card.id, kind="adjust", amount=delta, op_date=dt.date.today())
     session.add(operation)
     await session.flush()
@@ -150,7 +188,7 @@ async def undo(session: AsyncSession, card: CreditCard, operation: CreditOperati
     if operation.kind == "payment":
         card.debt += operation.amount
     elif operation.kind in ("interest", "adjust"):
-        card.debt = max(card.debt - operation.amount, ZERO)
+        card.debt -= operation.amount
         if operation.expense_id:
             expense = await session.get(Expense, operation.expense_id)
             if expense is not None:
@@ -167,8 +205,9 @@ async def undo(session: AsyncSession, card: CreditCard, operation: CreditOperati
 
 async def delete_card(session: AsyncSession, card: CreditCard) -> None:
     # Каскад в SQLite срабатывает не на каждом соединении — операции удаляем сами.
-    # Траты процентов остаются: деньги на них потрачены.
+    # Траты процентов и покупки остаются: деньги на них потрачены.
     await session.execute(delete(CreditOperation).where(CreditOperation.card_id == card.id))
+    await session.execute(update(Expense).where(Expense.card_id == card.id).values(card_id=None))
     await session.delete(card)
     await session.flush()
 
@@ -225,17 +264,19 @@ def _days_text(days: int) -> str:
     return ob._days_label(days).capitalize()
 
 
-def card_notice_text(card: CreditCard, chat: Chat, date: dt.date, what: str, today: dt.date) -> str:
+def card_notice_text(
+    card: CreditCard, debt: Decimal, chat: Chat, date: dt.date, what: str, today: dt.date
+) -> str:
     days = (date - today).days
     when = f"{_days_text(days)} ({ob._date_label(date)})"
     if what == "grace":
         text = f"💳 {when} заканчивается срок без процентов по «{card.title}»"
-        text += f"\nДолг: <b>{ob.fmt_amount(card.debt, chat.currency)}</b>"
+        text += f"\nДолг: <b>{ob.fmt_amount(debt, chat.currency)}</b>"
     else:
         text = f"💳 {when} минимальный платёж по «{card.title}»"
         if card.min_payment:
             text += f": <b>{ob.fmt_amount(card.min_payment, chat.currency)}</b>"
-        text += f"\nДолг: {ob.fmt_amount(card.debt, chat.currency)}"
+        text += f"\nДолг: {ob.fmt_amount(debt, chat.currency)}"
     return text
 
 
@@ -243,13 +284,14 @@ async def due_card_notices(session: AsyncSession, today: dt.date) -> list[ob.Not
     """Напоминания по картам за 7, 3, 1 день и в день срока — в личку владельцу. Отправленное
     помечается в карте (вызывающий коммитит). Пропущенные дни (сервер лежал) догоняются одним
     напоминанием, как у обязательных платежей."""
-    result = await session.execute(
-        select(CreditCard).where(CreditCard.is_archived.is_(False), CreditCard.debt > 0)
-    )
+    result = await session.execute(select(CreditCard).where(CreditCard.is_archived.is_(False)))
+    cards = list(result.scalars().all())
+    purchases = await purchases_total(session, [c.id for c in cards])
     notices = []
-    for card in result.scalars().all():
+    for card in cards:
+        debt = card.debt + purchases.get(card.id, ZERO)
         chat = await session.get(Chat, card.chat_id)
-        if chat is None:
+        if chat is None or debt <= 0:
             continue
         sent = {k for k in card.reminders_sent.split(",") if k}
         for date, what in deadlines(card):
@@ -261,7 +303,7 @@ async def due_card_notices(session: AsyncSession, today: dt.date) -> list[ob.Not
                 continue
             sent |= keys
             notices.append(ob.Notice(
-                chat.id, card_notice_text(card, chat, date, what, today),
+                chat.id, card_notice_text(card, debt, chat, date, what, today),
                 buttons=[], app_param=f"{chat.id}_credits", app_text="💳 Открыть «Кредиты»",
             ))
         # Ключи прошедших сроков больше не нужны
