@@ -328,7 +328,8 @@ class CategoryStat(BaseModel):
     total: Decimal
     count: int
     subcategories: list[SubcategoryStat] = Field(default_factory=list)
-    prev_total: Decimal = Decimal("0")  # та же категория в прошлом месяце
+    prev_total: Decimal = Decimal("0")  # та же категория в прошлом периоде
+    avg_total: Decimal | None = None  # в среднем за 3 прошлых месяца (только для месяца)
 
 
 class MonthTotal(BaseModel):
@@ -336,16 +337,50 @@ class MonthTotal(BaseModel):
     total: Decimal
 
 
-class StatsOut(BaseModel):
-    period: str
+class CategoryTrend(BaseModel):
+    category: str
+    totals: list[Decimal]  # по месяцам, как StatsOut.trend
+
+
+class TopExpense(BaseModel):
+    title: str
+    category: str
+    expense_date: dt.date
+    amount: Decimal
+
+
+class PlaceStat(BaseModel):
+    """Частое место: траты с одинаковым (нормализованным) названием."""
+
+    title: str
+    count: int
     total: Decimal
+
+
+class StatsOut(BaseModel):
+    period: str  # 'YYYY-MM' для месяца, иначе 'YYYY-MM-DD/YYYY-MM-DD'
+    date_from: dt.date
+    date_to: dt.date  # включительно
+    is_month: bool = True
+    total: Decimal
+    count: int = 0
     by_category: list[CategoryStat]
-    prev_total: Decimal = Decimal("0")  # весь прошлый месяц
-    # Траты нарастающим итогом по дням: daily[i] — потрачено с 1-го по (i+1)-е число
+    prev_total: Decimal = Decimal("0")  # весь прошлый период той же длины
+    avg_total: Decimal | None = None  # в среднем за 3 прошлых месяца с тратами (только для месяца)
+    # Траты нарастающим итогом по дням (только для месяца): daily[i] — потрачено с 1-го по (i+1)-е
     daily: list[Decimal] = Field(default_factory=list)
     prev_daily: list[Decimal] = Field(default_factory=list)
-    # Итоги за 12 месяцев, заканчивая выбранным, от старых к новым
+    # Итоги за 12 месяцев, заканчивая последним месяцем периода, от старых к новым
     trend: list[MonthTotal] = Field(default_factory=list)
+    category_trend: list[CategoryTrend] = Field(default_factory=list)  # по убыванию суммы за 12 мес
+    weekdays: list[Decimal] = Field(default_factory=list)  # пн..вс за период
+    top_expenses: list[TopExpense] = Field(default_factory=list)
+    places: list[PlaceStat] = Field(default_factory=list)
+    recurring_total: Decimal = Decimal("0")  # траты из регулярных платежей
+    recurring_count: int = 0
+    # Только «Мои финансы»: доходы по месяцам (как trend) и за период
+    income_trend: list[MonthTotal] | None = None
+    income_total: Decimal | None = None
 
 
 class IncomeIn(BaseModel):

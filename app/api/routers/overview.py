@@ -5,17 +5,19 @@
 from __future__ import annotations
 
 import datetime as dt
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
+from app.api.routers.stats import period_or_400
 from app.shared.database import get_session
-from app.shared.models import Member
+from app.shared.models import Chat, Income, Member
 from app.shared.my_spending import my_expenses
-from app.shared.schemas import AllExpenseOut, StatsOut
-from app.shared.stats import build_stats, stats_range
+from app.shared.schemas import AllExpenseOut, MonthTotal, StatsOut
+from app.shared.stats import ZERO, Row, build_stats, fetch_range, trend_months
 
 router = APIRouter(tags=["overview"])
 
@@ -68,20 +70,41 @@ async def all_expenses(
 
 @router.get("/all/stats", response_model=StatsOut)
 async def all_stats(
-    month: str,
+    month: str | None = None,
+    date_from: dt.date | None = None,
+    date_to: dt.date | None = None,
     full: bool = False,
     user: dict = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> StatsOut:
     """full=true — полные суммы трат, в которых пользователь участвует (переключатель
-    «всего» в «Моих финансах»), иначе — сколько из них на самом деле потратил он."""
-    try:
-        start, end = stats_range(month)
-    except (ValueError, IndexError) as exc:
-        raise HTTPException(status_code=400, detail="month должен быть в формате YYYY-MM") from exc
-    rows = await my_expenses(session, int(user["id"]), start, end)
-    return build_stats(month, [
-        (m.expense.expense_date, m.expense.category, m.expense.subcategory, m.expense.amount if full else m.amount)
+    «всего» в «Моих финансах»), иначе — сколько из них на самом деле потратил он.
+    Плюс доходы из личного пространства — по месяцам тренда и за период."""
+    start, end = period_or_400(month, date_from, date_to)
+    fetch_start, fetch_end = fetch_range(start, end)
+    rows = await my_expenses(session, int(user["id"]), fetch_start, fetch_end)
+    stats = build_stats(start, end, [
+        Row(m.expense.expense_date, m.expense.category, m.expense.subcategory,
+            m.expense.amount if full else m.amount, m.expense.title, m.expense.recurring_id is not None)
         for m in rows
         if full or m.amount
     ])
+
+    incomes = (
+        await session.execute(
+            select(Income.income_date, Income.amount)
+            .join(Chat, Chat.id == Income.chat_id)
+            .join(Member, Member.chat_id == Chat.id)
+            .where(
+                Chat.is_personal.is_(True), Member.tg_user_id == int(user["id"]),
+                Income.income_date >= fetch_start, Income.income_date < fetch_end,
+            )
+        )
+    ).all()
+    by_month: dict[str, Decimal] = {}
+    for date, amount in incomes:
+        key = date.strftime("%Y-%m")
+        by_month[key] = by_month.get(key, ZERO) + amount
+    stats.income_trend = [MonthTotal(month=m, total=by_month.get(m, ZERO)) for m in trend_months(end)]
+    stats.income_total = sum((a for d, a in incomes if start <= d < end), ZERO)
+    return stats
