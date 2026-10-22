@@ -51,8 +51,9 @@ async function renderRecurringTab() {
     <div class="hint-text" style="margin: 8px 4px 14px;">
       За 7, 3 и 1 день до платежа бот напомнит, а в день платежа спросит «Оплачено?»${isPersonal() ? " в личке" : " в чате"}. После подтверждения платёж запишется тратой. Сумму можно не указывать — тогда бот просто напомнит и спросит, сколько внесли.${isPersonal() ? "" : " Отметить оплату можно и во вкладке «🎯 Лимиты»."}
     </div>
-    ${month && month.items.length ? obligationsHtml(month) : ""}
-    ${hintsHtml(hints)}
+    <div class="dash two">
+    <div class="dash-col">${month && month.items.length ? obligationsHtml(month) : ""}${hintsHtml(hints)}</div>
+    <div class="dash-col">
     ${state.recurring.length === 0 ? '<div class="empty-state">Обязательных платежей пока нет.<br>Нажмите «+», чтобы добавить аренду, кредит или подписку.</div>' : state.recurring.map((r) => {
       const [icon] = KIND_INFO[r.kind] || KIND_INFO.other;
       const extra = [];
@@ -73,6 +74,8 @@ async function renderRecurringTab() {
         <div class="expense-amount">${Number(r.amount) ? fmtMoney(r.amount) : '<span class="hint-text">без суммы</span>'}</div>
       </div>`;
     }).join("")}
+    </div>
+    </div>
   `;
 
   content.querySelectorAll(".obligation-row").forEach((el) => {

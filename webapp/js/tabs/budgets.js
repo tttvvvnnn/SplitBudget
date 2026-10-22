@@ -35,19 +35,25 @@ async function renderBudgetsTab() {
     ? "Личные лимиты: считается, сколько вы потратили сами — в личных и семейных тратах. Уведомления при 80% и 100% придут вам в личку от бота."
     : "Лимиты семьи: считаются все траты этого чата. Уведомления при 80% и 100% придут в чат.";
 
+  // .tab-toolbar и .dash — раскладка широкого экрана (style.css), на телефоне прозрачны
   content.innerHTML = `
+    <div class="tab-toolbar">
     <div class="month-picker">
       <button data-dir="-1" aria-label="Предыдущий месяц">‹</button>
       <div class="label">${monthLabel(state.month)}</div>
       <button data-dir="1" aria-label="Следующий месяц">›</button>
     </div>
-    ${forecastHtml(forecast, budgets)}
-    ${obligationsHtml(obligations)}
+    </div>
+    <div class="dash two">
+    <div class="dash-col">${forecastHtml(forecast, budgets)}${obligationsHtml(obligations)}</div>
+    <div class="dash-col">
     <div class="section-title">🎯 Лимиты</div>
     <div class="hint-text" style="margin: 0 4px 12px;">${escapeHtml(hint)}</div>
     ${budgets.length === 0
       ? '<div class="empty-state">Лимитов пока нет.<br>Нажмите «+», чтобы задать лимит на месяц или категорию.</div>'
-      : budgets.map(budgetCardHtml).join("")}`;
+      : budgets.map(budgetCardHtml).join("")}
+    </div>
+    </div>`;
 
   content.querySelectorAll(".month-picker button").forEach((b) => {
     b.addEventListener("click", async () => {

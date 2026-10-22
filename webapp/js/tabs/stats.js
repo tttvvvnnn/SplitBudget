@@ -191,7 +191,10 @@ async function renderStatsTab() {
   ].filter(Boolean).join('<span class="hint-text"> · </span>');
 
   destroyCharts();
+  // .tab-toolbar и .stats-grid — раскладка широкого экрана (style.css): сверху строка
+  // управления, ниже панели сеткой. На телефоне обёртки прозрачны (display: contents).
   content.innerHTML = `
+    <div class="tab-toolbar">
     <div class="share-toggle period-toggle" id="period-toggle">
       ${PERIOD_MODES.map(([mode, label]) => `<button data-period="${mode}" class="${mode === periodMode ? "active" : ""}">${label}</button>`).join("")}
     </div>
@@ -209,6 +212,8 @@ async function renderStatsTab() {
     ${personal ? shareToggleHtml() : ""}
     <div class="total-line">${fmtMoney(cur)}</div>
     <div class="total-delta">${headerDeltas}</div>
+    </div>
+    <div class="stats-grid">
     ${incomeCard}
     ${empty ? '<div class="empty-state">Нет трат за этот период.</div>' : `
       <div class="stats-split">
@@ -270,6 +275,7 @@ async function renderStatsTab() {
             <div class="card">${placesHtml(stats)}</div>
           </div>` : ""}
       </div>`}
+    <div class="stats-panel wide">
     <div class="section-title trend-title">
       <span>По месяцам</span>
       <div class="share-toggle trend-toggle">
@@ -281,7 +287,9 @@ async function renderStatsTab() {
       <div class="chart-box"><canvas id="stats-trend"></canvas></div>
       <div class="chart-legend trend-legend" id="trend-legend"></div>
     </div>
+    </div>
     ${showIncomeTrend(stats, personal, total) ? `
+      <div class="stats-panel wide">
       <div class="section-title">Доходы и расходы</div>
       <div class="chart-wrap">
         <div class="chart-legend">
@@ -291,7 +299,9 @@ async function renderStatsTab() {
         </div>
         <div class="chart-box"><canvas id="stats-income"></canvas></div>
         <div class="hint-text income-trend-note" id="income-note"></div>
+      </div>
       </div>` : ""}
+    </div>
   `;
 
   const ctx = { stats, period, colors, personal, total };
@@ -807,4 +817,4 @@ function drawCategoryHistory(overlay, ctx, history, color) {
   }
 }
 
-export { renderStatsTab };
+export { renderStatsTab, PALETTE, OTHER_COLOR, deltaHtml };
