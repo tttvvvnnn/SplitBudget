@@ -229,37 +229,20 @@ def test_savings_for_income_uses_percent(client, seeded_chat, auth_header):
     assert asyncio.run(run()) == [("Отпуск", 125.0)]
 
 
-def _card(client, pid, me, h, amount=0):
-    r = client.post(f"/api/chats/{pid}/recurring", headers=h, json={
-        "title": "Кредитка Тбанк", "amount": amount, "payer_member_id": me, "day_of_month": 1,
-        "participants": [{"member_id": me}], "kind": "card",
-        "category": "Кредиты", "subcategory": "Кредитная карта"})
+def _card(client, pid, h, debt=50000):
+    r = client.post(f"/api/chats/{pid}/credit-cards", headers=h, json={
+        "title": "Кредитка Тбанк", "debt": debt, "category": "Кредиты", "subcategory": "Кредитная карта"})
     assert r.status_code == 201, r.text
-    rid = r.json()["id"]
-
-    async def backdate():
-        from app.shared.models import RecurringExpense
-        async with async_session_maker() as session:
-            await session.execute(update(RecurringExpense).where(RecurringExpense.id == rid)
-                                  .values(created_at=dt.datetime(2020, 1, 1)))
-            await session.commit()
-
-    asyncio.run(backdate())
-    month = TODAY.strftime("%Y-%m")
-    item = next(o for o in client.get(f"/api/chats/{pid}/obligations?month={month}", headers=h).json()["items"]
-                if o["recurring_id"] == rid)
-    return item["payment_id"]
+    return r.json()["id"]
 
 
 def test_card_payment_goes_to_item_by_category(client, seeded_chat, auth_header):
-    """Кредит — обычная статья с категорией; платёж по карте без суммы вносится при оплате."""
+    """Кредит — обычная статья с категорией; деньги, внесённые на карту, списываются с неё же."""
     pid, me, h = _personal(client, seeded_chat, auth_header)
     _item(client, pid, h, title="Кредитки", kind="spend", percent=30, categories=["Кредиты"])
     _income(client, pid, h, 100000)
-    payment_id = _card(client, pid, me, h)
-    # Суммы у платежа нет — оплатить можно, только указав, сколько внесли
-    assert client.post(f"/api/chats/{pid}/payments/{payment_id}/pay", headers=h, json={}).status_code == 400
-    assert client.post(f"/api/chats/{pid}/payments/{payment_id}/pay", headers=h, json={"amount": 12000}).status_code == 204
+    card_id = _card(client, pid, h)
+    assert client.post(f"/api/chats/{pid}/credit-cards/{card_id}/pay", headers=h, json={"amount": 12000}).status_code == 200
     _expense(client, pid, me, h, 3000, "Кредиты", subcategory="Кредит")
     items = _by_title(client.get(f"/api/chats/{pid}/plan", headers=h).json())
     assert float(items["Кредитки"]["spent"]) == 15000.0

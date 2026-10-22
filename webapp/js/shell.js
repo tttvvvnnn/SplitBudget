@@ -14,6 +14,7 @@ import { renderRecurringTab, openRecurringModal } from "./tabs/recurring.js";
 import { renderIncomeTab, openIncomeModal } from "./tabs/income.js";
 import { renderGoalsTab, openGoalModal } from "./tabs/goals.js";
 import { renderPlanTab, openNewPlanItem } from "./tabs/plan.js";
+import { renderCreditsTab, openCardModal } from "./tabs/credits.js";
 
 /* Версия/сборка в правом верхнем углу шапки — чтобы после пересборки контейнера на стенде
    было видно на глаз, старый код сейчас открыт или уже новый. /healthz отдаётся без
@@ -57,6 +58,7 @@ const TAB_ICONS = {
   recurring: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/>',
   income: '<path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/>',
   goals: '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><path d="M4 22v-7"/>',
+  credits: '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/><path d="M6 15h4"/>',
   plan: '<path d="M21 12c.552 0 1.005-.449.95-.998a10 10 0 0 0-8.953-8.951c-.55-.055-.998.398-.998.95v8a1 1 0 0 0 1 1z"/><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/>',
 };
 
@@ -71,12 +73,13 @@ const TABS = [
   { id: "budgets", label: "Лимиты" },
   { id: "plan", label: "План" },
   { id: "recurring", label: "Платежи" },
+  { id: "credits", label: "Кредиты" },
   { id: "income", label: "Доходы" },
   { id: "goals", label: "Цели" },
 ];
 
 // Только личные вкладки — в семейном чате их нет
-const PERSONAL_ONLY_TABS = ["income", "goals", "plan"];
+const PERSONAL_ONLY_TABS = ["income", "goals", "plan", "credits"];
 // В «Моих финансах» вместо лимитов — план распределения дохода (платежи месяца — в «Платежах»)
 const FAMILY_ONLY_TABS = ["balance", "budgets"];
 
@@ -87,6 +90,7 @@ const ADD_LABELS = {
   income: "Новый доход",
   goals: "Новая цель",
   plan: "Новая статья",
+  credits: "Новая карта",
 };
 
 function addLabel() {
@@ -257,6 +261,7 @@ function renderShell({ onSwitchSpace } = {}) {
       else if (state.tab === "income") openIncomeModal(null);
       else if (state.tab === "goals") openGoalModal(null);
       else if (state.tab === "plan") openNewPlanItem();
+      else if (state.tab === "credits") openCardModal(null);
       else openExpenseModal(null);
     });
   }
@@ -297,6 +302,7 @@ async function renderTab() {
   else if (state.tab === "income") await renderIncomeTab();
   else if (state.tab === "goals") await renderGoalsTab();
   else if (state.tab === "plan") await renderPlanTab();
+  else if (state.tab === "credits") await renderCreditsTab();
 }
 
 export { loadVersionBadge, renderShell, switchTab, renderTab, hideCurrentChat, PERSONAL_ONLY_TABS, FAMILY_ONLY_TABS };

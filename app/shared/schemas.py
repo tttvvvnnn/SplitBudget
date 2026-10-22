@@ -229,10 +229,13 @@ class SettlementOut(BaseModel):
 
 
 
-RECURRING_KINDS = ("rent", "loan", "card", "subscription", "other")
+# Кредитные карты — не обязательные платежи, а отдельная вкладка «Кредиты» (CreditCardIn)
+RECURRING_KINDS = ("rent", "loan", "subscription", "other")
 
 
 def _check_kind(v: str | None) -> str | None:
+    if v == "card":
+        raise ValueError("Кредитные карты заводятся во вкладке «Кредиты»")
     if v is not None and v not in RECURRING_KINDS:
         raise ValueError(f"kind должен быть одним из {RECURRING_KINDS}")
     return v
@@ -263,7 +266,7 @@ class RecurringCreate(BaseModel):
     participants: list[RecurringParticipantIn] = Field(default_factory=list)
     kind: str = "other"
     end_month: str | None = None  # последний платёж кредита, 'YYYY-MM'
-    debt: Decimal | None = Field(default=None, ge=0)  # общий долг по кредитной карте
+    debt: Decimal | None = Field(default=None, ge=0)  # остаток долга по кредиту
 
     @field_validator("kind")
     @classmethod
@@ -581,3 +584,79 @@ class CategoryHiddenIn(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     parent: str | None = Field(default=None, max_length=64)
     hidden: bool
+
+
+class CreditCardIn(BaseModel):
+    title: str = Field(min_length=1, max_length=255)
+    credit_limit: Decimal | None = Field(default=None, gt=0)
+    debt: Decimal = Field(default=Decimal("0"), ge=0)  # при создании; дальше — операции
+    statement_day: int | None = Field(default=None, ge=1, le=31)
+    grace_until: dt.date | None = None
+    min_payment: Decimal | None = Field(default=None, ge=0)
+    payment_date: dt.date | None = None
+    category: str = "Кредиты"
+    subcategory: str | None = "Кредитная карта"
+    is_archived: bool = False
+
+
+class CreditOperationOut(BaseModel):
+    id: int
+    kind: str  # payment | extend | interest | adjust
+    amount: Decimal | None
+    op_date: dt.date
+    note: str | None  # у extend — JSON со старыми и новыми датами
+
+    model_config = {"from_attributes": True}
+
+
+class CreditCardOut(BaseModel):
+    id: int
+    title: str
+    credit_limit: Decimal | None
+    debt: Decimal
+    statement_day: int | None
+    grace_until: dt.date | None
+    min_payment: Decimal | None
+    payment_date: dt.date | None
+    next_deadline: dt.date | None
+    category: str
+    subcategory: str | None
+    is_archived: bool
+    operations: list[CreditOperationOut]
+
+
+class LoanOut(BaseModel):
+    recurring_id: int
+    title: str
+    amount: Decimal  # ежемесячный платёж
+    debt: Decimal | None  # остаток
+    day_of_month: int
+    end_month: str | None
+    is_active: bool
+    payment_id: int | None  # платёж этого месяца
+    payment_status: str | None  # pending | paid | skipped
+    payment_amount: Decimal | None  # оплачено или к оплате
+    payment_due: dt.date | None
+    next_due: dt.date | None
+
+
+class CreditsOut(BaseModel):
+    cards: list[CreditCardOut]
+    loans: list[LoanOut]
+    total_debt: Decimal
+    next_deadline: dt.date | None
+
+
+class CreditAmountIn(BaseModel):
+    amount: Decimal = Field(gt=0)
+    op_date: dt.date | None = None
+
+
+class CreditExtendIn(BaseModel):
+    grace_until: dt.date | None = None
+    payment_date: dt.date | None = None
+    min_payment: Decimal | None = Field(default=None, ge=0)
+
+
+class CreditAdjustIn(BaseModel):
+    debt: Decimal = Field(ge=0)

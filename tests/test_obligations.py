@@ -1,4 +1,4 @@
-"""Обязательные платежи: напоминания, «Оплачено?», карта с долгом, резерв в лимитах."""
+"""Обязательные платежи: напоминания, «Оплачено?», остаток кредита, резерв в лимитах."""
 from __future__ import annotations
 
 import asyncio
@@ -127,23 +127,30 @@ def test_pay_other_amount_scales_custom_split(client, seeded_chat, auth_header, 
     assert _expenses_of(t["id"]) == [(600.0, [200.0, 400.0])]
 
 
-def test_credit_card_reduces_debt_without_expense(client, seeded_chat, auth_header, notices):
+def test_loan_payment_reduces_remaining_debt(client, seeded_chat, auth_header, notices):
     h = auth_header(seeded_chat.alice_init_data)
     t = _template(
-        client, seeded_chat, h, title="Карта", amount=5000, kind="card", debt=100000,
-        participants=[{"member_id": seeded_chat.alice_member_id}],
+        client, seeded_chat, h, title="Кредит", amount=5000, kind="loan", debt=100000,
+        category="Кредиты", subcategory="Кредит", participants=[{"member_id": seeded_chat.alice_member_id}],
     )
     data = _obligations(client, seeded_chat.chat_id, h, NEXT)
     item = data["items"][0]
-    assert item["counts"] is False and float(item["debt"]) == 100000.0
-    assert float(data["total"]) == 0.0  # платёж по карте не трата
+    assert item["counts"] is True and float(item["debt"]) == 100000.0
 
     cid = seeded_chat.chat_id
     assert client.post(f"/api/chats/{cid}/payments/{item['payment_id']}/pay", headers=h, json={}).status_code == 204
-    assert _expenses_of(t["id"]) == []
+    assert _expenses_of(t["id"]) == [(5000.0, [5000.0])]  # платёж по кредиту — трата целиком
     assert float(_obligations(client, cid, h, NEXT)["items"][0]["debt"]) == 95000.0
     assert client.post(f"/api/chats/{cid}/payments/{item['payment_id']}/reset", headers=h).status_code == 204
     assert float(_obligations(client, cid, h, NEXT)["items"][0]["debt"]) == 100000.0
+
+
+def test_card_is_not_a_recurring_payment(client, seeded_chat, auth_header):
+    h = auth_header(seeded_chat.alice_init_data)
+    r = client.post(f"/api/chats/{seeded_chat.chat_id}/recurring", headers=h, json={
+        "title": "Карта", "amount": 0, "payer_member_id": seeded_chat.alice_member_id, "kind": "card",
+        "participants": [{"member_id": seeded_chat.alice_member_id}]})
+    assert r.status_code == 422 and "Кредиты" in r.text
 
 
 def test_skip_and_loan_end(client, seeded_chat, auth_header, notices):

@@ -194,7 +194,8 @@ function obligationsHtml(data) {
     </div>`;
 }
 
-function openPaymentSheet(o, rerender = renderBudgetsTab) {
+/* onEdit — кнопка «✏️ Изменить» под действиями (вкладка «Кредиты» открывает правку кредита). */
+function openPaymentSheet(o, rerender = renderBudgetsTab, onEdit = null) {
   const [icon, kindLabel] = KIND_INFO[o.kind] || KIND_INFO.other;
   const base = `/chats/${o.chat_id}/payments/${o.payment_id}`;
   const lines = [`${kindLabel} · ${shortDate(o.due_date)}`];
@@ -203,6 +204,7 @@ function openPaymentSheet(o, rerender = renderBudgetsTab) {
     lines.push("Платёж по карте не считается тратой (покупки по карте записываются отдельно), но в «Плане» он списывается со статьи по своей категории.");
     if (o.debt !== null) lines.push(`Долг по карте: ${fmtMoney(o.debt)}`);
   }
+  if (o.kind === "loan" && o.debt !== null) lines.push(`Остаток долга: ${fmtMoney(o.debt)}`);
   if (o.end_month) lines.push(`Последний платёж: ${monthLabel(o.end_month).toLowerCase()}`);
 
   let actions = "";
@@ -227,7 +229,9 @@ function openPaymentSheet(o, rerender = renderBudgetsTab) {
     <div class="sheet-title">${icon} ${escapeHtml(o.title)}</div>
     <div class="hint-text" style="margin-bottom:14px;">${lines.join("<br>")}</div>
     ${actions}
+    ${onEdit ? '<button class="btn secondary" id="p-edit" style="margin-top:18px;">✏️ Изменить</button>' : ""}
   `);
+  if (onEdit) overlay.querySelector("#p-edit").addEventListener("click", () => { closeSheet(overlay); onEdit(); });
 
   async function run(path, body) {
     const errorEl = overlay.querySelector("#p-error");
