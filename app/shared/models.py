@@ -169,12 +169,12 @@ class RecurringExpense(Base):
     payer_member_id: Mapped[int] = mapped_column(ForeignKey("members.id", ondelete="CASCADE"))
     split_type: Mapped[str] = mapped_column(String(16), default="equal")
     day_of_month: Mapped[int] = mapped_column(default=1)  # 1..28
-    # Тип обязательного платежа: rent | loan | card | subscription | other. Платёж по
-    # кредитной карте (card) не считается тратой — покупки по карте записываются отдельно,
-    # он только уменьшает долг по карте (debt).
+    # Тип обязательного платежа: rent | loan | subscription | other. Кредитные карты живут
+    # отдельно (CreditCard): у них плавающие даты, а не день месяца. Бывший вид card остался
+    # только в старых записях до миграции.
     kind: Mapped[str] = mapped_column(String(16), default="other")
     end_month: Mapped[str | None] = mapped_column(String(7), nullable=True)  # последний платёж, 'YYYY-MM'
-    debt: Mapped[Decimal | None] = mapped_column(MoneyType, nullable=True)  # общий долг по карте
+    debt: Mapped[Decimal | None] = mapped_column(MoneyType, nullable=True)  # остаток долга по кредиту
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     last_generated_month: Mapped[str | None] = mapped_column(String(7), nullable=True)  # 'YYYY-MM'
     created_by_member_id: Mapped[int] = mapped_column(ForeignKey("members.id", ondelete="CASCADE"))
@@ -458,3 +458,51 @@ class WebSession(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
     last_used_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
     expires_at: Mapped[dt.datetime] = mapped_column(DateTime)
+
+
+class CreditCard(Base):
+    """Кредитная карта в «Моих финансах» (app/shared/credits.py). Долг меняют операции
+    (CreditOperation). Даты не «N-е число каждого месяца»: льготный период у банков не ровно
+    месяц, поэтому срок без процентов и дата минимального платежа хранятся датами и
+    обновляются после каждой выписки или кнопкой «Продлить срок»."""
+
+    __tablename__ = "credit_cards"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[int] = mapped_column(ForeignKey("chats.id", ondelete="CASCADE"))
+    title: Mapped[str] = mapped_column(String(255))
+    credit_limit: Mapped[Decimal | None] = mapped_column(MoneyType, nullable=True)
+    debt: Mapped[Decimal] = mapped_column(MoneyType, default=Decimal("0"))
+    statement_day: Mapped[int | None] = mapped_column(nullable=True)  # день выписки, 1..31
+    grace_until: Mapped[dt.date | None] = mapped_column(Date, nullable=True)  # весь долг без процентов до
+    min_payment: Mapped[Decimal | None] = mapped_column(MoneyType, nullable=True)
+    payment_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)  # минимальный платёж до
+    # Куда в «Плане» списываются платежи по карте и проценты
+    category: Mapped[str] = mapped_column(String(64), default="Кредиты")
+    subcategory: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    is_archived: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Какие напоминания уже отправлены: "2026-11-05:7,2026-11-05:3"
+    reminders_sent: Mapped[str] = mapped_column(String(255), default="")
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class CreditOperation(Base):
+    """Операция по кредитной карте.
+
+    kind: payment  — внесли деньги, долг уменьшился (не трата);
+          extend   — продлили срок: долг тот же, новые даты (amount пустой, старые даты в note);
+          interest — начислили проценты: трата в категории карты (expense_id), долг вырос;
+          adjust   — сверка с банком: amount — на сколько изменился долг."""
+
+    __tablename__ = "credit_operations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    card_id: Mapped[int] = mapped_column(ForeignKey("credit_cards.id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(String(16))
+    amount: Mapped[Decimal | None] = mapped_column(MoneyType, nullable=True)
+    op_date: Mapped[dt.date] = mapped_column(Date, default=dt.date.today)
+    note: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    expense_id: Mapped[int | None] = mapped_column(
+        ForeignKey("expenses.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)

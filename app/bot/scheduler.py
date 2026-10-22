@@ -2,7 +2,8 @@
 
 Раз в сутки рассылает напоминания за 7, 3 и 1 день до платежа, а в день платежа спрашивает
 «Оплачено?» с кнопками (см. app/shared/obligations.py, app/bot/handlers/payments.py).
-Трата записывается только после подтверждения оплаты. Так же в день зарплаты спрашивает
+Трата записывается только после подтверждения оплаты. По кредитным картам напоминает о
+минимальном платеже и конце беспроцентного периода (app/shared/credits.py). Так же в день зарплаты спрашивает
 «Пришла?» (app/shared/income.py), а 1-го числа присылает итоги прошлого месяца
 (app/shared/report.py), если по прогнозу лимит будет превышен — предупреждает
 (app/shared/forecast.py), а найденные по истории трат подписки предлагает сделать
@@ -18,6 +19,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 from app.bot.notify import notify_obligations, send_texts
 from app.shared.config import settings
+from app.shared.credits import due_card_notices
 from app.shared.database import async_session_maker
 from app.shared.forecast import due_forecast_alerts
 from app.shared.income import due_income_asks
@@ -34,6 +36,7 @@ async def process_obligations(today: dt.date | None = None) -> None:
         notices = await due_notices(session, day)
         notices += await due_income_asks(session, day)
         notices += await due_subscription_asks(session, day)
+        notices += await due_card_notices(session, day)
         reports = await due_reports(session, day)
         reports += await due_forecast_alerts(session, day)
         await session.commit()
