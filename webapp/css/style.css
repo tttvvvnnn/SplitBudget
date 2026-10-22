@@ -1148,6 +1148,77 @@ button:active, .expense-card:active, .budget-card:active, .obligation-row:active
 .cat-expense-title .hint-text { margin-right: 6px; }
 .cat-expense > span:last-child { white-space: nowrap; }
 
+/* Период статистики, сравнение категорий, календарь, дни недели — tabs/stats.js */
+.period-toggle { margin-bottom: 2px; }
+.period-toggle button { padding: 5px 13px; }
+.period-dates {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 0;
+}
+.period-dates input {
+  min-height: 40px;
+  padding: 6px 10px;
+  border: 1px solid var(--glass-edge);
+  border-radius: 12px;
+  background: var(--field-bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+.compare-toggle { margin: 0 auto 8px; }
+.compare-toggle button { min-height: 28px; padding: 3px 12px; font-size: 12px; }
+
+.stats-pair > div > .card, .stats-pair > div > .chart-wrap { margin-bottom: 10px; }
+
+.calendar-card { padding: 12px; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.cal-head { text-align: center; font-size: 11px; color: var(--hint); padding-bottom: 2px; }
+.cal-day {
+  aspect-ratio: 1 / 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 4px 5px;
+  border: none;
+  border-radius: 9px;
+  background: var(--field-bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.1;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+}
+.cal-day:disabled { cursor: default; color: var(--hint); }
+.cal-day b { font-size: 10.5px; font-weight: 600; font-variant-numeric: tabular-nums; max-width: 100%; overflow: hidden; }
+.cal-day.strong { color: #fff; }
+.cal-day.future { opacity: 0.45; }
+.cal-day.today { box-shadow: inset 0 0 0 2px var(--link); }
+.cal-day.blank { background: none; cursor: default; }
+.cal-note, .bar-note { margin: 10px 0 0; font-size: 12.5px; }
+
+.bar-row { display: grid; grid-template-columns: 26px 1fr 38px; align-items: center; gap: 10px; padding: 5px 0; font-size: 13.5px; }
+.bar-row-label { color: var(--hint); }
+.bar-row.weekend .bar-row-label { color: var(--text); font-weight: 600; }
+.bar-row-track { height: 8px; border-radius: 4px; background: var(--field-bg); overflow: hidden; }
+.bar-row-track div { height: 100%; border-radius: 4px; background: var(--link); }
+.bar-row.weekend .bar-row-track div { background: #ff9500; }
+.bar-row-value { text-align: right; font-variant-numeric: tabular-nums; }
+
+.split-bar { height: 8px; border-radius: 4px; background: color-mix(in srgb, var(--hint) 30%, transparent); overflow: hidden; margin: 4px 0 6px; }
+.split-bar div { height: 100%; background: var(--link); }
+
+.trend-legend { margin: 10px 0 0; }
+.chart-legend .dot.round { width: 8px; height: 8px; border-radius: 50%; }
+.income-trend-note { margin: 10px 0 0; font-size: 12.5px; }
+.sheet-chart .hint-text { margin: 8px 0 0; font-size: 12.5px; }
+
 /* Вкладка «Лимиты» (tabs/budgets.js): карточка с полоской прогресса */
 .budget-card {
   cursor: pointer;
@@ -1724,4 +1795,13 @@ button:active, .expense-card:active, .budget-card:active, .obligation-row:active
     align-items: start;
   }
   .stats-split > * { margin-bottom: 0; }
+  /* пары блоков (по дням + календарь, дни недели + регулярные, топ + места) — рядом;
+     если второго блока нет, первый растягивается на всю ширину */
+  .stats-pair {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+    gap: 0 12px;
+    align-items: start;
+  }
+  .cal-day { aspect-ratio: auto; height: 46px; }
 }

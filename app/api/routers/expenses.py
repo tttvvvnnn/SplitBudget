@@ -88,6 +88,8 @@ async def list_expenses(
     month: str | None = None,  # 'YYYY-MM'
     category: str | None = None,
     limit: int = 200,
+    date_from: dt.date | None = None,  # или с … по … включительно (статистика за период)
+    date_to: dt.date | None = None,
 ):
     query = select(Expense).where(Expense.chat_id == ctx.chat.id)
     if month:
@@ -98,6 +100,10 @@ async def list_expenses(
         except (ValueError, IndexError) as exc:
             raise HTTPException(status_code=400, detail="month должен быть в формате YYYY-MM") from exc
         query = query.where(Expense.expense_date >= start, Expense.expense_date < end)
+    if date_from:
+        query = query.where(Expense.expense_date >= date_from)
+    if date_to:
+        query = query.where(Expense.expense_date <= date_to)
     if category:
         query = query.where(Expense.category == category)
     query = query.order_by(Expense.expense_date.desc(), Expense.id.desc()).limit(min(limit, 1000))

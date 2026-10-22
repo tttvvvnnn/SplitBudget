@@ -32,11 +32,14 @@ def _month_range(month: str) -> tuple[dt.date, dt.date]:
 
 @router.get("/all/expenses", response_model=list[AllExpenseOut])
 async def all_expenses(
-    month: str,
+    month: str | None = None,
+    date_from: dt.date | None = None,  # или с … по … включительно (статистика за период)
+    date_to: dt.date | None = None,
     user: dict = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> list[AllExpenseOut]:
-    rows = await my_expenses(session, int(user["id"]), *_month_range(month))
+    period = _month_range(month) if month else period_or_400(None, date_from, date_to)
+    rows = await my_expenses(session, int(user["id"]), *period)
     payer_ids = {m.expense.payer_member_id for m in rows}
     payers: dict[int, Member] = {}
     if payer_ids:

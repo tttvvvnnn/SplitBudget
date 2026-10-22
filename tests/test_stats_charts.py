@@ -48,7 +48,7 @@ def test_build_stats_extra_fields():
         Row(D(2026, 10, 11), "Дом", None, Decimal("700"), "Интернет", True),  # воскресенье
         Row(D(2026, 10, 12), "Кафе", None, Decimal("90"), "Кофе"),
     ]
-    s = build_stats(*stats_period("2026-10"), rows)
+    s = build_stats(*stats_period("2026-10"), rows, today=D(2026, 11, 2))
     assert s.is_month and s.period == "2026-10" and s.count == 4
     assert s.avg_total == Decimal("450.00")  # (300 + 600) / 2 месяца с тратами
     cats = {c.category: c for c in s.by_category}
@@ -99,3 +99,33 @@ def test_all_stats_income_trend(client, seeded_chat, auth_header):
     # у Боба своих доходов нет
     bob = client.get("/api/all/stats?month=2026-10", headers=auth_header(seeded_chat.bob_init_data)).json()
     assert float(bob["income_total"]) == 0.0
+
+
+def test_expenses_by_date_range(client, seeded_chat, auth_header):
+    """Шторки статистики за квартал/год берут траты с … по …"""
+    headers = auth_header(seeded_chat.alice_init_data)
+    _add(client, headers, seeded_chat, "Июнь", 10, "2026-06-30")
+    _add(client, headers, seeded_chat, "Июль", 20, "2026-07-01")
+    _add(client, headers, seeded_chat, "Сентябрь", 30, "2026-09-30")
+    q = "date_from=2026-07-01&date_to=2026-09-30"
+    titles = {e["title"] for e in client.get(f"/api/chats/{seeded_chat.chat_id}/expenses?{q}", headers=headers).json()}
+    assert titles == {"Июль", "Сентябрь"}
+    titles = {e["title"] for e in client.get(f"/api/all/expenses?{q}", headers=headers).json()}
+    assert titles == {"Июль", "Сентябрь"}
+
+
+def test_unfinished_period_compares_same_days():
+    """Октябрь идёт 10 дней — сравниваем с 1–10 сентября и средним за те же дни, а не с целыми месяцами."""
+    rows = [
+        Row(D(2026, 8, 3), "Еда", None, Decimal("100")),
+        Row(D(2026, 8, 25), "Еда", None, Decimal("900")),
+        Row(D(2026, 9, 10), "Еда", None, Decimal("300")),
+        Row(D(2026, 9, 11), "Еда", None, Decimal("700")),
+        Row(D(2026, 10, 2), "Еда", None, Decimal("250")),
+    ]
+    s = build_stats(*stats_period("2026-10"), rows, today=D(2026, 10, 10))
+    assert s.prev_total == Decimal("1000") and s.prev_to_date == Decimal("300")
+    assert s.by_category[0].prev_to_date == Decimal("300") and s.by_category[0].prev_total == Decimal("1000")
+    assert s.avg_total == Decimal("200.00")  # (100 + 300) / 2
+    # прошедший месяц — без prev_to_date
+    assert build_stats(*stats_period("2026-09"), rows, today=D(2026, 10, 10)).prev_to_date is None

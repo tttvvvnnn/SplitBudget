@@ -116,10 +116,15 @@ def _places(rows: list[Row]) -> list[PlaceStat]:
     return places[:TOP_PLACES]
 
 
-def build_stats(start: dt.date, end: dt.date, rows: list[Row]) -> StatsOut:
-    """rows — траты за fetch_range(start, end)."""
+def build_stats(start: dt.date, end: dt.date, rows: list[Row], today: dt.date | None = None) -> StatsOut:
+    """rows — траты за fetch_range(start, end). Если период ещё идёт, сравнение (prev_to_date и
+    среднее) — с тем же сроком от начала прошлых периодов: 22 дня октября против 22 дней
+    сентября, а не против всего сентября."""
     rows = [Row(*r) for r in rows]
+    today = today or dt.date.today()
     prev_start, prev_end = prev_period(start, end)
+    # сколько дней периода уже прошло, если он ещё идёт
+    cutoff = (today - start).days + 1 if start <= today < end - dt.timedelta(days=1) else None
     cur_rows = [r for r in rows if start <= r.date < end]
     prev_rows = [r for r in rows if prev_start <= r.date < prev_end]
     by_month: dict[str, list[Row]] = {}
@@ -131,6 +136,13 @@ def build_stats(start: dt.date, end: dt.date, rows: list[Row]) -> StatsOut:
     prev_by_name = {c.category: c.total for c in prev_by_category}
     for c in by_category:
         c.prev_total = prev_by_name.get(c.category, ZERO)
+    prev_to_date = None
+    if cutoff:
+        to_date = [r for r in prev_rows if (r.date - prev_start).days < cutoff]
+        prev_to_date, to_date_by_category = summarize_by_category((r.category, r.subcategory, r.amount) for r in to_date)
+        to_date_by_name = {c.category: c.total for c in to_date_by_category}
+        for c in by_category:
+            c.prev_to_date = to_date_by_name.get(c.category, ZERO)
 
     is_month = _whole_months(start, end) == 1
     month = _ym(start)
@@ -141,7 +153,7 @@ def build_stats(start: dt.date, end: dt.date, rows: list[Row]) -> StatsOut:
         active = [m for m in (shift_month(month, -i) for i in range(1, AVG_MONTHS + 1)) if by_month.get(m)]
         if active:
             n = Decimal(len(active))
-            avg_rows = [r for m in active for r in by_month[m]]
+            avg_rows = [r for m in active for r in by_month[m] if not cutoff or r.date.day <= cutoff]
             avg_total = (sum((r.amount for r in avg_rows), ZERO) / n).quantize(Decimal("0.01"))
             avg_by_name: dict[str, Decimal] = {}
             for r in avg_rows:
@@ -176,6 +188,7 @@ def build_stats(start: dt.date, end: dt.date, rows: list[Row]) -> StatsOut:
         count=len(cur_rows),
         by_category=by_category,
         prev_total=prev_total,
+        prev_to_date=prev_to_date,
         avg_total=avg_total,
         daily=_cumulative(cur_rows, month) if is_month else [],
         prev_daily=_cumulative(prev_rows, shift_month(month, -1)) if is_month else [],

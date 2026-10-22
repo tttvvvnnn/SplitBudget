@@ -329,7 +329,8 @@ class CategoryStat(BaseModel):
     count: int
     subcategories: list[SubcategoryStat] = Field(default_factory=list)
     prev_total: Decimal = Decimal("0")  # та же категория в прошлом периоде
-    avg_total: Decimal | None = None  # в среднем за 3 прошлых месяца (только для месяца)
+    prev_to_date: Decimal | None = None  # прошлый период за тот же срок, если этот ещё идёт
+    avg_total: Decimal | None = None  # в среднем за 3 прошлых месяца (только для месяца; если идёт — за тот же срок)
 
 
 class MonthTotal(BaseModel):
@@ -366,7 +367,10 @@ class StatsOut(BaseModel):
     count: int = 0
     by_category: list[CategoryStat]
     prev_total: Decimal = Decimal("0")  # весь прошлый период той же длины
-    avg_total: Decimal | None = None  # в среднем за 3 прошлых месяца с тратами (только для месяца)
+    # Если период ещё идёт: прошлый период за тот же срок от начала (с ним и сравниваем)
+    prev_to_date: Decimal | None = None
+    # В среднем за 3 прошлых месяца с тратами (только для месяца; если он идёт — за тот же срок)
+    avg_total: Decimal | None = None
     # Траты нарастающим итогом по дням (только для месяца): daily[i] — потрачено с 1-го по (i+1)-е
     daily: list[Decimal] = Field(default_factory=list)
     prev_daily: list[Decimal] = Field(default_factory=list)
