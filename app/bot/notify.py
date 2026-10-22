@@ -110,8 +110,8 @@ async def notify_obligations(notices: list[Notice]) -> None:
             markup = payment_keyboard(
                 me.username, notice.ask_payment_id, notice.chat_link_id or notice.chat_id, notice.ask_amount
             )
-        elif notice.buttons:
-            markup = buttons_keyboard(me.username, notice.buttons, notice.app_param)
+        elif notice.buttons or notice.app_param:
+            markup = buttons_keyboard(me.username, notice.buttons or [], notice.app_param, notice.app_text)
         try:
             await bot.send_message(notice.chat_id, notice.text, reply_markup=markup)
         except Exception:  # noqa: BLE001

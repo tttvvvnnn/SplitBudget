@@ -3,7 +3,7 @@
 Подсказки категорий от ИИ: кэш ответов и выключатель на пространство.
 
 Revision ID: a3d9f1b7c520
-Revises: e2a6c8f0b154
+Revises: f4c8e2a6b910
 Create Date: 2026-10-22 18:10:00.000000
 """
 from __future__ import annotations
@@ -16,7 +16,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'a3d9f1b7c520'
-down_revision: Union[str, None] = 'e2a6c8f0b154'
+down_revision: Union[str, None] = 'f4c8e2a6b910'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

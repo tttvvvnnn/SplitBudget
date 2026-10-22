@@ -105,7 +105,7 @@ async def create_recurring(payload: RecurringCreate, ctx: ChatContext = Depends(
         day_of_month=payload.day_of_month,
         kind=payload.kind,
         end_month=payload.end_month,
-        debt=payload.debt if payload.kind == "card" else None,
+        debt=payload.debt if payload.kind == "loan" else None,
         created_by_member_id=ctx.member.id,
     )
     ctx.session.add(recurring)
@@ -165,7 +165,7 @@ async def update_recurring(
         recurring.end_month = payload.end_month or None
     if "debt" in payload.model_fields_set:
         recurring.debt = payload.debt
-    if recurring.kind != "card":
+    if recurring.kind != "loan":
         recurring.debt = None
 
     if payload.participants is not None:

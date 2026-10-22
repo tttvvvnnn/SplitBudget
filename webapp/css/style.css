@@ -1365,6 +1365,15 @@ button:active, .expense-card:active, .budget-card:active, .obligation-row:active
 }
 .income-plus { color: var(--success); }
 
+/* Вкладка «Кредиты» (tabs/credits.js) */
+.credit-summary { padding: 14px; }
+.credit-total { font-size: 26px; font-weight: 700; margin: 2px 0 4px; font-variant-numeric: tabular-nums; }
+.credit-sub { color: var(--hint); }
+.credit-card.archived { opacity: 0.55; }
+.credit-lines { font-size: 13px; color: var(--hint); margin-top: 6px; line-height: 1.45; }
+.credit-actions { display: flex; gap: 10px; margin-top: 10px; }
+.credit-actions .btn { flex: 1; }
+
 /* Вкладка «Цели» (tabs/goals.js) */
 .goal-card.archived { opacity: 0.55; }
 .deposit-row {

@@ -13,8 +13,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routers import (
-    balances, budgets, categories, chats, expenses, goals, income, obligations, overview, plan, recurring,
-    stats, web,
+    balances, budgets, categories, chats, credits, expenses, goals, income, obligations, overview, plan,
+    recurring, stats, web,
 )
 from app.bot.bot_instance import bot
 from app.bot.runner import start_polling
@@ -113,6 +113,7 @@ for router in (
     income.router,
     goals.router,
     plan.router,
+    credits.router,
     categories.router,
     web.router,
 ):

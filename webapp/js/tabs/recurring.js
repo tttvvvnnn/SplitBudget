@@ -9,11 +9,11 @@ import { obligationsHtml, openPaymentSheet } from "./budgets.js";
 import { categoryFieldsHtml, bindCategoryFields, readCategoryFields, categoryBadgeHtml, setCategory } from "../category-fields.js";
 
 /* ---------------- Вкладка «Платежи» (обязательные платежи) ----------------
-   Аренда, кредиты, кредитные карты, подписки. За 7, 3 и 1 день бот напоминает, в день
-   платежа спрашивает «Оплачено?», и только после подтверждения записывает трату
-   (app/shared/obligations.py). Платёж по кредитной карте тратой не считается — он уменьшает
-   долг по карте, а в «Плане» списывается со статьи по своей категории. Сумма необязательна:
-   без неё платёж — только напоминание, а сколько внесли, указывают при оплате.
+   Аренда, кредиты, подписки. За 7, 3 и 1 день бот напоминает, в день платежа спрашивает
+   «Оплачено?», и только после подтверждения записывает трату (app/shared/obligations.py).
+   У кредита можно указать остаток долга — он уменьшается с каждым платежом. Кредитные карты
+   живут во вкладке «Кредиты» (tabs/credits.js). Сумма необязательна: без неё платёж — только
+   напоминание, а сколько внесли, указывают при оплате.
 
    В «Моих финансах» сверху — платежи этого месяца (в семейном чате они во вкладке «Лимиты»). */
 
@@ -29,7 +29,6 @@ const KIND_INFO = {
 const KIND_CATEGORY = {
   rent: ["Дом", "Аренда"],
   loan: ["Кредиты", "Кредит"],
-  card: ["Кредиты", "Кредитная карта"],
   subscription: ["Подписки", ""],
 };
 
@@ -54,11 +53,11 @@ async function renderRecurringTab() {
     </div>
     ${month && month.items.length ? obligationsHtml(month) : ""}
     ${hintsHtml(hints)}
-    ${state.recurring.length === 0 ? '<div class="empty-state">Обязательных платежей пока нет.<br>Нажмите «+», чтобы добавить аренду, кредит, карту или подписку.</div>' : state.recurring.map((r) => {
+    ${state.recurring.length === 0 ? '<div class="empty-state">Обязательных платежей пока нет.<br>Нажмите «+», чтобы добавить аренду, кредит или подписку.</div>' : state.recurring.map((r) => {
       const [icon] = KIND_INFO[r.kind] || KIND_INFO.other;
       const extra = [];
       if (r.end_month) extra.push(`до ${monthShort(r.end_month)}`);
-      if (r.kind === "card" && r.debt !== null) extra.push(`долг ${fmtMoney(r.debt)}`);
+      if (r.debt !== null) extra.push(`осталось ${fmtMoney(r.debt)}`);
       return `
       <div class="card expense-card" data-id="${r.id}">
         <div class="expense-thumb placeholder">${r.is_active ? icon : "⏸"}</div>
@@ -130,9 +129,12 @@ function monthShort(ym) {
   return `${["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"][m - 1]} ${y}`;
 }
 
-function openRecurringModal(existing) {
+/* opts.kind — тип нового платежа (из «Кредитов» — loan), opts.onSaved — что перерисовать
+   после сохранения (по умолчанию вкладку «Платежи»). */
+function openRecurringModal(existing, opts = {}) {
   const isEdit = !!existing;
-  let kind = existing ? existing.kind : "rent";
+  const onSaved = opts.onSaved || renderRecurringTab;
+  let kind = existing ? existing.kind : (opts.kind || "rent");
   let categoryTouched = isEdit;
   const selectedIds = new Set(existing ? existing.participants.map((p) => p.member_id) : state.members.map((m) => m.id));
   let splitType = existing ? existing.split_type : "equal";
@@ -144,7 +146,7 @@ function openRecurringModal(existing) {
     <div class="field">
       <label>Тип</label>
       <div class="chip-row" id="r-kind">
-        ${Object.entries(KIND_INFO).map(([k, [icon, label]]) => `<div class="chip ${k === kind ? "selected" : ""}" data-kind="${k}">${icon} ${label}</div>`).join("")}
+        ${Object.entries(KIND_INFO).filter(([k]) => k !== "card").map(([k, [icon, label]]) => `<div class="chip ${k === kind ? "selected" : ""}" data-kind="${k}">${icon} ${label}</div>`).join("")}
       </div>
     </div>
     <div class="field">
@@ -157,9 +159,9 @@ function openRecurringModal(existing) {
       <div class="hint-text">Без суммы — только напоминание: в день платежа бот спросит, сколько внесли.</div>
     </div>
     <div class="field" id="r-debt-field">
-      <label>Общий долг по карте (${escapeHtml(state.chat.currency)})</label>
+      <label>Остаток долга (${escapeHtml(state.chat.currency)})</label>
       <input type="number" id="r-debt" min="0" step="0.01" value="${existing && existing.debt !== null ? existing.debt : ""}" placeholder="необязательно">
-      <div class="hint-text">Платёж по карте не считается тратой (покупки по карте записываются отдельно), он уменьшает долг. В «Плане» он списывается со статьи по категории ниже.</div>
+      <div class="hint-text">Каждый оплаченный платёж уменьшает остаток. Видно во вкладке «💳 Кредиты».</div>
     </div>
     <div id="r-category-wrap">
       ${categoryFieldsHtml("r", existing && existing.category, existing && existing.subcategory)}
@@ -197,10 +199,10 @@ function openRecurringModal(existing) {
   bindCategoryFields(overlay, "r", () => { categoryTouched = true; });
 
   function applyKind() {
-    overlay.querySelector("#r-debt-field").style.display = kind === "card" ? "block" : "none";
-    overlay.querySelector("#r-end-field").style.display = ["loan", "card", "other"].includes(kind) ? "block" : "none";
+    overlay.querySelector("#r-debt-field").style.display = kind === "loan" ? "block" : "none";
+    overlay.querySelector("#r-end-field").style.display = ["loan", "other"].includes(kind) ? "block" : "none";
     overlay.querySelector("#r-amount-label").textContent =
-      `${kind === "card" ? "Платёж в месяц" : "Сумма в месяц"} (${state.chat.currency})`;
+      `${kind === "loan" ? "Платёж в месяц" : "Сумма в месяц"} (${state.chat.currency})`;
     const preset = KIND_CATEGORY[kind];
     if (!categoryTouched && preset) setCategory(overlay, "r", preset[0], preset[1]);
   }
@@ -323,8 +325,8 @@ function openRecurringModal(existing) {
     const payload = {
       title, amount, category, subcategory, payer_member_id: payerId,
       split_type: splitType, day_of_month: day, participants, kind,
-      end_month: ["loan", "card", "other"].includes(kind) ? endMonth : "",
-      debt: kind === "card" && debtRaw !== "" ? Number(debtRaw) : null,
+      end_month: ["loan", "other"].includes(kind) ? endMonth : "",
+      debt: kind === "loan" && debtRaw !== "" ? Number(debtRaw) : null,
     };
     if (!isEdit && !payload.end_month) payload.end_month = null;
     if (isEdit) payload.is_active = overlay.querySelector("#r-active").checked;
@@ -338,7 +340,7 @@ function openRecurringModal(existing) {
       }
       haptic("notification", "success");
       closeSheet(overlay);
-      await renderRecurringTab();
+      await onSaved();
     } catch (e) {
       showFormError(errorEl, e.message);
     } finally {
@@ -356,7 +358,7 @@ function openRecurringModal(existing) {
         await api(`/chats/${state.chatId}/recurring/${existing.id}`, { method: "DELETE" });
         haptic("notification", "success");
         closeSheet(overlay);
-        await renderRecurringTab();
+        await onSaved();
       } catch (e) {
         toast(e.message);
       }

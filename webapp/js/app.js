@@ -10,7 +10,7 @@
      member-modals.js — добавление/переименование/список участников
      brand.js         — знак бренда, светлая/тёмная тема
      shell.js         — шапка, таббар, переключение вкладок, бейдж версии
-     tabs/*.js        — вкладки «Траты», «Баланс», «Статистика», «Лимиты», «Платежи» и их формы */
+     tabs/*.js        — вкладки «Траты», «Баланс», «Статистика», «Лимиты», «Платежи», «Кредиты» и их формы */
 
 import { tg, isWebVersion } from "./telegram.js";
 import { state } from "./state.js";
@@ -35,8 +35,8 @@ async function init() {
     state.chatId = tg.initDataUnsafe.start_param;
   }
   // Кнопка «Другая сумма» под вопросом бота: startapp=<chat_id>_pay — сразу на вкладку
-  // «Лимиты» (платежи месяца), <chat_id>_income — на «Доходы».
-  const START_TABS = { _pay: "budgets", _income: "income" };
+  // «Лимиты» (платежи месяца), <chat_id>_income — на «Доходы», <chat_id>_credits — на «Кредиты».
+  const START_TABS = { _pay: "budgets", _income: "income", _credits: "credits" };
   for (const [suffix, tab] of Object.entries(START_TABS)) {
     if (state.chatId && state.chatId.endsWith(suffix)) {
       state.chatId = state.chatId.slice(0, -suffix.length);

@@ -5,6 +5,8 @@
 заводится RecurringPayment: в день платежа бот спрашивает «Оплачено?», и только после
 подтверждения платёж записывается обычной тратой (Expense). Платёж по кредитной карте
 тратой не считается: покупки по карте записываются отдельно, он только уменьшает долг.
+Новые карты заводятся во вкладке «Кредиты» (app/shared/credits.py), а у кредита остаток
+долга (debt) уменьшается с каждым платежом.
 
 Пока платёж не оплачен, он «зарезервирован» в лимитах этого месяца (см. reserved), чтобы
 было видно, сколько денег на самом деле свободно.
@@ -233,7 +235,7 @@ async def pay(
         for member_id, share in shares:
             session.add(ExpenseShare(expense_id=expense.id, member_id=member_id, amount=share))
         expense_id = expense.id
-    elif recurring.debt is not None:
+    if recurring.debt is not None:  # остаток по кредиту
         recurring.debt = max(recurring.debt - amount, ZERO)
 
     payment.status = "paid"
@@ -264,7 +266,7 @@ async def reset(session: AsyncSession, payment: RecurringPayment) -> None:
             expense = await session.get(Expense, payment.expense_id)
             if expense is not None:
                 await session.delete(expense)
-        elif recurring.kind == "card" and recurring.debt is not None and payment.amount:
+        if recurring.debt is not None and payment.amount:
             recurring.debt += payment.amount
     payment.status = "pending"
     payment.amount = None
@@ -349,6 +351,10 @@ def reserved(items: list[Obligation]) -> dict[tuple[str, str | None], Decimal]:
     return totals
 
 
+def debt_label(recurring: RecurringExpense) -> str:
+    return "Долг по карте" if recurring.kind == "card" else "Остаток долга"
+
+
 def fmt_amount(amount: Decimal, currency: str) -> str:
     return f"{amount:,.0f} {currency}".replace(",", " ")
 
@@ -378,8 +384,8 @@ def payment_text(recurring: RecurringExpense, chat: Chat, payment: RecurringPaym
     text = f"{icon} {prefix}{when} ({_date_label(payment.due_date)}) платёж «{recurring.title}»"
     if recurring.amount:
         text += f" — <b>{fmt_amount(recurring.amount, chat.currency)}</b>"
-    if recurring.kind == "card" and recurring.debt is not None:
-        text += f"\nДолг по карте: {fmt_amount(recurring.debt, chat.currency)}"
+    if recurring.debt is not None:
+        text += f"\n{debt_label(recurring)}: {fmt_amount(recurring.debt, chat.currency)}"
     return text
 
 
@@ -393,6 +399,7 @@ class Notice:
     # с этим startapp-параметром (например, доходы — app/shared/income.py)
     buttons: list[list[tuple[str, str]]] | None = None
     app_param: str | None = None
+    app_text: str | None = None  # подпись кнопки-ссылки на мини-апп вместо «Другая сумма»
     ask_amount: bool = False  # у платежа нет суммы — вместо «Оплачено» кнопка «Внести сумму»
 
 
