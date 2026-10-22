@@ -3,6 +3,18 @@ import { escapeHtml } from "./format.js";
 
 /* ---------------- Шторки (bottom sheet) и общие формы ---------------- */
 
+/* Esc закрывает верхнюю шторку — на ПК (веб-версия, Telegram Desktop) так привычнее, чем
+   искать, куда кликнуть мимо окна. */
+document.addEventListener("keydown", (ev) => {
+  if (ev.key !== "Escape") return;
+  const overlays = document.querySelectorAll(".sheet-overlay");
+  const top = overlays[overlays.length - 1];
+  if (!top) return;
+  ev.preventDefault();
+  if (top._close) top._close();
+  else top.remove();
+});
+
 function openSheet(innerHtml) {
   // на всякий случай сбрасываем нативные кнопки от предыдущей шторки, если та не закрылась
   // штатно (не должно случаться, но так спокойнее)
@@ -15,6 +27,7 @@ function openSheet(innerHtml) {
   overlay.addEventListener("click", (ev) => {
     if (ev.target === overlay) closeSheet(overlay);
   });
+  overlay._close = () => closeSheet(overlay);
   document.body.appendChild(overlay);
 
   // Системная кнопка «назад» Telegram закрывает текущую шторку так же, как тап по фону

@@ -1,5 +1,6 @@
-"""Проверка подлинности Telegram.WebApp.initData, которую фронтенд шлёт в заголовке
-X-Telegram-Init-Data при каждом запросе к API.
+"""Кто делает запрос к API. Внутри Telegram фронтенд шлёт Telegram.WebApp.initData в
+заголовке X-Telegram-Init-Data, в браузере (веб-версия) — cookie сессии, выданной после
+входа через бота (app/shared/web_auth.py).
 
 Алгоритм ровно такой, как описан в официальной документации Telegram:
 https://core.telegram.org/bots/webapps#validating-data-received-via-the-web-app
@@ -12,11 +13,15 @@ import json
 import time
 from urllib.parse import parse_qsl
 
-from fastapi import Header, HTTPException
+from fastapi import Cookie, Depends, Header, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.shared.config import settings
+from app.shared.database import get_session
+from app.shared.web_auth import resolve_session
 
 MAX_INIT_DATA_AGE_SECONDS = 24 * 60 * 60  # сутки
+SESSION_COOKIE = "sb_session"
 
 
 def validate_init_data(init_data: str) -> dict:
@@ -58,5 +63,14 @@ def validate_init_data(init_data: str) -> dict:
     return user
 
 
-async def get_current_user(x_telegram_init_data: str = Header(alias="X-Telegram-Init-Data")) -> dict:
-    return validate_init_data(x_telegram_init_data)
+async def get_current_user(
+    x_telegram_init_data: str | None = Header(default=None, alias="X-Telegram-Init-Data"),
+    sb_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    if x_telegram_init_data:
+        return validate_init_data(x_telegram_init_data)
+    user = await resolve_session(session, sb_session or "")
+    if user is None:
+        raise HTTPException(status_code=401, detail="Нужно войти")
+    return user

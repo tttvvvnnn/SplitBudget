@@ -14,7 +14,8 @@
   <script>
     (function () {
       var tg = window.Telegram && window.Telegram.WebApp;
-      if (tg && tg.colorScheme) document.documentElement.dataset.theme = tg.colorScheme;
+      if (tg && tg.initData && tg.colorScheme) document.documentElement.dataset.theme = tg.colorScheme;
+      else if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) document.documentElement.dataset.theme = "dark";
     })();
   </script>
 </head>

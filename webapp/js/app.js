@@ -1,6 +1,7 @@
 /* SplitBudget — mini app. Ванильный JS, без сборки: нативные ES-модули, точка входа —
    этот файл (подключён в index.html как <script type="module">). Что где лежит:
      telegram.js      — объект Telegram WebApp, вибрация, алерты/подтверждения
+     login.js         — экран входа веб-версии (в браузере, вне Telegram)
      state.js         — общее состояние приложения
      format.js        — даты, деньги, escapeHtml, иконки категорий
      api.js           — запросы к /api и загрузка картинок с авторизацией
@@ -11,13 +12,14 @@
      shell.js         — шапка, таббар, переключение вкладок, бейдж версии
      tabs/*.js        — вкладки «Траты», «Баланс», «Статистика», «Лимиты», «Платежи» и их формы */
 
-import { tg } from "./telegram.js";
+import { tg, isWebVersion } from "./telegram.js";
 import { state } from "./state.js";
 import { escapeHtml } from "./format.js";
 import { api } from "./api.js";
 import { loadCategories } from "./categories.js";
 import { loadVersionBadge, renderShell, renderTab, PERSONAL_ONLY_TABS } from "./shell.js";
 import { initTheme } from "./brand.js";
+import { renderLogin } from "./login.js";
 
 initTheme();
 
@@ -41,14 +43,9 @@ async function init() {
       state.tab = tab;
     }
   }
+  // Вне Telegram (веб-версия) initData нет — API узнаёт пользователя по cookie сессии,
+  // а без неё (401) показываем экран входа через бота
   state.initData = tg ? tg.initData : "";
-
-  if (!state.initData) {
-    renderError(
-      "Приложение нужно открывать внутри Telegram — из семейного чата (кнопка «Открыть учёт трат»)."
-    );
-    return;
-  }
 
   // Личное пространство и семейные чаты нужны всегда — для переключателя в шапке. Без
   // chat_id (кнопка меню бота, «Мои финансы» в личке) открываем «Мои финансы».
@@ -62,7 +59,8 @@ async function init() {
     state.familyChats = chats;
     state.hiddenChats = hidden;
   } catch (e) {
-    renderError(e.message);
+    if (isWebVersion && e.status === 401) renderLogin(init);
+    else renderError(e.message);
     return;
   }
   // chat_id=all — старые ссылки на бывшую сводку «Все траты», теперь это «Мои финансы»
@@ -81,7 +79,16 @@ async function switchSpace(chatId) {
   state.filters = { search: "", category: "", payer: "" };
   state.filtersOpen = false;
   state.balances = null;
+  rememberSpaceInUrl();
   await loadMeAndRender();
+}
+
+/* В браузере открытое пространство живёт в адресе: обновление страницы или закладка
+   возвращают туда же. Внутри Telegram адрес не виден, там это не нужно. */
+function rememberSpaceInUrl() {
+  if (!isWebVersion) return;
+  const url = String(state.chatId) === String(state.personalChatId) ? "/" : `/?chat_id=${state.chatId}`;
+  history.replaceState(null, "", url);
 }
 
 function renderError(message) {

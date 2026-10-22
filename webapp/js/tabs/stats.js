@@ -89,6 +89,7 @@ async function renderStatsTab() {
     <div class="total-delta">${deltaHtml(cur, Number(stats.prev_total), { long: true })}</div>
     ${incomeHtml(income)}
     ${empty ? '<div class="empty-state">Нет трат за этот месяц.</div>' : `
+      <div class="stats-split">
       <div class="chart-wrap donut-wrap">
         <div class="chart-box donut-box"><canvas id="stats-donut"></canvas></div>
         <div class="donut-center">
@@ -98,6 +99,7 @@ async function renderStatsTab() {
       </div>
       <div class="card stats-list">
         ${stats.by_category.map((c, i) => categoryRowHtml(c, i, cur)).join("")}
+      </div>
       </div>
       <div class="section-title">По дням</div>
       <div class="chart-wrap">
