@@ -2,7 +2,8 @@
 «Моим финансам» и в каждый семейный чат. Командой /summary — то же за текущий месяц.
 
 В отчёте: сколько потрачено и сравнение с прошлым месяцем, топ категорий, что выросло
-сильнее всего, лимиты, обязательные платежи; в личном — доходы и сколько осталось,
+сильнее всего, лимиты, обязательные платежи; в личном — доходы и сколько осталось, долги
+по кредиткам за месяц и остаток по кредитам (app/shared/credits.py),
 в семейном — кто сколько заплатил; в личном — ещё и прогресс целей накоплений.
 """
 from __future__ import annotations
@@ -16,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.shared.budgets import budget_label, budgets_status, month_range, spending
 from app.shared.categories import CATEGORY_TREE
+from app.shared.credits import month_debts
 from app.shared.goals import goals_status
 from app.shared.models import Chat, Expense, Income, Member, MonthlyReport
 from app.shared.obligations import fmt_amount, month_of, obligations
@@ -120,6 +122,18 @@ async def build_report(session: AsyncSession, chat: Chat, month: str, partial: b
         paid = sum((o.share for o in items if o.payment.status == "paid"), ZERO)
         planned = sum((o.share for o in items if o.payment.status != "skipped"), ZERO)
         lines.append(f"📌 Обязательные платежи: оплачено {money(paid)} из {money(planned)}")
+
+    if chat.is_personal:
+        debts = await month_debts(session, chat, start, end)
+        if debts and (debts.cards_start or debts.cards_end or debts.purchases):
+            line = f"💳 Кредитки: долг {money(debts.cards_start)} → {money(debts.cards_end)}"
+            details = [f"покупки +{money(debts.purchases)}" if debts.purchases else "",
+                       f"внесено −{money(debts.paid)}" if debts.paid else ""]
+            details = [d for d in details if d]
+            lines.append("")
+            lines.append(line + (f" ({', '.join(details)})" if details else ""))
+        if debts and debts.loans:
+            lines.append(f"🏦 Остаток по кредитам: {money(debts.loans)}")
 
     if chat.is_personal:
         goals = [g for g in await goals_status(session, chat.id, end - dt.timedelta(days=1)) if not g.goal.is_archived]

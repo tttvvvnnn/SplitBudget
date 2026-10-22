@@ -257,3 +257,106 @@ def test_card_must_be_own(client, seeded_chat, auth_header):
     client.patch(f"/api/chats/{pid}/credit-cards/{card['id']}", headers=h, json={"title": "Т-Банк", "is_archived": True})
     me = client.get(f"/api/chats/{pid}/me", headers=h).json()["member"]["id"]
     assert _post_expense(client, pid, h, me, 100, card["id"]).status_code == 400
+
+
+def _callback(user_id, data, log):
+    from types import SimpleNamespace
+
+    async def edit_text(text, reply_markup=None):
+        log.append((text, reply_markup))
+
+    async def answer(text=None, show_alert=False):
+        if text:
+            log.append(("answer", text))
+
+    return SimpleNamespace(data=data, from_user=SimpleNamespace(id=user_id),
+                           message=SimpleNamespace(edit_text=edit_text, edit_reply_markup=edit_text), answer=answer)
+
+
+def test_quick_entry_by_card(client, seeded_chat, auth_header, monkeypatch):
+    from app.bot.handlers import quick
+
+    async def silent(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(quick, "notify_budget_alerts", silent)
+    pid, h = _personal(client, seeded_chat, auth_header)
+    card = _card(client, pid, h, title="Альфа", debt=0)
+    log = []
+
+    async def answer(text, reply_markup=None):
+        log.append((text, reply_markup))
+
+    from types import SimpleNamespace
+    msg = SimpleNamespace(from_user=SimpleNamespace(id=pid, username="alice", full_name="Алиса"),
+                          text="такси 350", answer=answer)
+    asyncio.run(quick.quick_expense(msg))
+    buttons = [b.callback_data for row in log[-1][1].inline_keyboard for b in row]
+    eid = _expenses(client, pid, h)[0]["id"]
+    assert f"qe:card:{eid}:{card['id']}" in buttons
+
+    asyncio.run(quick.on_quick_button(_callback(pid, f"qe:card:{eid}:{card['id']}", log)))
+    assert "💳 Альфа" in log[-1][0] and _debt(client, pid, h, card["id"])[0] == 350.0
+    # Чужой не может, «Своими» снимает карту
+    asyncio.run(quick.on_quick_button(_callback(seeded_chat.bob_tg_id, f"qe:card:{eid}:{card['id']}", log)))
+    asyncio.run(quick.on_quick_button(_callback(pid, f"qe:card:{eid}:0", log)))
+    assert _debt(client, pid, h, card["id"])[0] == 0.0
+
+
+def test_bot_card_buttons_and_statement(client, seeded_chat, auth_header):
+    from app.bot.handlers import credits as handlers
+    from app.shared.credits import plus_month
+
+    assert plus_month(dt.date(2026, 1, 31)) == dt.date(2026, 2, 28)
+    assert plus_month(dt.date(2026, 12, 5)) == dt.date(2027, 1, 5)
+    pid, h = _personal(client, seeded_chat, auth_header)
+    grace = TODAY + dt.timedelta(days=3)
+    card = _card(client, pid, h, title="Выписочная", debt=10000, statement_day=TODAY.day,
+                 grace_until=grace.isoformat(), payment_date=(TODAY + dt.timedelta(days=1)).isoformat())
+
+    async def run(day):
+        async with async_session_maker() as session:
+            notices = await due_card_notices(session, day)
+            await session.commit()
+            return [n for n in notices if "Выписочная" in n.text]
+
+    statement, minimum, grace_notice = asyncio.run(run(TODAY))
+    assert "выписка" in statement.text and [b for row in statement.buttons for _, b in row] == [f"cc:ext:{card['id']}"]
+    assert [b for row in minimum.buttons for _, b in row] == [
+        f"cc:min:{card['id']}", f"cc:full:{card['id']}", f"cc:ext:{card['id']}"]
+    assert "без процентов" in grace_notice.text
+
+    log = []
+    asyncio.run(handlers.on_card_button(_callback(pid, f"cc:min:{card['id']}", log)))
+    assert "внесено 4 200" in log[-1][0] and _debt(client, pid, h, card["id"])[0] == 5800.0
+    asyncio.run(handlers.on_card_button(_callback(seeded_chat.bob_tg_id, f"cc:full:{card['id']}", log)))
+    assert log[-1] == ("answer", "Карта не найдена")
+    asyncio.run(handlers.on_card_button(_callback(pid, f"cc:ext:{card['id']}", log)))
+    _, data = _debt(client, pid, h, card["id"])
+    assert data["grace_until"] == plus_month(grace).isoformat() and float(data["min_payment"]) == 4200.0
+    # Про выписку в этом месяце уже спросили, новые сроки ещё далеко
+    assert asyncio.run(run(TODAY)) == []
+    asyncio.run(handlers.on_card_button(_callback(pid, f"cc:full:{card['id']}", log)))
+    assert "погашен" in log[-1][0] and _debt(client, pid, h, card["id"])[0] == 0.0
+
+
+def test_debts_in_monthly_report(client, seeded_chat, auth_header):
+    from app.shared.models import Chat
+    from app.shared.report import build_report
+
+    pid, h = _personal(client, seeded_chat, auth_header)
+    me = client.get(f"/api/chats/{pid}/me", headers=h).json()["member"]["id"]
+    card = _card(client, pid, h, debt=10000)
+    _post_expense(client, pid, h, me, 2000, card["id"])
+    client.post(f"/api/chats/{pid}/credit-cards/{card['id']}/pay", headers=h, json={"amount": 5000})
+    client.post(f"/api/chats/{pid}/recurring", headers=h, json={
+        "title": "Кредит", "amount": 1000, "payer_member_id": me, "day_of_month": 28, "kind": "loan",
+        "debt": 50000, "participants": [{"member_id": me}]})
+
+    async def run():
+        async with async_session_maker() as session:
+            return await build_report(session, await session.get(Chat, pid), TODAY.strftime("%Y-%m"), True)
+
+    text = asyncio.run(run())
+    assert "💳 Кредитки: долг 10 000 RUB → 7 000 RUB (покупки +2 000 RUB, внесено −5 000 RUB)" in text
+    assert "🏦 Остаток по кредитам: 50 000 RUB" in text

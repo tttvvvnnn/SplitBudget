@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+import calendar
 import datetime as dt
 import json
 from dataclasses import dataclass
@@ -136,7 +137,8 @@ async def extend(
     card.grace_until = grace_until
     card.payment_date = payment_date
     card.min_payment = min_payment if payment_date else None
-    card.reminders_sent = ""
+    # Напоминания по новым датам — заново; что про выписку уже спросили, помним
+    card.reminders_sent = ",".join(k for k in card.reminders_sent.split(",") if k.startswith("stmt:"))
     operation = CreditOperation(
         card_id=card.id, kind="extend", op_date=dt.date.today(),
         note=json.dumps({"old": old, "new": _dates(card)}),
@@ -280,10 +282,45 @@ def card_notice_text(
     return text
 
 
+def plus_month(date: dt.date) -> dt.date:
+    """То же число через месяц (или последний день месяца, если такого числа нет)."""
+    year, month = (date.year + 1, 1) if date.month == 12 else (date.year, date.month + 1)
+    return date.replace(year=year, month=month, day=min(date.day, calendar.monthrange(year, month)[1]))
+
+
+async def extend_month(session: AsyncSession, card: CreditCard) -> CreditOperation:
+    """«Продлить срок на месяц» из бота: обе даты на месяц вперёд, минимальный платёж тот же."""
+    return await extend(
+        session, card,
+        plus_month(card.grace_until) if card.grace_until else None,
+        plus_month(card.payment_date) if card.payment_date else None,
+        card.min_payment,
+    )
+
+
+def _is_statement_day(card: CreditCard, today: dt.date) -> bool:
+    if not card.statement_day:
+        return False
+    last = calendar.monthrange(today.year, today.month)[1]
+    return today.day == min(card.statement_day, last)
+
+
+def card_buttons(card: CreditCard, debt: Decimal, what: str | None) -> list[list[tuple[str, str]]]:
+    """Кнопки под сообщением о карте (app/bot/handlers/credits.py)."""
+    rows = []
+    if what == "min" and card.min_payment and card.min_payment < debt:
+        rows.append([(f"✅ Внёс {ob.fmt_amount(card.min_payment, '').strip()}", f"cc:min:{card.id}")])
+    if what in ("min", "grace"):
+        rows.append([("✅ Погасил весь долг", f"cc:full:{card.id}")])
+    if card.grace_until or card.payment_date:
+        rows.append([("📅 Продлить срок на месяц", f"cc:ext:{card.id}")])
+    return rows
+
+
 async def due_card_notices(session: AsyncSession, today: dt.date) -> list[ob.Notice]:
-    """Напоминания по картам за 7, 3, 1 день и в день срока — в личку владельцу. Отправленное
-    помечается в карте (вызывающий коммитит). Пропущенные дни (сервер лежал) догоняются одним
-    напоминанием, как у обязательных платежей."""
+    """Напоминания по картам за 7, 3, 1 день и в день срока — в личку владельцу, а в день
+    выписки — вопрос про новые даты. Отправленное помечается в карте (вызывающий коммитит).
+    Пропущенные дни (сервер лежал) догоняются одним напоминанием, как у обязательных платежей."""
     result = await session.execute(select(CreditCard).where(CreditCard.is_archived.is_(False)))
     cards = list(result.scalars().all())
     purchases = await purchases_total(session, [c.id for c in cards])
@@ -294,6 +331,17 @@ async def due_card_notices(session: AsyncSession, today: dt.date) -> list[ob.Not
         if chat is None or debt <= 0:
             continue
         sent = {k for k in card.reminders_sent.split(",") if k}
+        link = {"app_param": f"{chat.id}_credits", "app_text": "💳 Открыть «Кредиты»"}
+        statement_key = f"stmt:{today:%Y-%m}"
+        if _is_statement_day(card, today) and statement_key not in sent:
+            sent.add(statement_key)
+            text = (
+                f"🧾 Сегодня выписка по «{card.title}». Долг по моим данным: "
+                f"<b>{ob.fmt_amount(debt, chat.currency)}</b>\n"
+                "Проверьте в банке срок без процентов и минимальный платёж: если они просто сдвинулись "
+                "на месяц — нажмите кнопку, если нет — поправьте в «Кредитах»."
+            )
+            notices.append(ob.Notice(chat.id, text, buttons=card_buttons(card, debt, None), **link))
         for date, what in deadlines(card):
             days = (date - today).days
             if days < 0 or days > max(REMINDER_DAYS):
@@ -304,10 +352,81 @@ async def due_card_notices(session: AsyncSession, today: dt.date) -> list[ob.Not
             sent |= keys
             notices.append(ob.Notice(
                 chat.id, card_notice_text(card, debt, chat, date, what, today),
-                buttons=[], app_param=f"{chat.id}_credits", app_text="💳 Открыть «Кредиты»",
+                buttons=card_buttons(card, debt, what), **link,
             ))
-        # Ключи прошедших сроков больше не нужны
-        actual = {d.isoformat() for d, _ in deadlines(card)}
-        card.reminders_sent = ",".join(sorted(k for k in sent if k.split(":")[0] in actual))
+        # Ключи прошедших сроков и прошлых выписок больше не нужны
+        actual = {d.isoformat() for d, _ in deadlines(card)} | {statement_key.split(":")[1]}
+        card.reminders_sent = ",".join(sorted(k for k in sent if _key_date(k) in actual))
     await session.flush()
     return notices
+
+
+def _key_date(key: str) -> str:
+    """"2026-11-05:7" → "2026-11-05", "stmt:2026-11" → "2026-11"."""
+    head, _, tail = key.partition(":")
+    return tail if head == "stmt" else head
+
+
+@dataclass
+class MonthDebts:
+    cards_start: Decimal  # долг по картам в начале месяца
+    cards_end: Decimal  # и в конце
+    purchases: Decimal  # покупки картами за месяц (с процентами)
+    paid: Decimal  # внесено на карты за месяц
+    loans: Decimal  # остаток по кредитам сейчас
+
+
+async def month_debts(session: AsyncSession, chat: Chat, start: dt.date, end: dt.date) -> MonthDebts | None:
+    """Долги для итогов месяца. Долг по картам на дату восстанавливается от текущего: из него
+    вычитается всё, что изменило долг позже (покупки, проценты, сверки, платежи)."""
+    cards = [c for c in await cards_of(session, chat.id) if not c.is_archived]
+    loans = [
+        r for r in (
+            await session.execute(
+                select(RecurringExpense).where(
+                    RecurringExpense.chat_id == chat.id,
+                    RecurringExpense.kind == "loan",
+                    RecurringExpense.is_active.is_(True),
+                    RecurringExpense.debt.is_not(None),
+                )
+            )
+        ).scalars().all()
+    ]
+    if not cards and not loans:
+        return None
+    ids = [c.id for c in cards]
+    now = sum((c.debt for c in cards), ZERO) + sum((await purchases_total(session, ids)).values(), ZERO)
+    after = in_month = purchases = paid = ZERO
+    if ids:
+        for date, amount in (
+            await session.execute(select(Expense.expense_date, Expense.amount).where(Expense.card_id.in_(ids)))
+        ).all():
+            if date >= end:
+                after += amount
+            elif date >= start:
+                in_month += amount
+                purchases += amount
+        for kind, date, amount in (
+            await session.execute(
+                select(CreditOperation.kind, CreditOperation.op_date, CreditOperation.amount).where(
+                    CreditOperation.card_id.in_(ids), CreditOperation.amount.is_not(None)
+                )
+            )
+        ).all():
+            change = -amount if kind == "payment" else amount
+            if date >= end:
+                after += change
+            elif date >= start:
+                in_month += change
+                if kind == "payment":
+                    paid += amount
+                elif kind == "interest":
+                    purchases += amount
+    cards_end = now - after
+    return MonthDebts(
+        cards_start=cards_end - in_month,
+        cards_end=cards_end,
+        purchases=purchases,
+        paid=paid,
+        loans=sum((r.debt for r in loans), ZERO),
+    )

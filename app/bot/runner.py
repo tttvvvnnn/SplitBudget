@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 
 from app.bot.bot_instance import bot, dp
-from app.bot.handlers import payments, quick, report, settle, start, subscriptions, web_login
+from app.bot.handlers import credits, payments, quick, report, settle, start, subscriptions, web_login
 from app.bot.middlewares import MemberTrackingMiddleware
 
 logger = logging.getLogger(__name__)
@@ -21,6 +21,7 @@ def configure_dispatcher() -> None:
     dp.include_router(web_login.router)
     dp.include_router(start.router)
     dp.include_router(payments.router)
+    dp.include_router(credits.router)
     dp.include_router(report.router)
     dp.include_router(settle.router)
     dp.include_router(subscriptions.router)

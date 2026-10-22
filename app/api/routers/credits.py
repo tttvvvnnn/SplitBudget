@@ -125,7 +125,7 @@ async def update_card(card_id: int, payload: CreditCardIn, ctx: ChatContext = De
     """Название, лимит, даты, категория. Долг здесь не меняется — для этого «Сверить с банком»."""
     card = await _card(ctx, card_id)
     if payload.grace_until != card.grace_until or payload.payment_date != card.payment_date:
-        card.reminders_sent = ""
+        card.reminders_sent = ",".join(k for k in card.reminders_sent.split(",") if k.startswith("stmt:"))
     _apply(card, payload)
     await ctx.session.commit()
     return await _card_out(ctx, card, dt.date.today())
