@@ -58,7 +58,7 @@ async function renderGoalsTab() {
     </div>
     ${goals.length === 0
       ? '<div class="empty-state">Целей пока нет.<br>Нажмите «+», например: «Отпуск 200 000 к июлю».</div>'
-      : goals.map(goalCardHtml).join("")}`;
+      : `<div class="card-grid">${goals.map(goalCardHtml).join("")}</div>`}`;
   content.querySelectorAll(".goal-card").forEach((el) => {
     el.addEventListener("click", () => openGoalSheet(goals.find((g) => g.id === Number(el.dataset.id))));
   });

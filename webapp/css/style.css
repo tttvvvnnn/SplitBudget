@@ -1675,41 +1675,62 @@ button:active, .expense-card:active, .budget-card:active, .obligation-row:active
 }
 @keyframes toast-in { from { opacity: 0; transform: translate(-50%, 8px); } }
 
-/* ---------------- Широкий экран: веб-версия на ПК, развёрнутый Telegram Desktop ----------------
-   Таббар и «+» уходят: слева боковая панель с пространствами и разделами, «Добавить» —
-   кнопкой в шапке, шторки — окнами по центру. Контент — колонкой до 1040px. */
+/* ---------------- Раскладка широкого экрана (веб-версия на ПК) ----------------
+   Вкладки размечают блоки обёртками: .tab-toolbar (месяц, переключатели, итог),
+   .dash (колонки: .two — две равные, .main-aside — список + колонка сводки справа,
+   .aside-first — сводка в разметке первой, на экране справа), .dash-col, .card-grid,
+   .stats-grid. На телефоне обёртки прозрачны: блоки идут одной лентой, как раньше. */
+
+.tab-toolbar, .dash, .dash-col, .card-grid, .stats-grid, .stats-panel { display: contents; }
 
 @media (min-width: 1000px) {
-  :root { --sidebar-w: 260px; --content-max: 1040px; }
+  :root {
+    --sidebar-w: 248px;
+    --gap: 20px;
+    --float: 16px; /* отступ плавающих панелей от края окна */
+    --header-h: 76px;
+  }
+
+  /* Свечение фона заметнее: на большом экране стеклу нужно, что размывать */
+  body::before {
+    background:
+      radial-gradient(40% 50% at 8% 0%, var(--aura-1), transparent 70%),
+      radial-gradient(35% 45% at 100% 10%, var(--aura-2), transparent 70%),
+      radial-gradient(45% 50% at 60% 100%, var(--aura-3), transparent 70%),
+      radial-gradient(30% 40% at 30% 60%, var(--aura-2), transparent 70%),
+      var(--page-bg);
+  }
 
   #app {
-    padding-left: var(--sidebar-w);
-    padding-bottom: 32px;
+    padding: 0 calc(var(--float) + 8px) 32px calc(var(--sidebar-w) + var(--float) * 2 + 8px);
   }
 
   .tabbar, .fab, .mobile-only { display: none !important; }
 
+  /* ---- Боковая панель: плавающее стекло ---- */
   .sidebar {
     display: flex;
     flex-direction: column;
     gap: 2px;
     position: fixed;
-    top: 0;
-    bottom: 0;
-    left: 0;
+    top: var(--float);
+    bottom: var(--float);
+    left: var(--float);
     width: var(--sidebar-w);
-    padding: 20px 14px 16px;
+    padding: 20px 12px 14px;
     overflow-y: auto;
+    border-radius: 28px;
     background: var(--glass-strong);
     -webkit-backdrop-filter: var(--glass-blur-strong);
     backdrop-filter: var(--glass-blur-strong);
-    border-right: 1px solid var(--glass-edge);
+    border: 1px solid var(--glass-edge);
+    box-shadow: var(--glass-highlight), var(--glass-shadow);
     z-index: 6;
   }
-  .sidebar .brand-row { font-size: 17px; gap: 8px; margin: 0 8px 18px; }
+  .sidebar .brand-row { font-size: 17px; gap: 8px; margin: 0 10px 16px; }
   .sidebar .brand-row .brand-mark { width: 26px; height: 26px; }
   .side-label {
-    margin: 14px 10px 6px;
+    margin: 14px 12px 6px;
     font-size: 11.5px;
     font-weight: 600;
     letter-spacing: 0.4px;
@@ -1724,9 +1745,9 @@ button:active, .expense-card:active, .budget-card:active, .obligation-row:active
     gap: 10px;
     width: 100%;
     min-height: 40px;
-    padding: 8px 10px;
-    border: none;
-    border-radius: 12px;
+    padding: 8px 12px;
+    border: 1px solid transparent;
+    border-radius: 14px;
     background: none;
     color: var(--text);
     font-size: 14.5px;
@@ -1738,17 +1759,33 @@ button:active, .expense-card:active, .budget-card:active, .obligation-row:active
   .side-item .icon { width: 20px; height: 20px; flex-shrink: 0; color: var(--hint); }
   .side-emoji { width: 20px; text-align: center; flex-shrink: 0; }
   .side-item:hover { background: var(--accent-soft); }
-  .side-item.active { background: var(--accent-soft); color: var(--link); font-weight: 600; }
+  .side-item.active {
+    background: var(--card-bg);
+    border-color: var(--glass-edge);
+    box-shadow: var(--glass-highlight), 0 4px 14px rgba(24, 74, 130, 0.12);
+    color: var(--link);
+    font-weight: 600;
+  }
   .side-item.active .icon { color: var(--link); }
   .side-item.muted { color: var(--hint); }
 
-  /* Шапка и контент — одной колонкой по центру свободного места */
+  /* ---- Шапка: плавающая стеклянная полоса над контентом ---- */
   .header {
-    padding: 22px max(32px, calc((100% - var(--content-max)) / 2)) 18px;
+    top: var(--float);
+    margin-top: var(--float);
+    min-height: var(--header-h);
+    display: flex;
+    align-items: center;
+    padding: 14px 22px;
+    border-radius: 24px;
+    border: 1px solid var(--glass-edge);
+    background: var(--glass-strong);
+    box-shadow: var(--glass-highlight), var(--glass-shadow);
   }
   .header .brand-row, .header .space-switcher { display: none; }
-  .header h1 { font-size: 28px; }
-  .header .sub { font-size: 14px; margin-top: 2px; }
+  .header-main { flex: 1; align-items: center; }
+  .header h1 { font-size: 26px; }
+  .header .sub { font-size: 13.5px; margin-top: 2px; }
   .header-add {
     display: flex;
     align-items: center;
@@ -1760,57 +1797,175 @@ button:active, .expense-card:active, .budget-card:active, .obligation-row:active
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 6px 18px rgba(36, 129, 204, 0.3);
   }
   .header-add svg { width: 18px; height: 18px; }
-  /* бейдж версии стоит в углу шапки — сдвигаем, чтобы не наезжал на «Добавить» */
-  .version-badge { top: 6px; right: 12px; }
+  .version-badge { top: 6px; right: 16px; }
 
   .content {
     width: 100%;
-    max-width: calc(var(--content-max) + 64px);
+    max-width: 1800px;
     margin: 0 auto;
-    padding: 18px 32px 24px;
+    padding: var(--gap) 0 0;
   }
 
-  /* Мышь: подсветка под курсором вместо «гаснет при нажатии» */
-  .expense-card, .budget-card, .obligation-row, .income-row, .stats-cat, .card[data-id] { cursor: pointer; }
-  .expense-card:hover, .budget-card:hover, .obligation-row:hover, .income-row:hover,
-  .stats-cat:hover, .card[data-id]:hover {
-    border-color: color-mix(in srgb, var(--link) 35%, transparent);
+  /* ---- Строка управления вкладки: месяц, переключатели, итог — в одну линию ---- */
+  .tab-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 18px;
+    padding: 8px 12px 8px 8px;
+    margin-bottom: var(--gap);
+    border-radius: 22px;
+    background: var(--card-bg);
+    -webkit-backdrop-filter: var(--glass-blur);
+    backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--glass-edge);
+    box-shadow: var(--glass-highlight), var(--glass-shadow);
   }
+  /* только переключатель месяца — полоса по его ширине, а не на весь экран */
+  .tab-toolbar:has(> :only-child) { width: max-content; }
+  .tab-toolbar .month-picker { padding: 0; gap: 6px; }
+  .tab-toolbar .month-picker button { width: 36px; height: 36px; font-size: 20px; }
+  .tab-toolbar .month-picker .label { font-size: 16px; }
+  .tab-toolbar .share-toggle { margin: 0; }
+  .tab-toolbar .period-dates { margin: 0; }
+  .tab-toolbar .total-line { margin: 0 0 0 auto; font-size: 26px; }
+  .tab-toolbar .total-delta { margin: 0; text-align: right; }
+  .tab-toolbar .top-actions { padding: 0; margin: 0; }
+  /* в «Тратах» итог не первый — «Фильтр/Категории» стоят за ним справа */
+  .tab-toolbar .total-line + .top-actions { margin-left: 4px; }
+
+  /* ---- Колонки ---- */
+  .dash { display: grid; gap: var(--gap); align-items: start; }
+  .dash.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dash.main-aside { grid-template-columns: minmax(0, 1fr) 360px; }
+  .dash.aside-first > .dash-col:first-child { grid-column: 2; grid-row: 1; }
+  .dash.aside-first > .dash-col:last-child { grid-column: 1; grid-row: 1; }
+  .dash-col { display: block; min-width: 0; }
+  .dash-col:empty { display: none; }
+  .dash.two:has(> .dash-col:empty) { grid-template-columns: minmax(0, 1fr); }
+  .dash-col > .section-title:first-child { margin-top: 0; }
+  .dash-aside { position: sticky; top: calc(var(--header-h) + var(--float) * 2); }
+
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 14px;
+  }
+  .card-grid > .card { margin: 0; }
+
+  /* «Траты»: фильтр всегда открыт, баланс — в колонке сводки справа */
+  #filter-panel {
+    display: grid !important;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr);
+    gap: 10px;
+    margin: 0 0 12px !important;
+  }
+  #filter-panel .field-row { display: contents; }
+  #filter-panel .field { margin: 0; }
+  #filter-panel > .btn { grid-column: 1 / -1; justify-self: start; margin-top: 0 !important; }
+  #filter-toggle-btn { display: none; }
+  .content > .balance-banner { display: none; }
+
+  /* ---- Колонка «Сводка месяца» (js/month-aside.js) ---- */
+  .aside-card { padding: 16px 18px; margin-bottom: 14px; }
+  .aside-link { cursor: pointer; }
+  .aside-title {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    color: var(--hint);
+    margin-bottom: 10px;
+  }
+  .aside-title .chevron { font-size: 16px; line-height: 1; text-transform: none; }
+  .aside-total { font-size: 30px; font-weight: 700; letter-spacing: -0.5px; font-variant-numeric: tabular-nums; }
+  .aside-sub { font-size: 13px; color: var(--hint); margin-top: 2px; }
+  .aside-forecast {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    font-size: 13.5px;
+    color: var(--hint);
+  }
+  .aside-forecast b { color: var(--text); font-variant-numeric: tabular-nums; }
+  .aside-cat + .aside-cat { margin-top: 10px; }
+  .aside-cat-head { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; }
+  .aside-cat-head b { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .aside-bar { height: 6px; margin-top: 6px; border-radius: 3px; background: var(--accent-soft); overflow: hidden; }
+  .aside-bar > div { height: 100%; border-radius: 3px; }
+
+  /* ---- Статистика: панели сеткой ---- */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: var(--gap);
+    align-items: start;
+  }
+  .stats-grid > *, .stats-split > *, .stats-pair > * { grid-column: span 6; margin-bottom: 0; min-width: 0; }
+  .stats-split, .stats-pair { display: contents; }
+  .stats-split > :first-child { grid-column: span 5; }
+  .stats-split > :last-child { grid-column: span 7; }
+  .stats-pair > :only-child, .stats-panel.wide, .stats-grid > .income-vs,
+  .stats-grid > .empty-state { grid-column: 1 / -1; }
+  .stats-panel { display: block; }
+  .stats-grid .section-title { margin-top: 0; }
+  .stats-grid .card, .stats-grid .chart-wrap { margin-bottom: 0; }
+  .stats-grid .chart-box { height: 240px; }
+  .stats-grid .donut-box { height: 300px; }
+  .cal-day { aspect-ratio: auto; height: 46px; }
+
+  /* ---- Мышь: подсветка под курсором вместо «гаснет при нажатии» ---- */
+  .expense-card, .budget-card, .obligation-row, .income-row, .stats-cat, .card[data-id],
+  .goal-card, .plan-row { cursor: pointer; }
+  .expense-card:hover, .budget-card:hover, .obligation-row:hover, .income-row:hover,
+  .stats-cat:hover, .card[data-id]:hover, .goal-card:hover, .aside-link:hover {
+    border-color: color-mix(in srgb, var(--link) 40%, transparent);
+    box-shadow: var(--glass-highlight), 0 10px 28px rgba(24, 74, 130, 0.14);
+  }
+  .expense-card { transition: border-color 0.15s ease, box-shadow 0.15s ease; }
+  /* список плотнее: на ПК видно вдвое больше трат без прокрутки */
+  .dash-col > #expense-list .expense-card { padding: 9px 16px; margin-bottom: 6px; gap: 14px; }
+  .dash-col > #expense-list .expense-thumb { width: 38px; height: 38px; border-radius: 11px; }
   button:active, .expense-card:active, .budget-card:active, .obligation-row:active,
   .income-row:active, .balance-banner:active, .chip:active, .stats-cat:active { opacity: 0.8; }
 
-  /* Шторки — окна по центру экрана */
-  .sheet-overlay { align-items: center; justify-content: center; padding: 32px; }
+  /* ---- Формы: стеклянная панель выезжает справа, список за ней остаётся виден ---- */
+  .sheet-overlay {
+    align-items: stretch;
+    justify-content: flex-end;
+    padding: var(--float);
+    background: rgba(0, 0, 0, 0.22);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
   .sheet {
-    width: 560px;
+    width: 500px;
     max-width: 100%;
-    max-height: calc(100vh - 64px);
-    border-radius: 24px;
+    max-height: none;
+    border-radius: 28px;
     border: 1px solid var(--glass-edge);
-    box-shadow: var(--glass-highlight), 0 24px 60px rgba(0, 0, 0, 0.28);
-    padding: 22px 24px 24px;
-    animation: dialog-in 0.18s ease-out;
+    box-shadow: var(--glass-highlight), 0 24px 70px rgba(0, 0, 0, 0.3);
+    padding: 24px 26px 26px;
+    animation: drawer-in 0.24s cubic-bezier(0.2, 0.9, 0.3, 1);
   }
   .sheet-handle { display: none; }
-  @keyframes dialog-in { from { transform: scale(0.96); opacity: 0; } }
+  @keyframes drawer-in { from { transform: translateX(40px); opacity: 0; } }
 
   .toast { bottom: 32px; margin-left: calc(var(--sidebar-w) / 2); }
+}
 
-  /* Статистика: кольцо слева, категории справа */
-  .stats-split {
-    display: grid;
-    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
-    gap: 12px;
-    align-items: start;
-  }
-  .stats-split > * { margin-bottom: 0; }
-  /* пары блоков (по дням + календарь, дни недели + регулярные, топ + места) — рядом;
-     если второго блока нет, первый растягивается на всю ширину */
-  .stats-pair {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
-    gap: 0 12px;
-    align-items: start;
-  }
-  .cal-day { aspect-ratio: auto; height: 46px; }
+/* Очень широкий экран: статистика в три колонки; одиночный блок пары занимает две
+   и встаёт в свободное место рядом (dense) */
+@media (min-width: 1600px) {
+  .stats-grid { grid-auto-flow: row dense; }
+  .stats-grid > *, .stats-pair > * { grid-column: span 4; }
+  .stats-pair > :only-child { grid-column: span 8; }
+  .stats-split > :first-child { grid-column: span 4; }
+  .stats-split > :last-child { grid-column: span 4; }
+  .dash.main-aside { grid-template-columns: minmax(0, 1fr) 400px; }
 }

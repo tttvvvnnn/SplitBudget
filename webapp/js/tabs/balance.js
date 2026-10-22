@@ -20,7 +20,10 @@ async function renderBalanceTab() {
   }
 
   const debts = state.balances.simplified_debts;
+  // .dash — две колонки на широком экране (style.css), на телефоне прозрачна
   content.innerHTML = `
+    <div class="dash two">
+    <div class="dash-col">
     <div class="section-title">Кто кому должен</div>
     ${debts.length === 0
       ? '<div class="card empty-state" style="padding:20px;">Все в расчёте 🎉</div>'
@@ -33,7 +36,8 @@ async function renderBalanceTab() {
           </div>
         </div>`).join("")}
     ${debts.length > 0 ? '<button type="button" class="btn secondary small" id="settle-up-btn" style="margin-top:4px;">🤝 Позвать рассчитаться в чат</button>' : ""}
-
+    </div>
+    <div class="dash-col">
     <div class="section-title">Баланс участников</div>
     <div class="card">
       ${state.balances.balances.map((b) => `
@@ -53,6 +57,8 @@ async function renderBalanceTab() {
             <span>${fmtMoney(s.amount)}</span>
           </div>`).join("")}
       </div>` : ""}
+    </div>
+    </div>
   `;
 
   content.querySelectorAll(".settle-btn").forEach((btn) => {

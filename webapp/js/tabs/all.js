@@ -5,6 +5,8 @@ import { categoryIcon, monthLabel, shiftMonth, fmtMoney, escapeHtml } from "../f
 import { openExpenseModal, dayHeaderLabel } from "./expenses.js";
 import { categoryBadgeHtml } from "../category-fields.js";
 import { openCategoriesSheet } from "../categories.js";
+import { renderMonthAside } from "../month-aside.js";
+import { switchTab } from "../shell.js";
 
 /* ---------------- Вкладка «Траты» в «Моих финансах» ----------------
    Личные траты и траты семейных чатов, которые пользователь оплатил или в которых у него
@@ -70,17 +72,23 @@ async function renderAllExpensesTab() {
     if (!spaces.some((s) => s.id === e.chat_id)) spaces.push({ id: e.chat_id, label: spaceLabel(e) });
   }
 
+  // .tab-toolbar и .dash — раскладка широкого экрана (style.css); на телефоне обёртки
+  // прозрачны (display: contents), порядок блоков тот же
   content.innerHTML = `
-    <div class="month-picker">
-      <button data-dir="-1" aria-label="Предыдущий месяц">‹</button>
-      <div class="label">${monthLabel(state.month)}</div>
-      <button data-dir="1" aria-label="Следующий месяц">›</button>
+    <div class="tab-toolbar">
+      <div class="month-picker">
+        <button data-dir="-1" aria-label="Предыдущий месяц">‹</button>
+        <div class="label">${monthLabel(state.month)}</div>
+        <button data-dir="1" aria-label="Следующий месяц">›</button>
+      </div>
+      ${shareToggleHtml()}
+      <div class="total-line" id="total-line"></div>
+      <div class="top-actions">
+        <button class="btn small secondary" id="categories-btn">🏷 Категории</button>
+      </div>
     </div>
-    ${shareToggleHtml()}
-    <div class="total-line" id="total-line"></div>
-    <div class="top-actions">
-      <button class="btn small secondary" id="categories-btn">🏷 Категории</button>
-    </div>
+    <div class="dash main-aside">
+    <div class="dash-col">
     <div class="field-row" style="margin-bottom: 10px;">
       <div class="field">
         <input type="text" id="all-search" placeholder="Поиск по названию…" value="${escapeHtml(allFilters.search)}">
@@ -92,7 +100,11 @@ async function renderAllExpensesTab() {
         </select>
       </div>
     </div>
-    <div id="expense-list"></div>`;
+    <div id="expense-list"></div>
+    </div>
+    <aside class="dash-col dash-aside" id="month-aside"></aside>
+    </div>`;
+  renderMonthAside(document.getElementById("month-aside"), switchTab);
 
   content.querySelectorAll(".month-picker button").forEach((b) => {
     b.addEventListener("click", async () => {
@@ -108,6 +120,7 @@ async function renderAllExpensesTab() {
   bindShareToggle(content, () => {
     content.querySelectorAll("#share-toggle button").forEach((x) => x.classList.toggle("active", x.dataset.mode === shareMode()));
     renderList(items);
+    renderMonthAside(document.getElementById("month-aside"), switchTab);
   });
   document.getElementById("all-search").addEventListener("input", (ev) => {
     allFilters.search = ev.target.value;

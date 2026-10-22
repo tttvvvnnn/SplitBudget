@@ -133,7 +133,10 @@ async function renderCreditsTab() {
   const archived = cards.filter((c) => c.is_archived);
   const empty = !cards.length && !loans.length;
 
+  // .dash — две колонки на широком экране (style.css): карты слева, кредиты справа
   content.innerHTML = `
+    <div class="dash two">
+    <div class="dash-col">
     ${empty ? "" : `
       <div class="card credit-summary">
         <div class="hint-text">Всего долг</div>
@@ -142,11 +145,15 @@ async function renderCreditsTab() {
       </div>`}
     <div class="section-title">💳 Кредитные карты</div>
     ${active.length ? active.map(cardHtml).join("") : '<div class="empty-state">Карт пока нет.<br>Нажмите «+», чтобы добавить кредитку.</div>'}
+    </div>
+    <div class="dash-col">
     <div class="section-title">🏦 Кредиты</div>
     ${loans.map(loanHtml).join("")}
     <button class="btn secondary" id="add-loan">＋ Добавить кредит</button>
     <div class="hint-text" style="margin: 10px 4px 0;">Платёж по кредиту записывается тратой целиком и уменьшает остаток. За 7, 3 и 1 день до срока бот напомнит в личке — и про карты, и про кредиты.</div>
-    ${archived.length ? `<div class="section-title">Архив</div>${archived.map(cardHtml).join("")}` : ""}`;
+    ${archived.length ? `<div class="section-title">Архив</div>${archived.map(cardHtml).join("")}` : ""}
+    </div>
+    </div>`;
 
   content.querySelectorAll("[data-card]").forEach((el) => {
     el.addEventListener("click", () => openCardSheet(cards.find((c) => c.id === Number(el.dataset.card))));

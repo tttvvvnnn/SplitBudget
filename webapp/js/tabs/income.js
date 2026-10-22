@@ -46,12 +46,18 @@ async function renderIncomeTab() {
       </div>`;
   }
 
+  // .tab-toolbar и .dash — раскладка широкого экрана (style.css): «Свободно» — колонкой
+  // справа, на телефоне обёртки прозрачны
   content.innerHTML = `
+    <div class="tab-toolbar">
     <div class="month-picker">
       <button data-dir="-1" aria-label="Предыдущий месяц">‹</button>
       <div class="label">${monthLabel(state.month)}</div>
       <button data-dir="1" aria-label="Следующий месяц">›</button>
     </div>
+    </div>
+    <div class="dash main-aside aside-first">
+    <div class="dash-col dash-aside">
     <div class="card free-card">
       <div class="hint-text">Свободно в этом месяце</div>
       <div class="free-amount ${free < 0 ? "negative" : ""}">${fmtMoney(free)}</div>
@@ -64,7 +70,8 @@ async function renderIncomeTab() {
       </div>
       ${untilNext}
     </div>
-
+    </div>
+    <div class="dash-col">
     <div class="section-title">🔁 Регулярные доходы</div>
     ${data.sources.length === 0
       ? '<div class="hint-text" style="margin: 0 4px 10px;">Добавьте зарплату и аванс — в их день бот спросит «Пришла?», а здесь будет видно, сколько можно тратить до следующего поступления.</div>'
@@ -91,7 +98,9 @@ async function renderIncomeTab() {
             <div class="hint-text">${shortDate(i.income_date)}</div>
           </div>
           <div class="ob-right"><div class="ob-amount income-plus">+${fmtMoney(i.amount)}</div></div>
-        </div>`).join("")}`;
+        </div>`).join("")}
+    </div>
+    </div>`;
 
   content.querySelectorAll(".month-picker button").forEach((b) => {
     b.addEventListener("click", async () => {

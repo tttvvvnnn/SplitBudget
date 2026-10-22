@@ -7,6 +7,7 @@ import { avatarHtml, loadAvatarsIn, memberById } from "../members.js";
 import { openSheet, closeSheet, useMainButtonFor, showFormError } from "../sheet.js";
 import { openAddMemberModal } from "../member-modals.js";
 import { switchTab } from "../shell.js";
+import { renderMonthAside } from "../month-aside.js";
 import { renderAllExpensesTab } from "./all.js";
 import {
   categoryFieldsHtml, bindCategoryFields, setCategory, showCategoryHint, readCategoryFields, categoryBadgeHtml,
@@ -59,18 +60,23 @@ async function renderExpensesTab() {
 
   const hasFilters = !!(state.filters.search || state.filters.category || state.filters.payer);
 
+  // .tab-toolbar и .dash — раскладка широкого экрана (style.css), на телефоне прозрачны
   content.innerHTML = `
     ${balanceBannerHtml()}
-    <div class="month-picker">
-      <button data-dir="-1" aria-label="Предыдущий месяц">‹</button>
-      <div class="label">${monthLabel(state.month)}</div>
-      <button data-dir="1" aria-label="Следующий месяц">›</button>
+    <div class="tab-toolbar">
+      <div class="month-picker">
+        <button data-dir="-1" aria-label="Предыдущий месяц">‹</button>
+        <div class="label">${monthLabel(state.month)}</div>
+        <button data-dir="1" aria-label="Следующий месяц">›</button>
+      </div>
+      <div class="total-line" id="total-line"></div>
+      <div class="top-actions">
+        <button class="btn small secondary" id="filter-toggle-btn">🔍 Фильтр${hasFilters ? " •" : ""}</button>
+        <button class="btn small secondary" id="categories-btn">🏷 Категории</button>
+      </div>
     </div>
-    <div class="total-line" id="total-line"></div>
-    <div class="top-actions">
-      <button class="btn small secondary" id="filter-toggle-btn">🔍 Фильтр${hasFilters ? " •" : ""}</button>
-      <button class="btn small secondary" id="categories-btn">🏷 Категории</button>
-    </div>
+    <div class="dash main-aside">
+    <div class="dash-col">
     <div id="filter-panel" style="display:${state.filtersOpen ? "block" : "none"}; margin: 0 0 10px;">
       <div class="field">
         <input type="text" id="filter-search" placeholder="Поиск по названию…" value="${escapeHtml(state.filters.search)}">
@@ -90,8 +96,12 @@ async function renderExpensesTab() {
         </div>
       </div>
     </div>
-    <div id="expense-list"></div>`;
+    <div id="expense-list"></div>
+    </div>
+    <aside class="dash-col dash-aside" id="month-aside"></aside>
+    </div>`;
   hideFamilyOnly(content);
+  renderMonthAside(document.getElementById("month-aside"), switchTab);
 
   const balanceBanner = document.getElementById("balance-banner");
   if (balanceBanner) balanceBanner.addEventListener("click", () => switchTab("balance"));

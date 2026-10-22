@@ -123,17 +123,24 @@ async function renderPlanTab() {
   // Можно тратить — остатки расходных статей и «Свободно» (накопления не трогаем)
   const totalLeft = plan.items.reduce((s, i) => s + (i.kind === "spend" || i.kind === "free" ? Number(i.remaining) : 0), 0);
 
+  // .tab-toolbar и .dash — раскладка широкого экрана (style.css): сводка — колонкой справа
   content.innerHTML = `
+    <div class="tab-toolbar">
     <div class="month-picker">
       <button data-dir="-1" aria-label="Предыдущий месяц">‹</button>
       <div class="label">${shortDate(plan.start)} – ${shortDate(plan.end)}</div>
       <button data-dir="1" aria-label="Следующий месяц">›</button>
     </div>
+    </div>
+    <div class="dash main-aside aside-first">
+    <div class="dash-col dash-aside">
     <div class="card plan-summary">
       <div>${incomeLine}</div>
       <div class="hint-text">Можно тратить <b>${fmtMoney(totalLeft)}</b> · распределено ${pctText(plan.percent_total)}</div>
       <button class="link-btn" id="plan-settings">Месяц плана начинается ${plan.start_day}-го числа</button>
     </div>
+    </div>
+    <div class="dash-col">
     ${items.length === 0
       ? '<div class="empty-state">Статей пока нет.<br>Нажмите «+» и задайте, какой процент от каждого поступления идёт на еду, отпуск, кредитки и т.д. Остаток достаётся «Свободно».</div>'
       : ""}
@@ -141,7 +148,9 @@ async function renderPlanTab() {
       ${sortedItems(items).map(itemRowHtml).join("")}
       ${itemRowHtml(free)}
     </div>
-    <div class="hint-text" style="margin: 4px 4px 16px;">В конце месяца плана статьи обнуляются: остатки и перерасходы переходят в «Свободно».</div>`;
+    <div class="hint-text" style="margin: 4px 4px 16px;">В конце месяца плана статьи обнуляются: остатки и перерасходы переходят в «Свободно».</div>
+    </div>
+    </div>`;
 
   content.querySelectorAll(".month-picker button").forEach((b) => {
     b.addEventListener("click", async () => {
