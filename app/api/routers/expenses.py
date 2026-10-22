@@ -12,14 +12,16 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import ChatContext, get_chat_context
+from app.api.routers.categories import nodes_out
 from app.bot.notify import notify_budget_alerts, notify_expense_deleted, notify_new_expense
-from app.shared.ai_category import suggest_with_ai
+from app.shared.ai_category import apply_proposal, cached_proposal, decline, suggest_with_ai
 from app.shared.autocategory import learn_category, suggest_category
 from app.shared.budgets import alerts_after_expense
 from app.shared.config import settings
 from app.shared.crud import build_custom_shares, build_equal_shares
+from app.shared.custom_categories import tree_for
 from app.shared.models import Expense, ExpenseShare, Member
-from app.shared.schemas import CategorySuggestionOut, ExpenseOut, ShareOut
+from app.shared.schemas import AiProposalAcceptedOut, AiProposalOut, CategorySuggestionOut, ExpenseOut, ShareOut
 
 router = APIRouter(tags=["expenses"])
 
@@ -225,7 +227,9 @@ async def _check_budgets(ctx: ChatContext, expense_id: int) -> None:
 async def category_suggestion(title: str, ai: bool = False, ctx: ChatContext = Depends(get_chat_context)):
     """Подсказка категории по названию траты — мини-апп подставляет её в форму, пока
     пользователь печатает название. null — угадать не получилось. ai=1 — если выученное и
-    словарь молчат, спросить ИИ (мини-апп делает это реже, после паузы в наборе)."""
+    словарь молчат, спросить ИИ (мини-апп делает это реже, после паузы в наборе). ИИ может
+    предложить новую категорию/подкатегорию (proposal) — мини-апп спрашивает согласия и
+    создаёт её обычным POST /categories."""
     if ai:
         suggestion = await suggest_with_ai(ctx.session, ctx.chat, title)
         await ctx.session.commit()  # кэш ответа ИИ
@@ -233,9 +237,39 @@ async def category_suggestion(title: str, ai: bool = False, ctx: ChatContext = D
         suggestion = await suggest_category(ctx.session, ctx.chat.id, title)
     if suggestion is None:
         return None
+    proposal = suggestion.proposal
     return CategorySuggestionOut(
-        category=suggestion.category, subcategory=suggestion.subcategory, source=suggestion.source
+        category=suggestion.category,
+        subcategory=suggestion.subcategory,
+        source=suggestion.source,
+        proposal=AiProposalOut(
+            action=proposal.action, category=proposal.category, subcategory=proposal.subcategory, icon=proposal.icon
+        ) if proposal else None,
     )
+
+
+@router.post("/chats/{chat_id}/category-suggestion/accept", response_model=AiProposalAcceptedOut)
+async def accept_category_proposal(title: str, ctx: ChatContext = Depends(get_chat_context)):
+    """«Создать» на предложение ИИ: создаём категорию/подкатегорию (уже существующие или
+    скрытые не дублируем) и возвращаем, что выбрать в форме, и обновлённое дерево."""
+    proposal = await cached_proposal(ctx.session, ctx.chat.id, title)
+    if proposal is None:
+        raise HTTPException(status_code=404, detail="Предложение устарело — выберите категорию сами")
+    try:
+        category, subcategory = await apply_proposal(ctx.session, ctx.chat, proposal)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await ctx.session.commit()
+    return AiProposalAcceptedOut(
+        category=category, subcategory=subcategory, categories=nodes_out(await tree_for(ctx.session, ctx.chat))
+    )
+
+
+@router.post("/chats/{chat_id}/category-suggestion/decline", status_code=204)
+async def decline_category_proposal(title: str, ctx: ChatContext = Depends(get_chat_context)):
+    """«Не надо» на предложение ИИ создать категорию — для этого названия больше не предлагаем."""
+    await decline(ctx.session, ctx.chat.id, title)
+    await ctx.session.commit()
 
 
 @router.get("/chats/{chat_id}/photos/{filename}")

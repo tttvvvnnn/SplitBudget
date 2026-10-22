@@ -229,3 +229,43 @@ def test_hidden_chat_not_offered_and_returns_on_use(client, seeded_chat, bot, au
     cb, _ = _group_callback(bot, chat_id, uid, uid, "пицца 1200", "split")
     asyncio.run(quick.on_group_choice(cb))
     assert [c["id"] for c in client.get("/api/my-chats", headers=headers).json()] == [chat_id]
+
+
+def test_quick_ai_proposal_buttons(client, seeded_chat, bot, monkeypatch):
+    from app.shared import ai_category
+    from app.shared.ai_category import AiAnswer
+    from app.shared.config import settings
+
+    async def _ask(title, tree, examples):
+        return {
+            "вейп": AiAnswer("new_category", "Табак", "Вейпы", "🚬"),
+            "кальян": AiAnswer("new_category", "Табак", "Кальян", "🚬"),
+        }[title.lower()]
+
+    monkeypatch.setattr(settings, "AI_API_KEY", "test-key")
+    monkeypatch.setattr(ai_category, "ask_provider", _ask)
+    uid = seeded_chat.alice_tg_id
+
+    # Новая категория — трата пока в «Другом», под ней «✨ Создать»
+    asyncio.run(quick.quick_expense(bot.message(uid, "вейп 1500")))
+    [(eid, _, _, cat, _, _)] = _expenses(uid)
+    assert cat == "Другое"
+    text, markup = bot.sent[-1]
+    assert f"qe:ai:{eid}" in _buttons(markup) and "Табак › Вейпы" in markup.inline_keyboard[0][0].text
+    asyncio.run(quick.on_quick_button(bot.callback(uid, f"qe:ai:{eid}")))
+    assert _expenses(uid)[0][3:5] == ("Табак", "Вейпы")
+    # Запомнил: следующий «вейп» сразу в новой категории, без кнопки
+    asyncio.run(quick.quick_expense(bot.message(uid, "вейп 700")))
+    assert _expenses(uid)[-1][3:5] == ("Табак", "Вейпы")
+    assert not any(b.startswith("qe:ai:") for b in _buttons(bot.sent[-1][1]))
+
+    # «Табак» уже есть — ИИ предлагает только подкатегорию, категория ставится сразу.
+    # «Не надо» — категория остаётся, подкатегорию больше не предлагаем
+    asyncio.run(quick.quick_expense(bot.message(uid, "кальян 900")))
+    kid, *_, cat, sub, _ = _expenses(uid)[-1]
+    assert (cat, sub) == ("Табак", None)
+    assert "Табак › Кальян" in bot.sent[-1][1].inline_keyboard[0][0].text
+    asyncio.run(quick.on_quick_button(bot.callback(uid, f"qe:noai:{kid}")))
+    asyncio.run(quick.quick_expense(bot.message(uid, "кальян 900")))
+    assert _expenses(uid)[-1][3:5] == ("Табак", None)
+    assert not any(b.startswith("qe:ai:") for b in _buttons(bot.sent[-1][1]))

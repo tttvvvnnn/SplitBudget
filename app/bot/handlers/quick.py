@@ -20,9 +20,10 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from sqlalchemy import select
 
 from app.bot.notify import notify_budget_alerts, notify_new_expense
+from app.shared.ai_category import AiAnswer, apply_proposal, cached_proposal, decline
 from app.shared.autocategory import learn_category
 from app.shared.budgets import alerts_after_expense
-from app.shared.categories import CATEGORY_TREE
+from app.shared.categories import CATEGORY_TREE, OTHER
 from app.shared.crud import family_chats_of, get_or_create_member, get_or_create_personal_space
 from app.shared.database import async_session_maker
 from app.shared.income import record_income
@@ -74,13 +75,38 @@ def _line(expense: Expense, currency: str) -> str:
     )
 
 
-def _single_markup(expense_id: int, family_chats: list[Chat]) -> InlineKeyboardMarkup:
-    rows = [
+def _proposal_label(proposal: AiAnswer) -> str:
+    where = " › ".join(x for x in (proposal.category, proposal.subcategory) if x)
+    return f"{proposal.icon} {where}" if proposal.action == "new_category" and proposal.icon else where
+
+
+async def _proposal_for(session, expense: Expense) -> AiAnswer | None:
+    """Предложение ИИ создать категорию для этой траты, если оно ещё к ней подходит."""
+    proposal = await cached_proposal(session, expense.chat_id, expense.title)
+    if proposal is None:
+        return None
+    if proposal.action == "new_category" and expense.category == OTHER:
+        return proposal
+    if proposal.action == "new_subcategory" and expense.category == proposal.category and not expense.subcategory:
+        return proposal
+    return None
+
+
+def _single_markup(
+    expense_id: int, family_chats: list[Chat], proposal: AiAnswer | None = None
+) -> InlineKeyboardMarkup:
+    rows = []
+    if proposal is not None:
+        rows.append([
+            InlineKeyboardButton(text=f"✨ Создать «{_proposal_label(proposal)}»", callback_data=f"qe:ai:{expense_id}"),
+            InlineKeyboardButton(text="Не надо", callback_data=f"qe:noai:{expense_id}"),
+        ])
+    rows.append(
         [
             InlineKeyboardButton(text="🏷 Категория", callback_data=f"qe:cat:{expense_id}"),
             InlineKeyboardButton(text="↩️ Отменить", callback_data=f"qe:undo:{expense_id}"),
         ]
-    ]
+    )
     for chat in family_chats[:MAX_FAMILY_BUTTONS]:
         rows.append(
             [
@@ -118,9 +144,11 @@ async def quick_expense(message: Message) -> None:
 
         if len(expenses) == 1 and not incomes:
             expense = expenses[0]
+            proposal = await _proposal_for(session, expense)
+            hint = "\n✨ ИИ предлагает новую категорию для таких трат" if proposal else ""
             await message.answer(
-                f"✅ Записал в «Мои финансы»\n{_line(expense, chat.currency)}",
-                reply_markup=_single_markup(expense.id, family),
+                f"✅ Записал в «Мои финансы»\n{_line(expense, chat.currency)}{hint}",
+                reply_markup=_single_markup(expense.id, family, proposal),
             )
         else:
             parts = []
@@ -259,6 +287,26 @@ async def on_quick_button(callback: CallbackQuery) -> None:
             await _edit(callback, text)
         elif action == "cat":
             await _edit(callback, markup=_category_markup(expense.id))
+        elif action in ("ai", "noai"):
+            family = await _family_chats(session, callback.from_user.id) if chat.is_personal and _in_private(callback) else []
+            proposal = await _proposal_for(session, expense)
+            if action == "noai" or proposal is None:
+                await decline(session, expense.chat_id, expense.title)
+                await session.commit()
+                await _edit(callback, f"{_header(chat)}\n{_line(expense, currency)}", _single_markup(expense.id, family))
+            else:
+                try:
+                    expense.category, expense.subcategory = await apply_proposal(session, chat, proposal)
+                except ValueError as exc:
+                    await callback.answer(str(exc), show_alert=True)
+                    return
+                await learn_category(session, expense.chat_id, expense.title, expense.category, expense.subcategory)
+                await session.commit()
+                await _edit(
+                    callback,
+                    f"{_header(chat)}\n{_line(expense, currency)}\n✨ Создал «{escape(_proposal_label(proposal))}» и запомнил",
+                    _single_markup(expense.id, family),
+                )
         elif action in ("c", "s") and len(nums) >= 2 and 0 <= nums[1] < len(CATEGORY_TREE):
             name, _, subs = CATEGORY_TREE[nums[1]]
             if action == "c" and subs:

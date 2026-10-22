@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.auth import get_current_user
 from app.api.dependencies import ChatContext, get_chat_context
 from app.shared.categories import category_tree_out
+from app.shared.config import settings
 from app.shared.custom_categories import tree_for
 from app.shared.crud import family_chats_of, get_or_create_personal_space
 from app.shared.database import get_session
@@ -20,7 +21,7 @@ from app.shared.models import (
     RecurringParticipant,
     Settlement,
 )
-from app.shared.schemas import CategoryNode, ChatOut, MeOut, MemberCreate, MemberOut, MemberUpdate
+from app.shared.schemas import AiSettingsIn, CategoryNode, ChatOut, MeOut, MemberCreate, MemberOut, MemberUpdate
 
 router = APIRouter(tags=["chats"])
 
@@ -82,7 +83,16 @@ async def get_me(ctx: ChatContext = Depends(get_chat_context)) -> MeOut:
         member=MemberOut.model_validate(ctx.member),
         members=[MemberOut.model_validate(m) for m in members],
         categories=[n.name for n in await tree_for(ctx.session, ctx.chat) if not n.hidden],
+        ai_available=bool(settings.AI_API_KEY),
     )
+
+
+@router.put("/chats/{chat_id}/ai", response_model=ChatOut)
+async def set_ai(payload: AiSettingsIn, ctx: ChatContext = Depends(get_chat_context)) -> ChatOut:
+    """Включить/выключить подсказки категорий от ИИ в этом пространстве."""
+    ctx.chat.ai_enabled = payload.ai_enabled
+    await ctx.session.commit()
+    return ChatOut.model_validate(ctx.chat)
 
 
 @router.get("/chats/{chat_id}/members", response_model=list[MemberOut])

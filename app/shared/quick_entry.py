@@ -131,7 +131,7 @@ async def add_split_expense(
         chat_id=chat.id,
         title=parsed.title,
         amount=parsed.amount,
-        category=suggestion.category if suggestion else OTHER,
+        category=(suggestion.category if suggestion else None) or OTHER,
         subcategory=suggestion.subcategory if suggestion else None,
         expense_date=parsed.date,
         payer_member_id=payer.id,

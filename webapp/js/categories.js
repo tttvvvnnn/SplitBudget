@@ -66,6 +66,11 @@ function openCategoriesSheet(onChange) {
     return `
       <div class="sheet-title">Категории</div>
       <div class="hint-text" style="margin-bottom:12px;">Свои категории есть только в этом пространстве. Базовые можно скрыть: старые траты в них останутся. Свою категорию можно удалить, если в ней нет трат.</div>
+      ${state.aiAvailable ? `
+        <label class="field" style="display:flex; gap:8px; align-items:flex-start; margin-bottom:12px;">
+          <input type="checkbox" id="cat-ai" ${state.chat.ai_enabled ? "checked" : ""}>
+          <span>✨ Подсказки ИИ<br><span class="hint-text">Если категорию не угадать по прошлым тратам и словарю, название траты (без суммы) отправляется ИИ. Он подберёт категорию или предложит создать новую.</span></span>
+        </label>` : ""}
       <button class="btn secondary" id="cat-add">➕ Своя категория</button>
       <div class="cat-list">
         ${nodes.map((n) => {
@@ -100,6 +105,18 @@ function openCategoriesSheet(onChange) {
 
   function bind() {
     overlay.querySelector("#cat-add").addEventListener("click", () => promptNewCategory(null, () => changed()));
+    const aiBox = overlay.querySelector("#cat-ai");
+    if (aiBox) {
+      aiBox.addEventListener("change", async () => {
+        try {
+          state.chat = await api(`/chats/${state.chatId}/ai`, { method: "PUT", body: { ai_enabled: aiBox.checked } });
+          haptic("selection");
+        } catch (e) {
+          aiBox.checked = !aiBox.checked;
+          toast(e.message);
+        }
+      });
+    }
     overlay.querySelectorAll("[data-open]").forEach((el) => {
       el.addEventListener("click", () => {
         haptic("selection");

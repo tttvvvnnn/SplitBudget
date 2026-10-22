@@ -82,7 +82,7 @@ def test_ai_is_asked_only_when_learned_and_dictionary_are_silent(client, seeded_
     assert calls == []
 
     s = _suggest(client, seeded_chat, headers, "Зубной")
-    assert s == {"category": "Здоровье", "subcategory": "Врачи", "source": "ai"}
+    assert s == {"category": "Здоровье", "subcategory": "Врачи", "source": "ai", "proposal": None}
     title, tree, _ = calls[0]
     assert title == "Зубной" and "Здоровье: Аптека, Врачи" in tree and "Другое" not in tree
 
@@ -95,11 +95,87 @@ def test_ai_is_asked_only_when_learned_and_dictionary_are_silent(client, seeded_
     assert len(calls) == 1
 
 
-def test_ai_new_category_is_not_applied_yet(client, seeded_chat, auth_header, fake_ai):
-    _, answers = fake_ai
+def _tree(client, seeded_chat, headers):
+    r = client.get(f"/api/chats/{seeded_chat.chat_id}/categories", headers=headers)
+    return {n["name"]: n for n in r.json()}
+
+
+def test_ai_proposes_new_category_and_creates_on_accept(client, seeded_chat, auth_header, fake_ai):
+    calls, answers = fake_ai
     headers = auth_header(seeded_chat.alice_init_data)
     answers["вейп"] = AiAnswer("new_category", "Табак", "Вейпы", "🚬")
-    assert _suggest(client, seeded_chat, headers, "Вейп") is None
+    s = _suggest(client, seeded_chat, headers, "Вейп")
+    assert s["category"] is None
+    assert s["proposal"] == {"action": "new_category", "category": "Табак", "subcategory": "Вейпы", "icon": "🚬"}
+
+    r = client.post(
+        f"/api/chats/{seeded_chat.chat_id}/category-suggestion/accept", params={"title": "вейп"}, headers=headers
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert (body["category"], body["subcategory"]) == ("Табак", "Вейпы")
+    tree = _tree(client, seeded_chat, headers)
+    assert tree["Табак"]["icon"] == "🚬" and tree["Табак"]["subcategories"] == ["Вейпы"]
+
+    # Дерево поменялось → кэш устарел, ИИ спросят снова; теперь «Табак › Вейпы» существует
+    answers["вейп"] = AiAnswer("existing", "Табак", "Вейпы")
+    assert _suggest(client, seeded_chat, headers, "Вейп")["subcategory"] == "Вейпы"
+    assert len(calls) == 2
+
+
+def test_ai_new_subcategory_sets_category_and_unhides_existing(client, seeded_chat, auth_header, fake_ai):
+    _, answers = fake_ai
+    headers = auth_header(seeded_chat.alice_init_data)
+    answers["ортодонт"] = AiAnswer("new_subcategory", "Здоровье", "Ортодонт")
+    s = _suggest(client, seeded_chat, headers, "Ортодонт")
+    assert (s["category"], s["subcategory"], s["proposal"]["subcategory"]) == ("Здоровье", None, "Ортодонт")
+
+    # ИИ «изобрёл» скрытую базовую категорию — при согласии её просто возвращаем, а не дублируем
+    r = client.put(
+        f"/api/chats/{seeded_chat.chat_id}/categories/hidden",
+        headers=headers,
+        json={"name": "Питомцы", "parent": None, "hidden": True},
+    )
+    assert r.status_code == 200, r.text
+    answers["шуршик"] = AiAnswer("new_category", "питомцы", "Корм", "🐈")
+    assert _suggest(client, seeded_chat, headers, "Шуршик")["proposal"]["category"] == "Питомцы"
+    r = client.post(
+        f"/api/chats/{seeded_chat.chat_id}/category-suggestion/accept",
+        params={"title": "Шуршик"},
+        headers=headers,
+    )
+    assert (r.json()["category"], r.json()["subcategory"]) == ("Питомцы", "Корм")
+    assert not _tree(client, seeded_chat, headers)["Питомцы"]["hidden"]
+
+
+def test_ai_declined_proposal_is_not_offered_again(client, seeded_chat, auth_header, fake_ai):
+    calls, answers = fake_ai
+    headers = auth_header(seeded_chat.alice_init_data)
+    answers["вейп"] = AiAnswer("new_category", "Табак", "Вейпы", "🚬")
+    assert _suggest(client, seeded_chat, headers, "Вейп")["proposal"] is not None
+    r = client.post(
+        f"/api/chats/{seeded_chat.chat_id}/category-suggestion/decline", params={"title": "Вейп"}, headers=headers
+    )
+    assert r.status_code == 204, r.text
+    client.post(f"/api/chats/{seeded_chat.chat_id}/categories", headers=headers, json={"name": "Хобби2", "parent": None})
+    assert _suggest(client, seeded_chat, headers, "Вейп") is None  # даже после смены дерева
+    assert len(calls) == 1
+    r = client.post(
+        f"/api/chats/{seeded_chat.chat_id}/category-suggestion/accept", params={"title": "Вейп"}, headers=headers
+    )
+    assert r.status_code == 404
+
+
+def test_ai_can_be_turned_off_per_space(client, seeded_chat, auth_header, fake_ai):
+    calls, answers = fake_ai
+    headers = auth_header(seeded_chat.alice_init_data)
+    me = client.get(f"/api/chats/{seeded_chat.chat_id}/me", headers=headers).json()
+    assert me["ai_available"] is True and me["chat"]["ai_enabled"] is True
+    r = client.put(f"/api/chats/{seeded_chat.chat_id}/ai", headers=headers, json={"ai_enabled": False})
+    assert r.status_code == 200 and r.json()["ai_enabled"] is False
+    answers["зубной"] = AiAnswer("existing", "Здоровье", "Врачи")
+    assert _suggest(client, seeded_chat, headers, "Зубной") is None
+    assert calls == []
 
 
 def test_ai_failure_and_limit(client, seeded_chat, auth_header, fake_ai, monkeypatch):

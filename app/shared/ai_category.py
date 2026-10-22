@@ -7,7 +7,8 @@
 
 Ответ кэшируется по (чат, название), пока дерево категорий не поменялось, и считается в
 дневной лимит AI_DAILY_LIMIT на пространство. ИИ может предложить и новую категорию или
-подкатегорию — её создаём только с согласия пользователя (пока предложения не показываются).
+подкатегорию — её создаём только с согласия пользователя (apply_proposal); отказ запоминается
+(decline), и то же самое для этого названия больше не предлагается.
 """
 from __future__ import annotations
 
@@ -30,6 +31,8 @@ from app.shared.models import AiGuess, CategoryRule, Chat
 logger = logging.getLogger(__name__)
 
 ACTIONS = ("existing", "new_subcategory", "new_category", "unknown")
+NEW_ACTIONS = ("new_subcategory", "new_category")
+DECLINED = "declined"  # пользователь отказался от предложения — в кэше навсегда
 MIN_TITLE = 3
 EXAMPLES = 30
 
@@ -145,6 +148,21 @@ def _parse(content: str) -> AiAnswer:
     return AiAnswer(action, data.get("category"), data.get("subcategory"), data.get("icon"))
 
 
+def _body(user: str) -> dict:
+    body = {
+        "model": settings.AI_MODEL,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user},
+        ],
+        "response_format": RESPONSE_FORMAT,
+        "max_tokens": 1000,  # с запасом на рассуждения у reasoning-моделей; сам ответ ~50 токенов
+    }
+    if "gpt-oss" in settings.AI_MODEL:  # задача простая — долго думать не нужно, так быстрее
+        body["reasoning_effort"] = "low"
+    return body
+
+
 async def ask_provider(title: str, tree: str, examples: list[str]) -> AiAnswer:
     """Один запрос к OpenAI-совместимому /chat/completions. Исключения — наверх."""
     user = f"Категории:\n{tree}\n\n"
@@ -155,17 +173,10 @@ async def ask_provider(title: str, tree: str, examples: list[str]) -> AiAnswer:
         response = await client.post(
             settings.AI_BASE_URL.rstrip("/") + "/chat/completions",
             headers={"Authorization": f"Bearer {settings.AI_API_KEY}"},
-            json={
-                "model": settings.AI_MODEL,
-                "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": user},
-                ],
-                "response_format": RESPONSE_FORMAT,
-                "max_tokens": 200,
-            },
+            json=_body(user),
         )
-    response.raise_for_status()
+    if response.is_error:  # текст ошибки провайдера — чтобы было понятно, что не так с запросом
+        raise RuntimeError(f"{response.status_code}: {response.text[:500]}")
     return _parse(response.json()["choices"][0]["message"]["content"])
 
 
@@ -205,6 +216,8 @@ async def ai_guess(session: AsyncSession, chat: Chat, title: str) -> AiAnswer | 
         select(AiGuess).where(AiGuess.chat_id == chat.id, AiGuess.keyword == keyword)
     )
     cached = result.scalar_one_or_none()
+    if cached is not None and cached.action == DECLINED:  # от подкатегории отказались — категория остаётся
+        return resolve(AiAnswer("existing", cached.category), tree) if cached.category else AiAnswer("unknown")
     if cached is not None and cached.tree_hash == tree_hash:
         return resolve(AiAnswer(cached.action, cached.category, cached.subcategory, cached.icon), tree)
     if await _calls_today(session, chat.id) >= settings.AI_DAILY_LIMIT:
@@ -230,14 +243,74 @@ async def ai_guess(session: AsyncSession, chat: Chat, title: str) -> AiAnswer | 
 
 
 async def suggest_with_ai(session: AsyncSession, chat: Chat, title: str) -> Suggestion | None:
-    """Выученное → словарь → ИИ. От ИИ пока берём только существующую категорию."""
+    """Выученное → словарь → ИИ. Если ИИ предлагает новую подкатегорию, категорию подставляем
+    сразу, а подкатегорию — только после согласия (Suggestion.proposal); новую категорию — тоже."""
     suggestion = await suggest_category(session, chat.id, title)
     if suggestion is not None:
         return suggestion
     answer = await ai_guess(session, chat, title)
-    if answer is None or answer.action != "existing":
+    if answer is None or answer.action == "unknown":
         return None
-    return Suggestion(answer.category, answer.subcategory, "ai")
+    if answer.action == "existing":
+        return Suggestion(answer.category, answer.subcategory, "ai")
+    category = answer.category if answer.action == "new_subcategory" else None
+    return Suggestion(category, None, "ai", proposal=answer)
+
+
+async def cached_proposal(session: AsyncSession, chat_id: int, title: str) -> AiAnswer | None:
+    """Предложение ИИ создать категорию для этого названия — из кэша, без запроса к провайдеру."""
+    result = await session.execute(
+        select(AiGuess).where(AiGuess.chat_id == chat_id, AiGuess.keyword == normalize(title)[:255])
+    )
+    row = result.scalar_one_or_none()
+    if row is None or row.action not in NEW_ACTIONS:
+        return None
+    return AiAnswer(row.action, row.category, row.subcategory, row.icon)
+
+
+async def decline(session: AsyncSession, chat_id: int, title: str) -> None:
+    """Пользователь отказался создавать предложенное — больше для этого названия не предлагаем."""
+    keyword = normalize(title)[:255]
+    result = await session.execute(select(AiGuess).where(AiGuess.chat_id == chat_id, AiGuess.keyword == keyword))
+    row = result.scalar_one_or_none()
+    if row is None:
+        row = AiGuess(chat_id=chat_id, keyword=keyword, tree_hash="")
+        session.add(row)
+    if row.action != "new_subcategory":
+        row.category = None
+    row.action = DECLINED
+    row.subcategory = row.icon = None
+    await session.flush()
+
+
+async def _ensure(session: AsyncSession, chat: Chat, name: str, icon: str | None, parent: str | None) -> str:
+    """Категория/подкатегория есть в пространстве и не скрыта; вернуть её точное имя."""
+    nodes = await cc.chat_tree(session, chat.id)
+    if parent is None:
+        names = {n.name: n.hidden for n in nodes}
+    else:
+        node = next((n for n in nodes if n.name == parent), None)
+        names = {s.name: s.hidden for s in node.subs} if node else {}
+    existing = _find(names, name)
+    if existing is None:
+        await cc.create(session, chat, name, icon, parent)
+        return cc.clean_name(name)
+    if names[existing]:
+        await cc.set_hidden(session, chat, existing, parent, False)
+    return existing
+
+
+async def apply_proposal(session: AsyncSession, chat: Chat, answer: AiAnswer) -> tuple[str, str | None]:
+    """Создать предложенные ИИ категорию и подкатегорию (с согласия пользователя).
+    Уже существующие (или скрытые) не дублируем, а возвращаем. → (категория, подкатегория)."""
+    if answer.action not in NEW_ACTIONS or not answer.category:
+        raise ValueError("Нечего создавать")
+    family_icon = next((n.icon for n in await cc.tree_for(session, chat) if n.name == answer.category), None)
+    category = await _ensure(session, chat, answer.category, answer.icon or family_icon, None)
+    subcategory = None
+    if answer.subcategory:
+        subcategory = await _ensure(session, chat, answer.subcategory, None, category)
+    return category, subcategory
 
 
 SAMPLE_TITLES = [
