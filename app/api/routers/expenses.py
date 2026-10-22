@@ -19,8 +19,9 @@ from app.shared.autocategory import learn_category, suggest_category
 from app.shared.budgets import alerts_after_expense
 from app.shared.config import settings
 from app.shared.crud import build_custom_shares, build_equal_shares
+from app.shared.credits import own_card
 from app.shared.custom_categories import tree_for
-from app.shared.models import Expense, ExpenseShare, Member
+from app.shared.models import CreditCard, Expense, ExpenseShare, Member
 from app.shared.schemas import AiProposalAcceptedOut, AiProposalOut, CategorySuggestionOut, ExpenseOut, ShareOut
 
 router = APIRouter(tags=["expenses"])
@@ -64,7 +65,20 @@ async def _save_photo(chat_id: int, photo: UploadFile) -> str:
     return filename
 
 
-def _to_out(expense: Expense, shares: list[ExpenseShare]) -> ExpenseOut:
+async def _card_for(ctx: ChatContext, raw: str, payer_member_id: int) -> int | None:
+    """card_id из формы: "" — оплачено своими деньгами. Картой можно оплатить только свою
+    трату и только своей картой (из «Моих финансов»)."""
+    if not raw:
+        return None
+    if payer_member_id != ctx.member.id:
+        raise HTTPException(status_code=400, detail="Картой можно отметить только трату, которую оплатили вы")
+    try:
+        return (await own_card(ctx.session, int(raw), ctx.member.tg_user_id)).id
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _to_out(expense: Expense, shares: list[ExpenseShare], viewer: Member) -> ExpenseOut:
     # Важно: не присваиваем shares в expense.shares (лениво загружаемая relationship) —
     # на AsyncSession это провоцирует неявный синхронный lazy-load вне greenlet-контекста
     # (MissingGreenlet). Передаём доли отдельным параметром и строим ExpenseOut напрямую.
@@ -82,6 +96,8 @@ def _to_out(expense: Expense, shares: list[ExpenseShare]) -> ExpenseOut:
         shares=[ShareOut(member_id=s.member_id, amount=s.amount) for s in shares],
         created_at=expense.created_at,
         is_recurring=expense.recurring_id is not None,
+        # Чем оплатил плательщик — его личное дело: остальным карта не показывается
+        card_id=expense.card_id if expense.payer_member_id == viewer.id else None,
     )
 
 
@@ -124,7 +140,7 @@ async def list_expenses(
         for share in shares_result.scalars().all():
             shares_by_expense.setdefault(share.expense_id, []).append(share)
 
-    return [_to_out(e, shares_by_expense.get(e.id, [])) for e in expenses]
+    return [_to_out(e, shares_by_expense.get(e.id, []), ctx.member) for e in expenses]
 
 
 @router.post("/chats/{chat_id}/expenses", response_model=ExpenseOut, status_code=201)
@@ -139,6 +155,7 @@ async def create_expense(
     split_type: str = Form("equal"),
     participant_ids: str | None = Form(None),  # JSON-массив id, для split_type='equal'
     custom_shares: str | None = Form(None),  # JSON-массив {member_id, amount}, для 'custom'
+    card_id: str | None = Form(None),  # оплачено своей кредитной картой
     photo: UploadFile | None = File(None),
 ):
     try:
@@ -172,6 +189,8 @@ async def create_expense(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    card = await _card_for(ctx, card_id or "", payer_member_id)
+
     photo_filename = None
     if photo is not None and photo.filename:
         photo_filename = await _save_photo(ctx.chat.id, photo)
@@ -187,6 +206,7 @@ async def create_expense(
         payer_member_id=payer_member_id,
         split_type=split_type,
         created_by_member_id=ctx.member.id,
+        card_id=card,
     )
     ctx.session.add(expense)
     await ctx.session.flush()
@@ -212,7 +232,7 @@ async def create_expense(
     await _check_budgets(ctx, expense.id)
 
     result_shares = [ExpenseShare(expense_id=expense.id, member_id=m, amount=a) for m, a in shares]
-    return _to_out(expense, result_shares)
+    return _to_out(expense, result_shares, ctx.member)
 
 
 async def _check_budgets(ctx: ChatContext, expense_id: int) -> None:
@@ -294,6 +314,7 @@ async def update_expense(
     split_type: str | None = Form(None),
     participant_ids: str | None = Form(None),
     custom_shares: str | None = Form(None),
+    card_id: str | None = Form(None),  # "" — своими деньгами
     photo: UploadFile | None = File(None),
 ):
     expense = await ctx.session.get(Expense, expense_id)
@@ -360,6 +381,15 @@ async def update_expense(
         for member_id, share_amount in new_shares:
             ctx.session.add(ExpenseShare(expense_id=expense.id, member_id=member_id, amount=share_amount))
 
+    if card_id is not None:
+        expense.card_id = await _card_for(ctx, card_id, expense.payer_member_id)
+    elif expense.card_id is not None and payer_member_id is not None:
+        # Плательщика сменили — карта прежнего плательщика к трате больше не относится
+        card = await ctx.session.get(CreditCard, expense.card_id)
+        payer = await ctx.session.get(Member, expense.payer_member_id)
+        if card is None or payer is None or payer.tg_user_id != card.chat_id:
+            expense.card_id = None
+
     if photo is not None and photo.filename:
         expense.photo_path = await _save_photo(ctx.chat.id, photo)
 
@@ -369,7 +399,7 @@ async def update_expense(
 
     result = await ctx.session.execute(select(ExpenseShare).where(ExpenseShare.expense_id == expense.id))
     final_shares = list(result.scalars().all())
-    out = _to_out(expense, final_shares)
+    out = _to_out(expense, final_shares, ctx.member)
     await _check_budgets(ctx, expense.id)
     return out
 

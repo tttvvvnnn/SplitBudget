@@ -11,7 +11,8 @@ import { openRecurringModal } from "./recurring.js";
    Кредитные карты и кредиты «Моих финансов» (app/shared/credits.py). У карты долг и
    плавающие даты: срок без процентов и минимальный платёж. «Внести» уменьшает долг (это не
    трата), «Продлить срок» переносит даты при том же долге, «Начислили %» — трата в категории
-   карты, долг растёт, «Сверить с банком» правит долг руками. Кредиты — обязательные платежи
+   карты, долг растёт, «Сверить с банком» правит долг руками. Покупки — траты, у которых в
+   «Чем оплачено» выбрана карта (tabs/expenses.js): долг считается с ними. Кредиты — обязательные платежи
    с остатком долга: платёж записывается тратой и уменьшает остаток. */
 
 const MONTHS_GEN = ["января", "февраля", "марта", "апреля", "мая", "июня",
@@ -198,6 +199,24 @@ function operationText(o) {
   return `${OP_LABELS.interest} +${fmtMoney(amount)}`;
 }
 
+/* История карты: операции (их можно отменить) и покупки — траты, оплаченные картой (они
+   правятся во вкладке «Траты»). */
+function historyHtml(c) {
+  const rows = [
+    ...c.operations.map((o) => ({ date: o.op_date, id: o.id, text: operationText(o), undo: true })),
+    ...c.purchases.map((p) => ({ date: p.expense_date, id: -p.id, text: `🛒 ${p.title} +${fmtMoney(p.amount)}`, undo: false })),
+  ].sort((a, b) => (a.date === b.date ? b.id - a.id : a.date < b.date ? 1 : -1));
+  if (!rows.length) return "";
+  return `
+    <div class="section-title" style="margin-top:18px;">История</div>
+    ${rows.map((r) => `
+      <div class="deposit-row">
+        <span>${r.date.split("-").reverse().join(".")}</span>
+        <span>${escapeHtml(r.text)}</span>
+        ${r.undo ? `<button class="link-btn" data-undo="${r.id}" aria-label="Отменить">✕</button>` : '<span class="link-btn" aria-hidden="true"></span>'}
+      </div>`).join("")}`;
+}
+
 function openCardSheet(c) {
   const base = `/chats/${creditsChatId()}/credit-cards/${c.id}`;
   const suggested = c.min_payment !== null && Number(c.min_payment) ? Number(c.min_payment) : "";
@@ -215,15 +234,8 @@ function openCardSheet(c) {
       <button class="btn secondary" id="cc-interest">➕ Начислили %</button>
     </div>
     <button class="btn secondary" id="cc-adjust" style="margin-top:10px;">🔄 Сверить с банком</button>
-    <div class="hint-text" style="margin-top:8px;">«Внести» уменьшает долг и тратой не считается. «Продлить срок» — долг тот же, новые даты. «Начислили %» запишет трату в категории карты.</div>
-    ${c.operations.length ? `
-      <div class="section-title" style="margin-top:18px;">История</div>
-      ${c.operations.map((o) => `
-        <div class="deposit-row">
-          <span>${o.op_date.split("-").reverse().join(".")}</span>
-          <span>${escapeHtml(operationText(o))}</span>
-          <button class="link-btn" data-undo="${o.id}" aria-label="Отменить">✕</button>
-        </div>`).join("")}` : ""}
+    <div class="hint-text" style="margin-top:8px;">«Внести» уменьшает долг и тратой не считается. «Продлить срок» — долг тот же, новые даты. «Начислили %» запишет трату в категории карты. Покупки добавляются сами: в трате выберите «Чем оплачено» → эту карту.</div>
+    ${historyHtml(c)}
     <button class="btn secondary" id="cc-edit" style="margin-top:18px;">✏️ Изменить карту</button>
   `);
   const errorEl = overlay.querySelector("#cc-error");

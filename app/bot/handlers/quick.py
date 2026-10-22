@@ -1,8 +1,9 @@
 """Быстрый ввод трат текстом.
 
 В личке с ботом: «кофе 250» сразу записывается в «Мои финансы» с автоподбором категории.
-Под ответом — кнопки: поменять категорию (бот запомнит исправление), отменить или
-перенести трату в семейный чат (поровну на всех).
+Под ответом — кнопки: поменять категорию (бот запомнит исправление), отменить, отметить, что
+оплачено кредитной картой (долг карты вырастет, app/shared/credits.py), или перенести трату в
+семейный чат (поровну на всех).
 
 В семейном чате: на сообщение, похожее на трату («кофе 250», см. parse_group_message), бот
 отвечает кнопками «👪 Поровну на всех» / «👤 В мои финансы» / «✖️ Это не трата» —
@@ -27,7 +28,8 @@ from app.shared.categories import CATEGORY_TREE, OTHER
 from app.shared.crud import family_chats_of, get_or_create_member, get_or_create_personal_space
 from app.shared.database import async_session_maker
 from app.shared.income import record_income
-from app.shared.models import Chat, Expense, Income, Member
+from app.shared.credits import own_card
+from app.shared.models import Chat, CreditCard, Expense, Income, Member
 from app.shared.quick_entry import (
     ParsedExpense,
     active_members,
@@ -48,6 +50,7 @@ HELP = (
     "Можно несколько записей — каждую с новой строки."
 )
 MAX_FAMILY_BUTTONS = 3
+MAX_CARD_BUTTONS = 3
 
 
 def _money(amount: Decimal, currency: str) -> str:
@@ -68,10 +71,11 @@ def _date_note(expense: Expense) -> str:
     return {0: "", 1: " · вчера", 2: " · позавчера"}.get(days, f" · {expense.expense_date:%d.%m}")
 
 
-def _line(expense: Expense, currency: str) -> str:
+def _line(expense: Expense, currency: str, card: CreditCard | None = None) -> str:
+    paid = f" · 💳 {escape(card.title)}" if card else ""
     return (
         f"{_icon(expense.category)} {escape(expense.title)} — <b>{_money(expense.amount, currency)}</b>"
-        f"{_date_note(expense)}\n<i>{escape(_category_label(expense))}</i>"
+        f"{_date_note(expense)}\n<i>{escape(_category_label(expense))}</i>{paid}"
     )
 
 
@@ -92,9 +96,23 @@ async def _proposal_for(session, expense: Expense) -> AiAnswer | None:
     return None
 
 
+async def _cards(session, tg_user_id: int) -> list[CreditCard]:
+    """Кредитные карты пользователя для кнопок «Картой» — только в личке: в группе их не видно."""
+    result = await session.execute(
+        select(CreditCard)
+        .where(CreditCard.chat_id == tg_user_id, CreditCard.is_archived.is_(False))
+        .order_by(CreditCard.id)
+    )
+    return list(result.scalars().all())
+
+
 def _single_markup(
-    expense_id: int, family_chats: list[Chat], proposal: AiAnswer | None = None
+    expense: Expense,
+    family_chats: list[Chat],
+    cards: list[CreditCard] | None = None,
+    proposal: AiAnswer | None = None,
 ) -> InlineKeyboardMarkup:
+    expense_id = expense.id
     rows = []
     if proposal is not None:
         rows.append([
@@ -107,6 +125,15 @@ def _single_markup(
             InlineKeyboardButton(text="↩️ Отменить", callback_data=f"qe:undo:{expense_id}"),
         ]
     )
+    card_buttons = [
+        InlineKeyboardButton(text=f"💳 {card.title}", callback_data=f"qe:card:{expense_id}:{card.id}")
+        for card in (cards or [])[:MAX_CARD_BUTTONS]
+        if card.id != expense.card_id
+    ]
+    if expense.card_id and cards:
+        card_buttons.append(InlineKeyboardButton(text="👤 Своими", callback_data=f"qe:card:{expense_id}:0"))
+    if card_buttons:
+        rows.append(card_buttons)
     for chat in family_chats[:MAX_FAMILY_BUTTONS]:
         rows.append(
             [
@@ -148,7 +175,7 @@ async def quick_expense(message: Message) -> None:
             hint = "\n✨ ИИ предлагает новую категорию для таких трат" if proposal else ""
             await message.answer(
                 f"✅ Записал в «Мои финансы»\n{_line(expense, chat.currency)}{hint}",
-                reply_markup=_single_markup(expense.id, family, proposal),
+                reply_markup=_single_markup(expense, family, await _cards(session, user.id), proposal),
             )
         else:
             parts = []
@@ -289,11 +316,13 @@ async def on_quick_button(callback: CallbackQuery) -> None:
             await _edit(callback, markup=_category_markup(expense.id))
         elif action in ("ai", "noai"):
             family = await _family_chats(session, callback.from_user.id) if chat.is_personal and _in_private(callback) else []
+            cards = await _cards(session, callback.from_user.id) if _in_private(callback) else []
+            card = await session.get(CreditCard, expense.card_id) if expense.card_id and cards else None
             proposal = await _proposal_for(session, expense)
             if action == "noai" or proposal is None:
                 await decline(session, expense.chat_id, expense.title)
                 await session.commit()
-                await _edit(callback, f"{_header(chat)}\n{_line(expense, currency)}", _single_markup(expense.id, family))
+                await _edit(callback, f"{_header(chat)}\n{_line(expense, currency, card)}", _single_markup(expense, family, cards))
             else:
                 try:
                     expense.category, expense.subcategory = await apply_proposal(session, chat, proposal)
@@ -304,8 +333,8 @@ async def on_quick_button(callback: CallbackQuery) -> None:
                 await session.commit()
                 await _edit(
                     callback,
-                    f"{_header(chat)}\n{_line(expense, currency)}\n✨ Создал «{escape(_proposal_label(proposal))}» и запомнил",
-                    _single_markup(expense.id, family),
+                    f"{_header(chat)}\n{_line(expense, currency, card)}\n✨ Создал «{escape(_proposal_label(proposal))}» и запомнил",
+                    _single_markup(expense, family, cards),
                 )
         elif action in ("c", "s") and len(nums) >= 2 and 0 <= nums[1] < len(CATEGORY_TREE):
             name, _, subs = CATEGORY_TREE[nums[1]]
@@ -318,11 +347,36 @@ async def on_quick_button(callback: CallbackQuery) -> None:
             expense.subcategory = subs[si] if 0 <= si < len(subs) else None
             await learn_category(session, expense.chat_id, expense.title, expense.category, expense.subcategory)
             await session.commit()
-            family = await _family_chats(session, callback.from_user.id) if chat.is_personal and _in_private(callback) else []
+            private = chat.is_personal and _in_private(callback)
+            family = await _family_chats(session, callback.from_user.id) if private else []
+            cards = await _cards(session, callback.from_user.id) if _in_private(callback) else []
+            card = await session.get(CreditCard, expense.card_id) if expense.card_id and cards else None
             await _edit(
                 callback,
-                f"{_header(chat)}\n{_line(expense, currency)}\n🧠 Запомнил на будущее",
-                _single_markup(expense.id, family),
+                f"{_header(chat)}\n{_line(expense, currency, card)}\n🧠 Запомнил на будущее",
+                _single_markup(expense, family, cards),
+            )
+        elif action == "card" and len(nums) == 2 and _in_private(callback):
+            # Картой — только трату, которую оплатил сам, и только своей картой
+            payer = await session.get(Member, expense.payer_member_id)
+            if payer is None or payer.tg_user_id != callback.from_user.id:
+                await callback.answer("Картой можно отметить только свою трату", show_alert=True)
+                return
+            card = None
+            if nums[1]:
+                try:
+                    card = await own_card(session, nums[1], callback.from_user.id)
+                except ValueError as exc:
+                    await callback.answer(str(exc), show_alert=True)
+                    return
+            expense.card_id = card.id if card else None
+            await session.commit()
+            family = await _family_chats(session, callback.from_user.id) if chat.is_personal else []
+            await _edit(
+                callback,
+                f"{_header(chat)}\n{_line(expense, currency, card)}"
+                + ("\n💳 Долг карты вырос" if card else "\n👤 Оплачено своими"),
+                _single_markup(expense, family, await _cards(session, callback.from_user.id)),
             )
         elif action == "fam" and len(nums) == 2 and chat.is_personal:
             family_chat = await session.get(Chat, nums[1])
@@ -447,7 +501,7 @@ async def on_group_choice(callback: CallbackQuery) -> None:
             header += f" (платит {escape(payer.full_name)})"
         body = "\n".join(_line(e, chat.currency) for e in expenses)
         if len(expenses) == 1:
-            markup = _single_markup(expenses[0].id, [])
+            markup = _single_markup(expenses[0], [])
         else:
             markup = InlineKeyboardMarkup(
                 inline_keyboard=[[InlineKeyboardButton(

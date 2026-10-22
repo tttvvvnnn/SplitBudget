@@ -186,6 +186,7 @@ function cardHtml(e) {
           ${categoryBadgeHtml(e.category, e.subcategory)}
           <span>${escapeHtml(spaceLabel(e))}${payer}</span>
           ${e.is_recurring ? '<span title="Повторяющаяся">🔁</span>' : ""}
+          ${e.card_id ? '<span title="Оплачено кредитной картой">💳</span>' : ""}
         </div>
       </div>
       <div class="expense-amount">

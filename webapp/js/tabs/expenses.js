@@ -246,6 +246,7 @@ function expenseCardHtml(e) {
         <div class="expense-meta">
           ${categoryBadgeHtml(e.category, e.subcategory)}${familyMeta}
           ${e.is_recurring ? '<span title="Повторяющаяся">🔁</span>' : ""}
+          ${e.card_id ? '<span title="Оплачено кредитной картой">💳</span>' : ""}
         </div>
       </div>
       <div class="expense-amount">${fmtMoney(e.amount)}</div>
@@ -289,6 +290,11 @@ function openExpenseModal(existing) {
         <input type="number" id="f-amount" min="0" step="0.01" value="${existing ? existing.amount : ""}">
       </div>
     </div>
+    <div class="field" id="f-card-field" style="display:none;">
+      <label>Чем оплачено</label>
+      <select id="f-card"></select>
+      <div class="hint-text">Покупка кредиткой увеличит долг карты во вкладке «💳 Кредиты». Карту видите только вы.</div>
+    </div>
     ${categoryFieldsHtml("f", existing && existing.category, existing && existing.subcategory)}
     <div class="field">
       <label>Дата</label>
@@ -311,6 +317,7 @@ function openExpenseModal(existing) {
   // участник, поэтому selectedIds по умолчанию уже {он}), выбирать нечего.
   hideFamilyOnly(overlay);
   bindAutoCategory(overlay, isEdit);
+  const cardField = bindCardField(overlay, existing);
 
   const photoInput = overlay.querySelector("#f-photo");
   const photoPreview = overlay.querySelector("#f-photo-preview");
@@ -436,6 +443,11 @@ function openExpenseModal(existing) {
     form.append("expense_date", date);
     form.append("payer_member_id", String(payerId));
     form.append("split_type", splitType);
+    // Карту отмечает только сам плательщик: остальным поле не видно, и его не трогаем
+    if (cardField.visible()) {
+      form.append("card_id", cardField.value());
+      rememberCard(cardField.value());
+    }
 
     if (splitType === "equal") {
       const ids = Array.from(selectedIds);
@@ -489,6 +501,49 @@ function openExpenseModal(existing) {
       }
     });
   }
+}
+
+/* «Чем оплачено»: свои деньги или своя кредитная карта (tabs/credits.js). Карты — из «Моих
+   финансов», поэтому поле видно, только если трату оплатил сам пользователь. Для новой траты
+   подставляется последний выбор. */
+const LAST_CARD_KEY = "sb-last-card";
+
+function rememberCard(value) {
+  try { localStorage.setItem(LAST_CARD_KEY, value); } catch (e) { /* не критично */ }
+}
+
+function lastCard() {
+  try { return localStorage.getItem(LAST_CARD_KEY) || ""; } catch (e) { return ""; }
+}
+
+function bindCardField(overlay, existing) {
+  const field = overlay.querySelector("#f-card-field");
+  const select = overlay.querySelector("#f-card");
+  const payer = overlay.querySelector("#f-payer");
+  let cards = [];
+  const isMine = () => Number(payer.value) === state.member.id;
+  const update = () => { field.style.display = cards.length && isMine() ? "block" : "none"; };
+  payer.addEventListener("change", update);
+
+  (async () => {
+    try {
+      const data = await api(`/chats/${state.personalChatId}/credits`);
+      cards = data.cards.filter((c) => !c.is_archived || (existing && existing.card_id === c.id));
+    } catch (e) {
+      return; // без карт — просто без поля
+    }
+    const current = existing ? String(existing.card_id || "") : lastCard();
+    const known = cards.some((c) => String(c.id) === current);
+    select.innerHTML = '<option value="">👤 Свои деньги</option>' + cards
+      .map((c) => `<option value="${c.id}" ${known && String(c.id) === current ? "selected" : ""}>💳 ${escapeHtml(c.title)}</option>`)
+      .join("");
+    update();
+  })();
+
+  return {
+    visible: () => field.style.display !== "none",
+    value: () => select.value,
+  };
 }
 
 /* Автоподбор категории по названию (GET .../category-suggestion): пока пользователь печатает

@@ -187,6 +187,7 @@ class ExpenseOut(BaseModel):
     shares: list[ShareOut]
     created_at: dt.datetime
     is_recurring: bool
+    card_id: int | None = None  # своя кредитная карта; чужая не показывается
 
 
 class AllExpenseOut(BaseModel):
@@ -208,6 +209,7 @@ class AllExpenseOut(BaseModel):
     payer_name: str
     i_paid: bool
     is_recurring: bool
+    card_id: int | None = None  # оплачено своей кредитной картой
 
 
 class BalanceEntry(BaseModel):
@@ -625,11 +627,23 @@ class CreditOperationOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class CreditPurchaseOut(BaseModel):
+    """Трата, оплаченная картой (личная или семейная)."""
+
+    id: int
+    chat_id: int
+    title: str
+    amount: Decimal
+    expense_date: dt.date
+
+    model_config = {"from_attributes": True}
+
+
 class CreditCardOut(BaseModel):
     id: int
     title: str
     credit_limit: Decimal | None
-    debt: Decimal
+    debt: Decimal  # вместе с покупками
     statement_day: int | None
     grace_until: dt.date | None
     min_payment: Decimal | None
@@ -639,6 +653,7 @@ class CreditCardOut(BaseModel):
     subcategory: str | None
     is_archived: bool
     operations: list[CreditOperationOut]
+    purchases: list[CreditPurchaseOut]  # последние покупки
 
 
 class LoanOut(BaseModel):
