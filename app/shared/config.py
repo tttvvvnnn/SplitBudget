@@ -19,6 +19,14 @@ class Settings(BaseSettings):
 
     # Категории и подкатегории трат — в app/shared/categories.py.
 
+    # Подсказки категорий от ИИ (app/shared/ai_category.py): любой OpenAI-совместимый API.
+    # Пустой ключ — ИИ выключен, работают только выученное и словарь.
+    AI_BASE_URL: str = "https://api.x.ai/v1"
+    AI_API_KEY: str = ""
+    AI_MODEL: str = "grok-4.3"
+    AI_TIMEOUT: float = 4.0  # секунд; не успел — подсказки нет
+    AI_DAILY_LIMIT: int = 200  # обращений к провайдеру на пространство в сутки
+
     @property
     def database_url(self) -> str:
         Path(self.DATABASE_PATH).parent.mkdir(parents=True, exist_ok=True)
