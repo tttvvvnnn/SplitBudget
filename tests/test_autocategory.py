@@ -73,6 +73,25 @@ def test_suggestion_learns_from_saved_expenses(client, seeded_chat, auth_header)
     assert (s["category"], s["subcategory"], s["source"]) == ("Дом", "Бытовая химия", "learned")
 
 
+def test_other_is_not_learned(client, seeded_chat, auth_header):
+    headers = auth_header(seeded_chat.alice_init_data)
+    # «Другое» — это «не знаю»: не запоминаем и не перекрываем им словарь
+    _create(client, seeded_chat, headers, "Вейп", "Другое")
+    assert _suggest(client, seeded_chat, headers, "Вейп") is None
+    _create(client, seeded_chat, headers, "Пятёрочка", "Другое")
+    assert _suggest(client, seeded_chat, headers, "Пятёрочка")["source"] == "dictionary"
+
+    # Было выучено, потом поправили на «Другое» — правило забывается
+    e = _create(client, seeded_chat, headers, "Шуршик", "Питомцы", "Корм")
+    r = client.patch(
+        f"/api/chats/{seeded_chat.chat_id}/expenses/{e['id']}",
+        headers=headers,
+        data={"category": "Другое", "subcategory": ""},
+    )
+    assert r.status_code == 200, r.text
+    assert _suggest(client, seeded_chat, headers, "Шуршик") is None
+
+
 def test_learning_is_per_chat(client, seeded_chat, auth_header):
     headers = auth_header(seeded_chat.alice_init_data)
     _create(client, seeded_chat, headers, "Мурзик", "Питомцы", "Корм")
