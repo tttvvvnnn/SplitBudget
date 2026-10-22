@@ -7,9 +7,10 @@ import { categoryBadgeHtml } from "../category-fields.js";
 import { openCategoriesSheet } from "../categories.js";
 
 /* ---------------- Вкладка «Траты» в «Моих финансах» ----------------
-   Личные траты и траты семейных чатов, в которых у пользователя есть доля, одним списком.
-   Переключатель «Моя доля / Всего»: в семейной трате на 3 000 на двоих моя доля — 1 500,
-   всего — 3 000 (вторая сумма — мелко под первой). Личную трату тап открывает на
+   Личные траты и траты семейных чатов, которые пользователь оплатил или в которых у него
+   есть доля, одним списком. Переключатель «Мои траты / Всего»: «Мои траты» — сколько из
+   траты потратил сам (оплатил 3 000 на двоих — 3 000, пока второй не вернёт 1 500; см.
+   app/shared/my_spending.py), всего — полная сумма (вторая сумма — мелко под первой). Личную трату тап открывает на
    редактирование прямо здесь, семейную — в её чате. */
 
 let allFilters = { search: "", space: "" };
@@ -27,12 +28,12 @@ function setShareMode(mode) {
   try { localStorage.setItem("shareMode", mode); } catch (e) { /* не критично */ }
 }
 
-/* Переключатель «Моя доля / Всего»; onChange вызывается после смены режима. */
+/* Переключатель «Мои траты / Всего»; onChange вызывается после смены режима. */
 function shareToggleHtml() {
   const mode = shareMode();
   return `
     <div class="share-toggle" id="share-toggle">
-      <button data-mode="share" class="${mode === "share" ? "active" : ""}">Моя доля</button>
+      <button data-mode="share" class="${mode === "share" ? "active" : ""}">Мои траты</button>
       <button data-mode="total" class="${mode === "total" ? "active" : ""}">Всего</button>
     </div>`;
 }
@@ -133,6 +134,8 @@ function renderList(items) {
   const list = document.getElementById("expense-list");
   const q = allFilters.search.trim().toLowerCase();
   const filtered = items.filter((e) => {
+    // За пользователя заплатили, а он ещё не вернул — пока это не его трата
+    if (shareMode() !== "total" && Number(e.my_share) === 0) return false;
     if (q && !e.title.toLowerCase().includes(q)) return false;
     if (allFilters.space && String(e.chat_id) !== String(allFilters.space)) return false;
     return true;
@@ -172,7 +175,7 @@ function cardHtml(e) {
   const shared = Number(e.my_share) !== Number(e.amount);
   const payer = e.is_personal ? "" : ` · ${e.i_paid ? "платили вы" : `платил(а) ${escapeHtml(e.payer_name)}`}`;
   const sub = !shared ? "" : shareMode() === "total"
-    ? `<div class="amount-sub">ваша доля ${fmtMoney(e.my_share)}</div>`
+    ? `<div class="amount-sub">на вас ${fmtMoney(e.my_share)}</div>`
     : `<div class="amount-sub">из ${fmtMoney(e.amount)}</div>`;
   return `
     <div class="card expense-card" data-id="${e.id}" data-chat="${e.chat_id}">

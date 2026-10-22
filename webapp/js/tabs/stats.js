@@ -56,8 +56,8 @@ async function renderStatsTab() {
   const isCurrent = state.month === todayMonth();
   let stats, forecast = null, income = null;
   try {
-    // В «Моих финансах» — личные траты и доля (или полные суммы) семейных трат.
-    // Прогноз сервер считает по доле, поэтому в режиме «Всего» его не показываем.
+    // В «Моих финансах» — личные траты и сколько потрачено в семейных (или их полные суммы).
+    // Прогноз сервер считает по «Моим тратам», поэтому в режиме «Всего» его не показываем.
     const forecastChat = personal ? (total ? null : state.personalChatId) : state.chatId;
     [stats, forecast, income] = await Promise.all([
       personal
@@ -158,7 +158,7 @@ function plural(n, one, few, many) {
   return many;
 }
 
-/* Доходы против расходов месяца (только «Мои финансы»; расходы — ваша доля, как в «Доходах»). */
+/* Доходы против расходов месяца (только «Мои финансы»; расходы — ваши траты, как в «Доходах»). */
 function incomeHtml(income) {
   if (!income || Number(income.received) <= 0) return "";
   const received = Number(income.received);
@@ -221,7 +221,7 @@ async function openCategorySheet(c, idx) {
       ? await api(`/all/expenses?month=${state.month}`)
       : await api(`/chats/${state.chatId}/expenses?month=${state.month}`);
     const amountOf = (e) => (personal && shareMode() !== "total" ? Number(e.my_share) : Number(e.amount));
-    const rows = items.filter((e) => e.category === c.category);
+    const rows = items.filter((e) => e.category === c.category && amountOf(e) !== 0);
     box.innerHTML = rows.length ? rows.map((e) => `
       <div class="balance-row cat-expense">
         <span class="cat-expense-title">

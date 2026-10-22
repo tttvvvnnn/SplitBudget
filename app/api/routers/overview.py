@@ -1,7 +1,7 @@
 """Сводка «Моих финансов» по всем пространствам пользователя сразу: личному («Мои финансы») и
-всем семейным чатам. Каждая трата считается по доле пользователя в ней (ExpenseShare), а не по
-полной сумме: если в семейном чате ты заплатил 3 000, а твоя доля 1 000, то твой расход — 1 000,
-остальное тебе должны (это долг, а не трата)."""
+всем семейным чатам. Трата считается по реальным деньгам (app/shared/my_spending.py): если в
+семейном чате ты заплатил 3 000, а твоя доля 1 000, то твой расход — 3 000, пока остальные
+не вернут свои 2 000."""
 from __future__ import annotations
 
 import datetime as dt
@@ -12,7 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
 from app.shared.database import get_session
-from app.shared.models import Chat, Expense, ExpenseShare, Member
+from app.shared.models import Member
+from app.shared.my_spending import my_expenses
 from app.shared.schemas import AllExpenseOut, StatsOut
 from app.shared.stats import build_stats, stats_range
 
@@ -27,43 +28,22 @@ def _month_range(month: str) -> tuple[dt.date, dt.date]:
         raise HTTPException(status_code=400, detail="month должен быть в формате YYYY-MM") from exc
 
 
-async def _my_shares(session: AsyncSession, tg_user_id: int, month: str):
-    """Строки (Expense, ExpenseShare, Chat) — траты за месяц, в которых у пользователя есть доля,
-    по всем чатам, где он участник (в т.ч. тем, из которых он уже вышел: история остаётся)."""
-    return await _my_shares_between(session, tg_user_id, *_month_range(month))
-
-
-async def _my_shares_between(session: AsyncSession, tg_user_id: int, start: dt.date, end: dt.date):
-    result = await session.execute(
-        select(Expense, ExpenseShare, Chat)
-        .join(ExpenseShare, ExpenseShare.expense_id == Expense.id)
-        .join(Member, Member.id == ExpenseShare.member_id)
-        .join(Chat, Chat.id == Expense.chat_id)
-        .where(
-            Member.tg_user_id == tg_user_id,
-            Expense.expense_date >= start,
-            Expense.expense_date < end,
-        )
-        .order_by(Expense.expense_date.desc(), Expense.id.desc())
-    )
-    return result.all()
-
-
 @router.get("/all/expenses", response_model=list[AllExpenseOut])
 async def all_expenses(
     month: str,
     user: dict = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> list[AllExpenseOut]:
-    rows = await _my_shares(session, int(user["id"]), month)
-    payer_ids = {e.payer_member_id for e, _, _ in rows}
+    rows = await my_expenses(session, int(user["id"]), *_month_range(month))
+    payer_ids = {m.expense.payer_member_id for m in rows}
     payers: dict[int, Member] = {}
     if payer_ids:
         payers_result = await session.execute(select(Member).where(Member.id.in_(payer_ids)))
         payers = {m.id: m for m in payers_result.scalars().all()}
 
     out = []
-    for expense, share, chat in rows:
+    for row in rows:
+        expense, chat = row.expense, row.chat
         payer = payers.get(expense.payer_member_id)
         out.append(
             AllExpenseOut(
@@ -73,13 +53,13 @@ async def all_expenses(
                 is_personal=chat.is_personal,
                 title=expense.title,
                 amount=expense.amount,
-                my_share=share.amount,
+                my_share=row.amount,
                 category=expense.category,
                 subcategory=expense.subcategory,
                 photo_url=(f"photos/{expense.photo_path}" if expense.photo_path else None),
                 expense_date=expense.expense_date,
                 payer_name=payer.full_name if payer else "",
-                i_paid=expense.payer_member_id == share.member_id,
+                i_paid=row.i_paid,
                 is_recurring=expense.recurring_id is not None,
             )
         )
@@ -94,13 +74,14 @@ async def all_stats(
     session: AsyncSession = Depends(get_session),
 ) -> StatsOut:
     """full=true — полные суммы трат, в которых пользователь участвует (переключатель
-    «всего» в «Моих финансах»), иначе — только его доля."""
+    «всего» в «Моих финансах»), иначе — сколько из них на самом деле потратил он."""
     try:
         start, end = stats_range(month)
     except (ValueError, IndexError) as exc:
         raise HTTPException(status_code=400, detail="month должен быть в формате YYYY-MM") from exc
-    rows = await _my_shares_between(session, int(user["id"]), start, end)
+    rows = await my_expenses(session, int(user["id"]), start, end)
     return build_stats(month, [
-        (expense.expense_date, expense.category, expense.subcategory, expense.amount if full else share.amount)
-        for expense, share, _ in rows
+        (m.expense.expense_date, m.expense.category, m.expense.subcategory, m.expense.amount if full else m.amount)
+        for m in rows
+        if full or m.amount
     ])

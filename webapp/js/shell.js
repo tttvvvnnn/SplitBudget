@@ -183,7 +183,7 @@ function renderShell({ onSwitchSpace } = {}) {
   if (isPersonal()) tabs = TABS.filter((t) => !FAMILY_ONLY_TABS.includes(t.id));
   else tabs = TABS.filter((t) => !PERSONAL_ONLY_TABS.includes(t.id));
   let sub;
-  if (isPersonal()) sub = "Личное + ваша доля в семейных · видно только вам";
+  if (isPersonal()) sub = "Личное + ваши траты в семейных · видно только вам";
   else sub = `Валюта: ${escapeHtml(state.chat.currency)} · Вы: ${escapeHtml(memberLabel(state.member.id))}`
     + ` · <button class="link-btn inline" id="hide-chat">Убрать из списка</button>`;
   if (isWebVersion) sub += `<span class="mobile-only"> · <button class="link-btn inline" data-logout>Выйти</button></span>`;
