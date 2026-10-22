@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.routers import (
     balances, budgets, categories, chats, expenses, goals, income, obligations, overview, plan, recurring,
-    stats,
+    stats, web,
 )
 from app.bot.bot_instance import bot
 from app.bot.runner import start_polling
@@ -114,6 +114,7 @@ for router in (
     goals.router,
     plan.router,
     categories.router,
+    web.router,
 ):
     app.include_router(router, prefix="/api")
 

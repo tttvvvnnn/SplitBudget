@@ -1,10 +1,11 @@
 import { state, isPersonal } from "./state.js";
-import { haptic, toast, confirmAction } from "./telegram.js";
+import { haptic, toast, confirmAction, isWebVersion } from "./telegram.js";
 import { api } from "./api.js";
 import { openSheet, closeSheet } from "./sheet.js";
 import { escapeHtml } from "./format.js";
 import { memberLabel } from "./members.js";
 import { brandMarkSvg, wordmarkHtml } from "./brand.js";
+import { logout } from "./login.js";
 import { renderExpensesTab, openExpenseModal } from "./tabs/expenses.js";
 import { renderBalanceTab } from "./tabs/balance.js";
 import { renderStatsTab } from "./tabs/stats.js";
@@ -78,6 +79,34 @@ const TABS = [
 const PERSONAL_ONLY_TABS = ["income", "goals", "plan"];
 // В «Моих финансах» вместо лимитов — план распределения дохода (платежи месяца — в «Платежах»)
 const FAMILY_ONLY_TABS = ["balance", "budgets"];
+
+/* Подпись кнопки «Добавить» в шапке на широком экране — что именно добавит «+». */
+const ADD_LABELS = {
+  recurring: "Новый платёж",
+  budgets: "Новый лимит",
+  income: "Новый доход",
+  goals: "Новая цель",
+  plan: "Новая статья",
+};
+
+function addLabel() {
+  return ADD_LABELS[state.tab] || "Новая трата";
+}
+
+/* Пространства списком для боковой панели широкого экрана (на телефоне — spaceSwitcherHtml). */
+function sidebarSpacesHtml() {
+  const spaces = [
+    { id: state.personalChatId, icon: "👤", label: "Мои финансы" },
+    ...state.familyChats.map((c) => ({ id: c.id, icon: "🏠", label: c.title || String(c.id) })),
+  ].filter((s) => s.id !== null);
+  const hidden = state.hiddenChats.length
+    ? `<button class="side-item muted" data-hidden-chats><span class="side-emoji">🙈</span><span>Скрытые · ${state.hiddenChats.length}</span></button>`
+    : "";
+  return spaces.map((s) => `
+    <button class="side-item${String(s.id) === String(state.chatId) ? " active" : ""}" data-space="${s.id}">
+      <span class="side-emoji">${s.icon}</span><span>${escapeHtml(s.label)}</span>
+    </button>`).join("") + hidden;
+}
 
 /* Переключатель «👤 Мои финансы | 🏠 семейные чаты» под заголовком. */
 function spaceSwitcherHtml() {
@@ -157,11 +186,37 @@ function renderShell({ onSwitchSpace } = {}) {
   if (isPersonal()) sub = "Личное + ваша доля в семейных · видно только вам";
   else sub = `Валюта: ${escapeHtml(state.chat.currency)} · Вы: ${escapeHtml(memberLabel(state.member.id))}`
     + ` · <button class="link-btn inline" id="hide-chat">Убрать из списка</button>`;
+  if (isWebVersion) sub += `<span class="mobile-only"> · <button class="link-btn inline" data-logout>Выйти</button></span>`;
+  // На широком экране (style.css, @media min-width: 1000px) таббар и «+» прячутся: вкладки
+  // и пространства — в боковой панели, «+» — кнопкой в шапке. На телефоне наоборот.
   app.innerHTML = `
+    <aside class="sidebar">
+      <div class="brand-row">${brandMarkSvg()}${wordmarkHtml()}</div>
+      <div class="side-label">Пространства</div>
+      <div class="side-group">${sidebarSpacesHtml()}</div>
+      <div class="side-label">Разделы</div>
+      <nav class="side-group">
+        ${tabs.map((t) => `
+          <button class="side-item${state.tab === t.id ? " active" : ""}" data-tab="${t.id}"${state.tab === t.id ? ' aria-current="page"' : ""}>
+            ${tabIconSvg(t.id)}<span>${t.label}</span>
+          </button>`).join("")}
+      </nav>
+      <div class="side-footer">
+        ${isWebVersion ? '<button class="side-item muted" data-logout><span class="side-emoji">🚪</span><span>Выйти</span></button>' : ""}
+      </div>
+    </aside>
     <div class="header">
       <div class="brand-row">${brandMarkSvg()}${wordmarkHtml()}</div>
-      <h1>${escapeHtml(state.chat.title || "SplitBudget")}</h1>
-      <div class="sub">${sub}</div>
+      <div class="header-main">
+        <div class="header-titles">
+          <h1>${escapeHtml(state.chat.title || "SplitBudget")}</h1>
+          <div class="sub">${sub}</div>
+        </div>
+        <button class="btn header-add" id="header-add">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          <span id="header-add-label">${addLabel()}</span>
+        </button>
+      </div>
       ${spaceSwitcherHtml()}
     </div>
     <div id="content" class="content"></div>
@@ -175,7 +230,7 @@ function renderShell({ onSwitchSpace } = {}) {
         </button>`).join("")}
     </nav>`;
 
-  app.querySelectorAll(".space-switcher button[data-space]").forEach((btn) => {
+  app.querySelectorAll(".space-switcher button[data-space], .sidebar [data-space]").forEach((btn) => {
     btn.addEventListener("click", () => {
       haptic("selection");
       if (onSwitchSpace) onSwitchSpace(btn.dataset.space);
@@ -184,23 +239,27 @@ function renderShell({ onSwitchSpace } = {}) {
 
   const hideBtn = document.getElementById("hide-chat");
   if (hideBtn) hideBtn.addEventListener("click", () => hideCurrentChat(onSwitchSpace));
-  const hiddenBtn = document.getElementById("hidden-chats");
-  if (hiddenBtn) hiddenBtn.addEventListener("click", () => { haptic("selection"); openHiddenChats(onSwitchSpace); });
+  app.querySelectorAll("#hidden-chats, [data-hidden-chats]").forEach((btn) => {
+    btn.addEventListener("click", () => { haptic("selection"); openHiddenChats(onSwitchSpace); });
+  });
+  app.querySelectorAll("[data-logout]").forEach((btn) => btn.addEventListener("click", logout));
 
-  app.querySelectorAll(".tabbar button").forEach((btn) => {
+  app.querySelectorAll("[data-tab]").forEach((btn) => {
     btn.addEventListener("click", () => switchTab(btn.dataset.tab));
   });
 
   updateFab();
-  document.getElementById("fab-add").addEventListener("click", () => {
-    haptic("impact", "light");
-    if (state.tab === "recurring") openRecurringModal(null);
-    else if (state.tab === "budgets") openBudgetModal(null);
-    else if (state.tab === "income") openIncomeModal(null);
-    else if (state.tab === "goals") openGoalModal(null);
-    else if (state.tab === "plan") openNewPlanItem();
-    else openExpenseModal(null);
-  });
+  for (const id of ["fab-add", "header-add"]) {
+    document.getElementById(id).addEventListener("click", () => {
+      haptic("impact", "light");
+      if (state.tab === "recurring") openRecurringModal(null);
+      else if (state.tab === "budgets") openBudgetModal(null);
+      else if (state.tab === "income") openIncomeModal(null);
+      else if (state.tab === "goals") openGoalModal(null);
+      else if (state.tab === "plan") openNewPlanItem();
+      else openExpenseModal(null);
+    });
+  }
 }
 
 /* Переключение вкладки — вынесено отдельно, чтобы можно было вызвать не только из таббара
@@ -209,7 +268,7 @@ async function switchTab(tabId) {
   if (tabId === state.tab) return;
   haptic("selection");
   state.tab = tabId;
-  document.querySelectorAll(".tabbar button").forEach((b) => {
+  document.querySelectorAll("[data-tab]").forEach((b) => {
     const active = b.dataset.tab === tabId;
     b.classList.toggle("active", active);
     if (active) b.setAttribute("aria-current", "page");
@@ -223,6 +282,8 @@ async function switchTab(tabId) {
 function updateFab() {
   const hidden = state.tab === "stats";
   document.getElementById("fab-add").style.display = hidden ? "none" : "flex";
+  document.getElementById("header-add").style.visibility = hidden ? "hidden" : "visible";
+  document.getElementById("header-add-label").textContent = addLabel();
 }
 
 async function renderTab() {

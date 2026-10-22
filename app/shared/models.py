@@ -424,3 +424,37 @@ class CustomCategory(Base):
     is_builtin: Mapped[bool] = mapped_column(Boolean, default=False)
     is_hidden: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class WebLogin(Base):
+    """Запрос на вход в веб-версию через бота (app/shared/web_auth.py).
+
+    Браузер создаёт запрос и открывает t.me/<бот>?start=login_<token>, пользователь
+    подтверждает вход в боте, браузер по secret забирает сессию. secret знает только
+    браузер, поэтому увидеть ссылку недостаточно, чтобы войти."""
+
+    __tablename__ = "web_logins"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    token: Mapped[str] = mapped_column(String(64), unique=True)
+    secret_hash: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(16), default="pending")  # pending|confirmed|cancelled|used
+    tg_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    user_json: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    user_agent: Mapped[str] = mapped_column(String(255), default="")
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class WebSession(Base):
+    """Сессия веб-версии: cookie в браузере, в базе — только sha256 от неё."""
+
+    __tablename__ = "web_sessions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    tg_user_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    user_json: Mapped[str] = mapped_column(String(1024))
+    user_agent: Mapped[str] = mapped_column(String(255), default="")
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
+    last_used_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
+    expires_at: Mapped[dt.datetime] = mapped_column(DateTime)
