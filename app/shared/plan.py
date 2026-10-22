@@ -11,8 +11,8 @@
   с подкатегорией;
 - goal — накопительная: выделенное откладывается на цель по кнопке «Отложил».
 Кредиты и кредитки — обычные расходные статьи с категорией «Кредиты»: платёж по кредиту
-записывается тратой, а оплаченный платёж по кредитной карте (он тратой не считается)
-попадает в статью по категории своего шаблона. Траты без статьи и пополнения целей без
+записывается тратой, а деньги, внесённые на кредитную карту (это тратой не считается),
+попадают в статью по категории карты (app/shared/credits.py). Траты без статьи и пополнения целей без
 статьи списываются со «Свободно».
 
 Месяц плана начинается с chat.plan_start_day (по умолчанию 1-го). В конце месяца статьи
@@ -32,13 +32,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.shared.models import (
     Chat,
+    CreditCard,
+    CreditOperation,
     Goal,
     GoalDeposit,
     Income,
     PlanAlert,
     PlanItem,
-    RecurringExpense,
-    RecurringPayment,
 )
 from app.shared.my_spending import my_expenses
 
@@ -162,20 +162,17 @@ async def _flows(session: AsyncSession, chat: Chat, start: dt.date, end: dt.date
     # Платёж по кредитной карте тратой не записывается, но деньги из плана уходят
     cards = (
         await session.execute(
-            select(RecurringPayment, RecurringExpense)
-            .join(RecurringExpense, RecurringExpense.id == RecurringPayment.recurring_id)
+            select(CreditOperation, CreditCard)
+            .join(CreditCard, CreditCard.id == CreditOperation.card_id)
             .where(
-                RecurringExpense.chat_id == chat.id,
-                RecurringExpense.kind == "card",
-                RecurringPayment.status == "paid",
-                RecurringPayment.expense_id.is_(None),
+                CreditCard.chat_id == chat.id,
+                CreditOperation.kind == "payment",
+                CreditOperation.op_date >= start,
+                CreditOperation.op_date < end,
             )
         )
     ).all()
-    for p, r in cards:
-        date = p.paid_at.date() if p.paid_at else p.due_date
-        if start <= date < end and p.amount:
-            out.append(Entry(date, r.title, p.amount, "card", r.category, r.subcategory))
+    out += [Entry(o.op_date, c.title, o.amount, "card", c.category, c.subcategory) for o, c in cards]
     deposits = (
         await session.execute(
             select(GoalDeposit.deposit_date, Goal.title, GoalDeposit.goal_id, GoalDeposit.amount)

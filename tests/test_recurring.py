@@ -80,7 +80,7 @@ def test_delete_recurring(client, seeded_chat, auth_header):
 def test_recurring_without_amount(client, seeded_chat, auth_header):
     """Платёж без суммы — только напоминание; делить его можно только поровну."""
     a, b = seeded_chat.alice_member_id, seeded_chat.bob_member_id
-    base = {"title": "Кредитка", "amount": 0, "payer_member_id": a, "day_of_month": 7, "kind": "card"}
+    base = {"title": "Кредит", "amount": 0, "payer_member_id": a, "day_of_month": 7, "kind": "loan"}
     h = auth_header(seeded_chat.alice_init_data)
     url = f"/api/chats/{seeded_chat.chat_id}/recurring"
     r = client.post(url, headers=h, json={**base, "participants": [{"member_id": a}, {"member_id": b}]})

@@ -67,8 +67,8 @@ async def on_payment_button(callback: CallbackQuery) -> None:
             if action == "pay":
                 expense_id = await ob.pay(session, payment, None, actor.id if actor else None)
                 result = f"✅ Оплачено: «{recurring.title}» — {ob.fmt_amount(payment.amount, chat.currency)}"
-                if recurring.kind == "card" and recurring.debt is not None:
-                    result += f"\nДолг по карте: {ob.fmt_amount(recurring.debt, chat.currency)}"
+                if recurring.debt is not None:
+                    result += f"\n{ob.debt_label(recurring)}: {ob.fmt_amount(recurring.debt, chat.currency)}"
             elif action == "skip":
                 await ob.skip(session, payment)
                 result = f"⏭ «{recurring.title}» — в этом месяце не платим"
