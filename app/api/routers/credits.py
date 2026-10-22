@@ -15,6 +15,7 @@ from app.shared.schemas import (
     CreditCardOut,
     CreditExtendIn,
     CreditOperationOut,
+    CreditPurchaseOut,
     CreditsOut,
     LoanOut,
 )
@@ -32,20 +33,23 @@ def _personal(ctx: ChatContext) -> None:
 
 async def _card_out(ctx: ChatContext, card: CreditCard, today: dt.date) -> CreditCardOut:
     operations = await credits.operations_of(ctx.session, card.id, RECENT_OPERATIONS)
+    purchases = await credits.recent_purchases(ctx.session, card.id, RECENT_OPERATIONS)
+    debt = await credits.debt_of(ctx.session, card)
     return CreditCardOut(
         id=card.id,
         title=card.title,
         credit_limit=card.credit_limit,
-        debt=card.debt,
+        debt=debt,
         statement_day=card.statement_day,
         grace_until=card.grace_until,
         min_payment=card.min_payment,
         payment_date=card.payment_date,
-        next_deadline=credits.next_deadline(card, today),
+        next_deadline=credits.next_deadline(card, debt, today),
         category=card.category,
         subcategory=card.subcategory,
         is_archived=card.is_archived,
         operations=[CreditOperationOut.model_validate(o) for o in operations],
+        purchases=[CreditPurchaseOut.model_validate(e) for e in purchases],
     )
 
 

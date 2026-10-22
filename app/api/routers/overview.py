@@ -61,6 +61,7 @@ async def all_expenses(
                 payer_name=payer.full_name if payer else "",
                 i_paid=row.i_paid,
                 is_recurring=expense.recurring_id is not None,
+                card_id=expense.card_id if row.i_paid else None,
             )
         )
     return out

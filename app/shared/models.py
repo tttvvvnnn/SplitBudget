@@ -110,6 +110,11 @@ class Expense(Base):
     recurring_id: Mapped[int | None] = mapped_column(
         ForeignKey("recurring_expenses.id", ondelete="SET NULL"), nullable=True
     )
+    # Оплачено кредитной картой плательщика (её долг растёт на сумму траты). Карта лежит в
+    # «Моих финансах» плательщика, поэтому в семейном чате её видит только он сам.
+    card_id: Mapped[int | None] = mapped_column(
+        ForeignKey("credit_cards.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[dt.datetime] = mapped_column(
         DateTime, default=_utcnow, onupdate=_utcnow
@@ -461,8 +466,8 @@ class WebSession(Base):
 
 
 class CreditCard(Base):
-    """Кредитная карта в «Моих финансах» (app/shared/credits.py). Долг меняют операции
-    (CreditOperation). Даты не «N-е число каждого месяца»: льготный период у банков не ровно
+    """Кредитная карта в «Моих финансах» (app/shared/credits.py). Долг = debt (стартовый долг
+    и операции CreditOperation) плюс покупки — траты с card_id этой карты. Даты не «N-е число каждого месяца»: льготный период у банков не ровно
     месяц, поэтому срок без процентов и дата минимального платежа хранятся датами и
     обновляются после каждой выписки или кнопкой «Продлить срок»."""
 
@@ -472,6 +477,7 @@ class CreditCard(Base):
     chat_id: Mapped[int] = mapped_column(ForeignKey("chats.id", ondelete="CASCADE"))
     title: Mapped[str] = mapped_column(String(255))
     credit_limit: Mapped[Decimal | None] = mapped_column(MoneyType, nullable=True)
+    # Долг без покупок: стартовый ± операции. Может уйти в минус, когда покупки погашены.
     debt: Mapped[Decimal] = mapped_column(MoneyType, default=Decimal("0"))
     statement_day: Mapped[int | None] = mapped_column(nullable=True)  # день выписки, 1..31
     grace_until: Mapped[dt.date | None] = mapped_column(Date, nullable=True)  # весь долг без процентов до
