@@ -400,9 +400,10 @@ async def _other_expenses(session: AsyncSession, chat_id: int) -> list[Expense]:
     return list(result.scalars().all())
 
 
-async def tidy_other(session: AsyncSession, chat: Chat) -> tuple[list[TidyItem], bool]:
+async def tidy_other(session: AsyncSession, chat: Chat) -> tuple[list[TidyItem], list[str], bool]:
     """Траты в «Другом», сгруппированные по названию, с подсказкой категории (выученное,
-    словарь, ИИ пачками). → (что можно разложить, остались ли группы, до которых не дошли)."""
+    словарь, ИИ пачками). → (что можно разложить, названия, которые не угадали, остались ли
+    группы, до которых не дошли)."""
     groups: dict[str, list[Expense]] = {}
     for expense in await _other_expenses(session, chat.id):
         keyword = normalize(expense.title)
@@ -412,7 +413,7 @@ async def tidy_other(session: AsyncSession, chat: Chat) -> tuple[list[TidyItem],
     pending: list[list[Expense]] = []
     for rows in sorted(groups.values(), key=len, reverse=True):
         suggestion = await suggest_category(session, chat.id, rows[0].title)
-        if suggestion is not None:
+        if suggestion is not None and suggestion.category != OTHER:
             items.append(_tidy_item(rows, suggestion))
         else:
             pending.append(rows)
@@ -425,11 +426,14 @@ async def tidy_other(session: AsyncSession, chat: Chat) -> tuple[list[TidyItem],
             break
         answers.update(await ai_guess_many(session, chat, [rows[0].title for rows in pending[start : start + BATCH]]))
         asked = start + BATCH
+    unknown: list[str] = []
     for rows in pending[:asked]:
         suggestion = _to_suggestion(answers.get(normalize(rows[0].title)[:255]))
         if suggestion is not None:
             items.append(_tidy_item(rows, suggestion))
-    return items, asked < len(pending)
+        else:
+            unknown.append(rows[0].title)
+    return items, unknown, asked < len(pending)
 
 
 def _tidy_item(rows: list[Expense], suggestion: Suggestion) -> TidyItem:
