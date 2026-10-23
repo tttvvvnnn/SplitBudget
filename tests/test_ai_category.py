@@ -1,6 +1,7 @@
 """Подсказки категорий от ИИ (app/shared/ai_category.py) — провайдер подменён заглушкой."""
 from __future__ import annotations
 
+import asyncio
 import json
 
 import httpx
@@ -9,6 +10,8 @@ import pytest
 from app.shared import ai_category
 from app.shared.ai_category import AiAnswer, _parse_many, resolve
 from app.shared.config import settings
+from app.shared.database import async_session_maker
+from app.shared.models import CategoryRule
 
 TREE = [
     ("Продукты", "🛒", ["Супермаркет", "Алкоголь"]),
@@ -272,7 +275,8 @@ def test_tidy_other(client, seeded_chat, auth_header, fake_ai):
     body = r.json()
     assert body["more"] is False
     by_title = {i["title"].lower(): i for i in body["items"]}
-    assert set(by_title) == {"вейп", "зубной", "пятёрочка"}  # «перевод саше» ИИ не понял
+    assert set(by_title) == {"вейп", "зубной", "пятёрочка"}
+    assert body["unknown"] == ["Перевод Саше"]  # ИИ не понял — показываем отдельно
     assert by_title["вейп"]["count"] == 2 and by_title["вейп"]["proposal"]["category"] == "Табак"
     assert by_title["пятёрочка"]["source"] == "dictionary"
 
@@ -300,3 +304,24 @@ def test_tidy_other(client, seeded_chat, auth_header, fake_ai):
         json={"items": [{"title": "Перевод Саше", "category": "Несуществующая"}]},
     )
     assert r.status_code == 400
+
+
+def test_tidy_ignores_old_other_rules(client, seeded_chat, auth_header, fake_ai):
+    """Правило «→ Другое» без подкатегории (раньше быстрый ввод их запоминал) не подсказываем:
+    иначе разбор предлагал переложить «Другое» в «Другое», а ИИ не спрашивался."""
+    _, answers = fake_ai
+    headers = auth_header(seeded_chat.alice_init_data)
+    answers["фото на документы"] = AiAnswer("new_subcategory", "Дом", "Фото на документы")
+    _create(client, seeded_chat, headers, "Фото на документы")
+
+    async def _old_rule():
+        async with async_session_maker() as session:
+            session.add(CategoryRule(chat_id=seeded_chat.chat_id, keyword="фото на документы", category="Другое"))
+            await session.commit()
+
+    asyncio.run(_old_rule())
+    body = client.get(f"/api/chats/{seeded_chat.chat_id}/tidy-other", headers=headers).json()
+    [item] = body["items"]
+    assert item["source"] == "ai" and item["proposal"]["subcategory"] == "Фото на документы"
+    # и при вводе новой траты тоже спрашиваем ИИ, а не подставляем «Другое»
+    assert _suggest(client, seeded_chat, headers, "Фото на документы")["source"] == "ai"

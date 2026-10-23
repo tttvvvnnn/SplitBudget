@@ -307,7 +307,7 @@ async def tidy_other_list(ctx: ChatContext = Depends(get_chat_context)):
     ИИ спрашиваем не дольше ~20 с за раз; more=true — можно запросить ещё."""
     if not ctx.chat.ai_enabled:
         raise HTTPException(status_code=400, detail="Подсказки ИИ выключены в этом пространстве")
-    items, more = await tidy_other(ctx.session, ctx.chat)
+    items, unknown, more = await tidy_other(ctx.session, ctx.chat)
     await ctx.session.commit()  # кэш ответов ИИ
     return TidyOut(
         items=[
@@ -322,6 +322,7 @@ async def tidy_other_list(ctx: ChatContext = Depends(get_chat_context)):
             )
             for i in items
         ],
+        unknown=unknown,
         more=more,
     )
 

@@ -715,6 +715,7 @@ class TidyItemOut(BaseModel):
 
 class TidyOut(BaseModel):
     items: list[TidyItemOut]
+    unknown: list[str] = []  # названия, для которых категорию не угадали
     more: bool  # не всё успели разобрать — можно запросить ещё
 
 
