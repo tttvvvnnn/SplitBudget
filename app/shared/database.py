@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -14,6 +15,16 @@ class Base(DeclarativeBase):
 
 
 engine = create_async_engine(settings.database_url, echo=False)
+
+
+@event.listens_for(engine.sync_engine, "connect")
+def _foreign_keys_on(dbapi_connection, _record) -> None:
+    # В SQLite внешние ключи (а с ними ON DELETE CASCADE / SET NULL) включаются на каждом
+    # соединении отдельно. Без этого удалённый кредит оставлял свои платежи, и новый кредит
+    # с тем же (освободившимся) id получал чужой платёж.
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
 async_session_maker = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 
@@ -24,7 +35,6 @@ async def configure_sqlite() -> None:
     не эта функция — см. lifespan в app/main.py."""
     async with engine.begin() as conn:
         await conn.exec_driver_sql("PRAGMA journal_mode=WAL;")
-        await conn.exec_driver_sql("PRAGMA foreign_keys=ON;")
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:

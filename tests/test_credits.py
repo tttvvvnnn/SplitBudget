@@ -506,3 +506,51 @@ def test_old_interest_moves_into_card(tmp_path, monkeypatch):
     con = sqlite3.connect(db)
     assert con.execute("select card_id from expenses where id = 5").fetchone() == (1,)
     assert con.execute("select debt from credit_cards where id = 1").fetchone() == (10000,)
+
+
+def test_deleted_loan_payment_not_inherited(client, seeded_chat, auth_header):
+    """Удалили кредит и завели новый: новый не должен получить платёж старого (SQLite отдаёт
+    освободившийся id, а каскад работает, только если внешние ключи включены на соединении)."""
+    pid, h = _personal(client, seeded_chat, auth_header)
+    me = client.get(f"/api/chats/{pid}/me", headers=h).json()["member"]["id"]
+    body = {"title": "Старый", "amount": 0, "payer_member_id": me, "kind": "loan",
+            "participants": [{"member_id": me}], "category": "Кредиты"}
+    old = client.post(f"/api/chats/{pid}/recurring", headers=h, json={**body, "day_of_month": TODAY.day}).json()
+    client.get(f"/api/chats/{pid}/credits", headers=h)
+    assert client.delete(f"/api/chats/{pid}/recurring/{old['id']}", headers=h).status_code == 204
+
+    new = client.post(f"/api/chats/{pid}/recurring", headers=h,
+                      json={**body, "title": "Образовательный", "day_of_month": 31}).json()
+    [loan] = client.get(f"/api/chats/{pid}/credits", headers=h).json()["loans"]
+    assert loan["recurring_id"] == new["id"]
+    last = (TODAY.replace(day=28) + dt.timedelta(days=4)).replace(day=1) - dt.timedelta(days=1)
+    assert loan["payment_due"] == last.isoformat()
+
+
+def test_orphan_rows_migration(tmp_path, monkeypatch):
+    """Миграция чинит платёж, доставшийся новому кредиту от удалённого, и удаляет сирот."""
+    db = tmp_path / "db.sqlite3"
+    cfg = Config(str(ROOT / "alembic.ini"))
+    cfg.set_main_option("script_location", str(ROOT / "migrations"))
+    monkeypatch.setattr("app.shared.config.settings.DATABASE_PATH", str(db))
+    command.upgrade(cfg, "e6a2c4f8b051")
+    conn = sqlite3.connect(db)
+    conn.executescript("""
+        INSERT INTO chats (id, title, currency, created_at, is_personal, plan_start_day)
+            VALUES (1, 'Мои финансы', 'RUB', '2026-01-01', 1, 1);
+        INSERT INTO members (id, chat_id, tg_user_id, full_name, is_active, is_hidden, added_at)
+            VALUES (1, 1, 7, 'A', 1, 0, '2026-01-01');
+        INSERT INTO recurring_expenses (id, chat_id, title, amount, category, payer_member_id, split_type,
+            day_of_month, is_active, created_by_member_id, created_at, kind)
+            VALUES (5, 1, 'Образовательный', 0, 'Кредиты', 1, 'equal', 31, 1, 1, '2026-10-23 10:00:00', 'loan');
+        INSERT INTO recurring_payments (recurring_id, month, due_date, status, reminders_sent, asked)
+            VALUES (5, '2026-09', '2026-09-23', 'pending', '', 0),
+                   (5, '2026-10', '2026-10-23', 'pending', '7,3,1', 1),
+                   (6, '2026-10', '2026-10-05', 'pending', '', 0);
+        INSERT INTO recurring_participants (recurring_id, member_id) VALUES (6, 1);
+    """)
+    conn.commit()
+    command.upgrade(cfg, "f7b3d5e9c162")
+    assert conn.execute("SELECT recurring_id, month, due_date, reminders_sent FROM recurring_payments").fetchall() == [
+        (5, "2026-10", "2026-10-31", "")]
+    assert conn.execute("SELECT count(*) FROM recurring_participants").fetchone() == (0,)
