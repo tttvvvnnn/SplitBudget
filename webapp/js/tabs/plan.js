@@ -95,6 +95,23 @@ function itemRowHtml(it) {
     </div>`;
 }
 
+/* Итого: в конце месяца плана статьи обнуляются, и всё, что осталось (или ушло в минус), вместе
+   со «Свободно» переходит в следующий месяц. Это доходы с переносом минус все списания. */
+function totalRowHtml(plan, isCurrent) {
+  const allocated = plan.items.reduce((s, i) => s + Number(i.allocated), 0);
+  const spent = plan.items.reduce((s, i) => s + Number(i.spent), 0);
+  const carry = allocated - spent;
+  const label = plan.end < todayISO() ? "Перешло на следующий месяц" : "Перейдёт на следующий месяц";
+  return `
+    <div class="plan-total">
+      <div class="plan-row-head">
+        <span class="plan-row-title">Итого</span>
+        <span class="plan-row-left ${carry < 0 ? "plan-minus" : ""}">${carry < 0 ? "−" : ""}${fmtMoney(Math.abs(carry))}</span>
+      </div>
+      <div class="plan-row-sub hint-text">${label}${isCurrent ? ", если больше ничего не тратить" : ""} · потрачено и отложено ${fmtMoney(spent)} из ${fmtMoney(allocated)}</div>
+    </div>`;
+}
+
 // Сверху — ушедшие в минус, затем близкие к лимиту; дальше — в порядке плана
 function sortedItems(items) {
   const rank = { over: 0, warn: 1, ok: 2 };
@@ -147,6 +164,7 @@ async function renderPlanTab() {
     <div class="card plan-list">
       ${sortedItems(items).map(itemRowHtml).join("")}
       ${itemRowHtml(free)}
+      ${totalRowHtml(plan, isCurrent)}
     </div>
     <div class="hint-text" style="margin: 4px 4px 16px;">В конце месяца плана статьи обнуляются: остатки и перерасходы переходят в «Свободно».</div>
     </div>

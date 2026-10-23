@@ -1443,6 +1443,7 @@ select.dd-native { display: none !important; }
 .plan-row:has(+ .plan-row-free) { border-bottom: none; }
 .plan-row-free { border-top: 1px dashed var(--border); }
 .plan-row-icon { font-size: 20px; width: 26px; text-align: center; }
+.plan-total { padding: 10px 0 9px 36px; }
 .plan-row-main { flex: 1; min-width: 0; }
 
 .plan-row-head {
