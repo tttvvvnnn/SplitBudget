@@ -12,6 +12,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from sqlalchemy import delete, select
 
 from app.bot.notify import notify_budget_alerts
+from app.shared import loans
 from app.shared import obligations as ob
 from app.shared import plan
 from app.shared.budgets import alerts_after_expense, month_range
@@ -68,7 +69,7 @@ async def on_payment_button(callback: CallbackQuery) -> None:
                 expense_id = await ob.pay(session, payment, None, actor.id if actor else None)
                 result = f"✅ Оплачено: «{recurring.title}» — {ob.fmt_amount(payment.amount, chat.currency)}"
                 if recurring.debt is not None:
-                    result += f"\n{ob.debt_label(recurring)}: {ob.fmt_amount(recurring.debt, chat.currency)}"
+                    result += f"\n{ob.debt_label(recurring)}: {ob.fmt_amount(loans.remaining(recurring, dt.date.today()), chat.currency)}"
             elif action == "skip":
                 await ob.skip(session, payment)
                 result = f"⏭ «{recurring.title}» — в этом месяце не платим"

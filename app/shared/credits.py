@@ -28,6 +28,7 @@ from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.shared import obligations as ob
+from app.shared.loans import remaining
 from app.shared.models import (
     Chat,
     CreditCard,
@@ -511,5 +512,5 @@ async def month_debts(session: AsyncSession, chat: Chat, start: dt.date, end: dt
         cards_end=cards_end,
         purchases=purchases,
         paid=paid,
-        loans=sum((r.debt for r in loans), ZERO),
+        loans=sum((remaining(r, dt.date.today()) for r in loans), ZERO),
     )

@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 
 from app.api.dependencies import ChatContext, get_chat_context
-from app.shared import credits
-from app.shared.models import CreditCard, CreditOperation, Expense
+from app.shared import credits, loans
+from app.shared.models import CreditCard, CreditOperation, Expense, LoanTranche, RecurringExpense
 from app.shared.schemas import (
     CreditAdjustIn,
     CreditAmountIn,
@@ -19,6 +19,8 @@ from app.shared.schemas import (
     CreditPurchaseOut,
     CreditsOut,
     LoanOut,
+    LoanTrancheIn,
+    LoanTrancheOut,
 )
 
 router = APIRouter(tags=["credits"])
@@ -82,14 +84,20 @@ async def list_credits(ctx: ChatContext = Depends(get_chat_context)) -> CreditsO
     _personal(ctx)
     today = dt.date.today()
     cards = [await _card_out(ctx, c, today) for c in await credits.cards_of(ctx.session, ctx.chat.id)]
-    loans = await credits.loans_of(ctx.session, ctx.chat, today)
+    states = await credits.loans_of(ctx.session, ctx.chat, today)
     await ctx.session.commit()  # платежи месяца создаются при первом обращении
     loans_out = [
         LoanOut(
             recurring_id=s.recurring.id,
             title=s.recurring.title,
             amount=s.recurring.amount,
-            debt=s.recurring.debt,
+            debt=loans.remaining(s.recurring, today),
+            body=s.recurring.debt,
+            interest=loans.accrued(s.recurring, today) if s.recurring.debt is not None else None,
+            daily_interest=loans.daily(s.recurring) if s.recurring.rate else None,
+            rate=s.recurring.rate,
+            loan_amount=s.recurring.loan_amount,
+            tranches=[LoanTrancheOut.model_validate(t) for t in await loans.tranches_of(ctx.session, s.recurring.id)],
             day_of_month=s.recurring.day_of_month,
             end_month=s.recurring.end_month,
             is_active=s.recurring.is_active,
@@ -100,7 +108,7 @@ async def list_credits(ctx: ChatContext = Depends(get_chat_context)) -> CreditsO
             payment_due=s.payment.due_date if s.payment else None,
             next_due=s.next_due,
         )
-        for s in loans
+        for s in states
     ]
     active_cards = [c for c in cards if not c.is_archived]
     deadlines = [c.next_deadline for c in active_cards if c.next_deadline]
@@ -196,3 +204,35 @@ async def undo_operation(card_id: int, operation_id: int, ctx: ChatContext = Dep
     if operation is None or operation.card_id != card.id:
         raise HTTPException(status_code=404, detail="Операция не найдена")
     return await _run(ctx, card, credits.undo(ctx.session, card, operation))
+
+
+async def _loan(ctx: ChatContext, recurring_id: int) -> RecurringExpense:
+    _personal(ctx)
+    recurring = await ctx.session.get(RecurringExpense, recurring_id)
+    if recurring is None or recurring.chat_id != ctx.chat.id or recurring.kind != "loan":
+        raise HTTPException(status_code=404, detail="Кредит не найден")
+    return recurring
+
+
+@router.post("/chats/{chat_id}/loans/{recurring_id}/tranches", response_model=LoanTrancheOut, status_code=201)
+async def add_tranche(
+    recurring_id: int, payload: LoanTrancheIn, ctx: ChatContext = Depends(get_chat_context)
+) -> LoanTrancheOut:
+    recurring = await _loan(ctx, recurring_id)
+    try:
+        tranche = await loans.add_tranche(ctx.session, recurring, payload.amount, payload.tranche_date, dt.date.today())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await ctx.session.commit()
+    return LoanTrancheOut.model_validate(tranche)
+
+
+@router.delete("/chats/{chat_id}/loans/{recurring_id}/tranches/{tranche_id}", status_code=204)
+async def delete_tranche(recurring_id: int, tranche_id: int, ctx: ChatContext = Depends(get_chat_context)):
+    recurring = await _loan(ctx, recurring_id)
+    tranche = await ctx.session.get(LoanTranche, tranche_id)
+    if tranche is None or tranche.recurring_id != recurring.id:
+        raise HTTPException(status_code=404, detail="Транш не найден")
+    await loans.delete_tranche(ctx.session, recurring, tranche, dt.date.today())
+    await ctx.session.commit()
+    return None

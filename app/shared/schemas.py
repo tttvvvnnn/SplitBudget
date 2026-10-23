@@ -286,7 +286,10 @@ class RecurringCreate(BaseModel):
     participants: list[RecurringParticipantIn] = Field(default_factory=list)
     kind: str = "other"
     end_month: str | None = None  # последний платёж кредита, 'YYYY-MM'
-    debt: Decimal | None = Field(default=None, ge=0)  # остаток долга по кредиту
+    debt: Decimal | None = Field(default=None, ge=0)  # остаток долга (тело) по кредиту
+    loan_amount: Decimal | None = Field(default=None, ge=0)  # сумма кредита
+    rate: Decimal | None = Field(default=None, ge=0, le=1000)  # % годовых
+    interest: Decimal | None = Field(default=None, ge=0)  # набежавшие проценты сейчас
 
     @field_validator("kind")
     @classmethod
@@ -312,6 +315,9 @@ class RecurringUpdate(BaseModel):
     kind: str | None = None
     end_month: str | None = None  # "" — без срока
     debt: Decimal | None = Field(default=None, ge=0)
+    loan_amount: Decimal | None = Field(default=None, ge=0)
+    rate: Decimal | None = Field(default=None, ge=0, le=1000)
+    interest: Decimal | None = Field(default=None, ge=0)
 
     @field_validator("kind")
     @classmethod
@@ -338,6 +344,9 @@ class RecurringOut(BaseModel):
     kind: str
     end_month: str | None
     debt: Decimal | None
+    loan_amount: Decimal | None = None
+    rate: Decimal | None = None
+    interest: Decimal | None = None  # набежавшие проценты на сегодня
 
 
 class SubcategoryStat(BaseModel):
@@ -668,11 +677,30 @@ class CreditCardOut(BaseModel):
     opening_left: Decimal = Decimal("0")  # непогашенный стартовый долг (гасится первым)
 
 
+class LoanTrancheIn(BaseModel):
+    amount: Decimal = Field(gt=0)
+    tranche_date: dt.date
+
+
+class LoanTrancheOut(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: int
+    amount: Decimal
+    tranche_date: dt.date
+
+
 class LoanOut(BaseModel):
     recurring_id: int
     title: str
     amount: Decimal  # ежемесячный платёж
-    debt: Decimal | None  # остаток
+    debt: Decimal | None  # остаток: тело и набежавшие проценты
+    body: Decimal | None = None  # тело
+    interest: Decimal | None = None  # набежавшие проценты на сегодня
+    daily_interest: Decimal | None = None  # сколько набегает за день
+    rate: Decimal | None = None
+    loan_amount: Decimal | None = None
+    tranches: list[LoanTrancheOut] = Field(default_factory=list)
     day_of_month: int
     end_month: str | None
     is_active: bool
