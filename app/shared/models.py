@@ -118,6 +118,11 @@ class Expense(Base):
     card_id: Mapped[int | None] = mapped_column(
         ForeignKey("credit_cards.id", ondelete="SET NULL"), nullable=True
     )
+    # Трата — платёж по своей кредитной карте (категория «Кредиты»): долг карты уменьшается
+    # на её сумму. Как card_id, видна только плательщику.
+    repays_card_id: Mapped[int | None] = mapped_column(
+        ForeignKey("credit_cards.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[dt.datetime] = mapped_column(
         DateTime, default=_utcnow, onupdate=_utcnow

@@ -188,6 +188,7 @@ class ExpenseOut(BaseModel):
     created_at: dt.datetime
     is_recurring: bool
     card_id: int | None = None  # своя кредитная карта; чужая не показывается
+    repays_card_id: int | None = None  # платёж по своей кредитной карте
 
 
 class AllExpenseOut(BaseModel):
@@ -210,6 +211,7 @@ class AllExpenseOut(BaseModel):
     i_paid: bool
     is_recurring: bool
     card_id: int | None = None  # оплачено своей кредитной картой
+    repays_card_id: int | None = None  # платёж по своей кредитной карте
 
 
 class BalanceEntry(BaseModel):
@@ -635,6 +637,7 @@ class CreditPurchaseOut(BaseModel):
     title: str
     amount: Decimal
     expense_date: dt.date
+    is_payment: bool = False  # трата-платёж по карте: долг уменьшился
 
     model_config = {"from_attributes": True}
 

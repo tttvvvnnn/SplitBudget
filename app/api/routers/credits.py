@@ -49,7 +49,10 @@ async def _card_out(ctx: ChatContext, card: CreditCard, today: dt.date) -> Credi
         subcategory=card.subcategory,
         is_archived=card.is_archived,
         operations=[CreditOperationOut.model_validate(o) for o in operations],
-        purchases=[CreditPurchaseOut.model_validate(e) for e in purchases],
+        purchases=[
+            CreditPurchaseOut.model_validate(e).model_copy(update={"is_payment": e.repays_card_id == card.id})
+            for e in purchases
+        ],
     )
 
 

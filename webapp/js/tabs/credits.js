@@ -211,7 +211,12 @@ function operationText(o) {
 function historyHtml(c) {
   const rows = [
     ...c.operations.map((o) => ({ date: o.op_date, id: o.id, text: operationText(o), undo: true })),
-    ...c.purchases.map((p) => ({ date: p.expense_date, id: -p.id, text: `🛒 ${p.title} +${fmtMoney(p.amount)}`, undo: false })),
+    ...c.purchases.map((p) => ({
+      date: p.expense_date,
+      id: -p.id,
+      text: p.is_payment ? `💸 ${p.title} −${fmtMoney(p.amount)}` : `🛒 ${p.title} +${fmtMoney(p.amount)}`,
+      undo: false,
+    })),
   ].sort((a, b) => (a.date === b.date ? b.id - a.id : a.date < b.date ? 1 : -1));
   if (!rows.length) return "";
   return `
