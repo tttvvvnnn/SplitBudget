@@ -21,8 +21,8 @@ function incomeChatId() {
   return state.personalChatId;
 }
 
-/* Деньги считаются по оплате: покупка с кредитки станет тратой, когда погасишь карту.
-   Здесь видно, сколько куплено в кредит и насколько вырос долг — этих денег ещё нет в тратах. */
+/* Покупки кредиткой живут в карте (tabs/credits.js), тратой становится погашение. Здесь видно,
+   сколько куплено в кредит за месяц и насколько вырос долг — этих денег ещё нет в тратах. */
 function cardsHtml(data) {
   if (!data.has_cards || Number(data.spent_card) <= 0) return "";
   const debtChange = Number(data.spent_card) - Number(data.card_repaid);
@@ -32,7 +32,7 @@ function cardsHtml(data) {
           <div><span>💳 Куплено в кредит</span><span>${fmtMoney(data.spent_card)}</span></div>
           <div><span>💳 Долг по картам за месяц</span><span>${debtChange > 0 ? "+" : debtChange < 0 ? "−" : ""}${fmtMoney(Math.abs(debtChange))}</span></div>
         </div>
-        <div class="hint-text">В «Свободно» не входит: станет тратой, когда внесёте платёж на карту.</div>
+        <div class="hint-text">В тратах и «Свободно» этого нет: тратой станет погашение карты.</div>
       </div>`;
 }
 

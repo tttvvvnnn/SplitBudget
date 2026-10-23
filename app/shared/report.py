@@ -21,7 +21,7 @@ from app.shared.credits import month_debts
 from app.shared.goals import goals_status
 from app.shared.models import Chat, Expense, Income, Member, MonthlyReport
 from app.shared.obligations import fmt_amount, month_of, obligations
-from app.shared.plan import items_of, money_entries
+from app.shared.plan import items_of
 
 ZERO = Decimal("0")
 MONTHS = (
@@ -82,16 +82,8 @@ async def build_report(session: AsyncSession, chat: Chat, month: str, partial: b
     before = await spending(session, chat, prev_month(month))
     before_total = before.get(("", None), ZERO)
     lines.append(f"Потрачено: <b>{money(total)}</b>{'' if partial else _percent_change(total, before_total)}")
-    # Покупки с кредитки — траты в день покупки, а свои деньги уходят, когда гасишь карту
-    debts = await month_debts(session, chat, start, end) if chat.is_personal else None
-    cash = total
-    if debts and (debts.purchases or debts.paid):
-        cash = sum((e.amount for e in await money_entries(session, chat, start, end)), ZERO)
-        if debts.purchases:
-            lines.append(f"💳 Из них в кредит: {money(debts.purchases)}")
-        lines.append(f"💵 Своих денег ушло: {money(cash)}")
     if chat.is_personal and incomes > 0:
-        left = incomes - cash
+        left = incomes - total
         lines.append(f"Доходы: {money(incomes)} · {'осталось' if left >= 0 else 'перерасход'} {money(abs(left))}")
 
     cats = _by_category(now)
@@ -132,6 +124,7 @@ async def build_report(session: AsyncSession, chat: Chat, month: str, partial: b
         lines.append(f"📌 Обязательные платежи: оплачено {money(paid)} из {money(planned)}")
 
     if chat.is_personal:
+        debts = await month_debts(session, chat, start, end)
         if debts and (debts.cards_start or debts.cards_end or debts.purchases):
             line = f"💳 Кредитки: долг {money(debts.cards_start)} → {money(debts.cards_end)}"
             details = [f"покупки +{money(debts.purchases)}" if debts.purchases else "",
@@ -158,10 +151,7 @@ async def build_report(session: AsyncSession, chat: Chat, month: str, partial: b
         result = await session.execute(
             select(Member.full_name, func.sum(Expense.amount))
             .join(Member, Member.id == Expense.payer_member_id)
-            .where(
-                Expense.chat_id == chat.id, Expense.expense_date >= start, Expense.expense_date < end,
-                Expense.repays_card_id.is_(None),
-            )
+            .where(Expense.chat_id == chat.id, Expense.expense_date >= start, Expense.expense_date < end)
             .group_by(Member.id)
             .order_by(func.sum(Expense.amount).desc())
         )

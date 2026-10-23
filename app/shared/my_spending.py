@@ -16,6 +16,11 @@
 зачёт считается по общему долгу участника, без разбивки по тому, кому именно он должен.
 
 Хранить ничего не нужно: всё пересчитывается из трат, долей и погашений.
+
+Покупка своей кредиткой (Expense.card_id) — не трата: она живёт в карте
+(app/shared/credits.py), а тратой становится погашение карты (Expense.repays_card_id).
+Поэтому такие траты сюда не попадают; семейная трата с твоей кредиткой остаётся семейной —
+в балансах чата она есть, а в «Моих финансах» её нет, пока не погасишь карту.
 """
 from __future__ import annotations
 
@@ -57,7 +62,7 @@ async def _in_chat(session: AsyncSession, member: Member, chat: Chat, start: dt.
                 select(Expense).where(Expense.chat_id == chat.id, Expense.expense_date >= start, Expense.expense_date < end)
             )
         ).scalars().all()
-        return [MyExpense(e, chat, e.amount, True) for e in rows]
+        return [MyExpense(e, chat, e.amount, True) for e in rows if e.card_id is None]
 
     # Возвраты пересчитывают и прошлые траты, поэтому берём всю историю чата
     mine = select(ExpenseShare.expense_id).where(ExpenseShare.member_id == member.id)
@@ -105,6 +110,8 @@ async def _in_chat(session: AsyncSession, member: Member, chat: Chat, start: dt.
     for e in expenses:
         if not (start <= e.expense_date < end):
             continue
+        if e.payer_member_id == member.id and e.card_id is not None:
+            continue  # покупка своей кредиткой — в карте, а не в тратах
         if e.payer_member_id == member.id:
             out.append(MyExpense(e, chat, e.amount - returned.get(e.id, ZERO), True))
         else:

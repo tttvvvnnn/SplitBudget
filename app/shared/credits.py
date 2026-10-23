@@ -1,13 +1,16 @@
 """Кредиты и кредитные карты «Моих финансов».
 
-Кредитная карта (CreditCard) — счёт с долгом. Долг = собственный учёт карты (card.debt) плюс
-покупки — траты, оплаченные картой (Expense.card_id), минус траты-платежи по карте
-(Expense.repays_card_id, категория «Кредиты»): трату поправили или удалили, и долг
-пересчитался сам. Учёт карты меняют операции (CreditOperation):
-«Внести» уменьшает долг и тратой не считается, «Продлить срок» переносит даты, не трогая
-долг, «Начислили %» записывает трату в категории карты и увеличивает долг, «Сверить с
-банком» правит долг руками. Даты хранятся датами, а не днём месяца: льготный период у банков
-не ровно месяц, и после каждой выписки срок свой.
+Кредитная карта (CreditCard) — счёт с долгом. Покупки по карте — траты с Expense.card_id —
+тратами «Моих финансов» не считаются, они живут в карте (app/shared/my_spending.py). Тратой
+становится погашение: трата «Кредиты» с Expense.repays_card_id (так же записывается «Внести»).
+Погашения закрывают покупки по очереди, начиная с самых старых (ledger), — так видно, что ещё
+не погашено.
+
+Долг = собственный учёт карты (card.debt: стартовый долг, сверки и старые операции) плюс
+покупки минус погашения: трату поправили или удалили, и долг пересчитался сам. «Продлить
+срок» переносит даты, не трогая долг, «Начислили %» записывает покупку «Проценты» в карту,
+«Сверить с банком» правит долг руками. Даты хранятся датами, а не днём месяца: льготный период
+у банков не ровно месяц, и после каждой выписки срок свой.
 
 Кредиты остаются обязательными платежами (RecurringExpense, kind = loan): у них фиксированный
 день и сумма, платёж — трата целиком, а остаток долга (debt) уменьшается при оплате
@@ -56,6 +59,53 @@ async def purchases_total(session: AsyncSession, card_ids: list[int]) -> dict[in
 
 async def debt_of(session: AsyncSession, card: CreditCard) -> Decimal:
     return card.debt + (await purchases_total(session, [card.id])).get(card.id, ZERO)
+
+
+@dataclass
+class Ledger:
+    """Что по карте ещё не погашено: погашения закрывают долг по очереди, от самого старого."""
+
+    opening: Decimal  # долг, с которым карту завели (и прочий долг не из покупок)
+    opening_left: Decimal
+    left: dict[int, Decimal]  # expense_id покупки → сколько осталось погасить
+
+
+async def ledger(session: AsyncSession, card: CreditCard) -> Ledger:
+    """Погашения (траты-погашения, старые «Внести», сверки в минус) закрывают сначала стартовый
+    долг, потом покупки и проценты по дате. Сверка в плюс — как покупка в свой день."""
+    ops = (
+        await session.execute(select(CreditOperation).where(CreditOperation.card_id == card.id))
+    ).scalars().all()
+    paid_ops = sum((o.amount for o in ops if o.kind == "payment"), ZERO)
+    # card.debt уже включает старые «Внести», сверки и старые проценты без покупки
+    changes = [o for o in ops if o.amount is not None and (o.kind == "adjust" or (o.kind == "interest" and not o.expense_id))]
+    opening = card.debt + paid_ops - sum((o.amount for o in changes), ZERO)
+    rows = (
+        await session.execute(
+            select(Expense.id, Expense.expense_date, Expense.amount, Expense.card_id)
+            .where(or_(Expense.card_id == card.id, Expense.repays_card_id == card.id))
+            .order_by(Expense.expense_date, Expense.id)
+        )
+    ).all()
+    repaid = paid_ops + sum((a for _, _, a, c in rows if c != card.id), ZERO)
+    repaid += sum((-o.amount for o in changes if o.amount < 0), ZERO)
+    if opening < 0:
+        repaid, opening = repaid - opening, ZERO
+    # Очередь долга: стартовый долг, затем покупки и сверки в плюс по дате
+    queue: list[tuple[dt.date, int | None, Decimal]] = [(dt.date.min, None, opening)]
+    queue += [(d, i, a) for i, d, a, c in rows if c == card.id]
+    queue += [(o.op_date, None, o.amount) for o in changes if o.amount > 0]
+    queue.sort(key=lambda x: (x[0], x[1] or 0))
+    left: dict[int, Decimal] = {}
+    opening_left = ZERO
+    for date, expense_id, amount in queue:
+        part = min(amount, max(repaid, ZERO))
+        repaid -= part
+        if expense_id is not None:
+            left[expense_id] = amount - part
+        elif date == dt.date.min:
+            opening_left = amount - part
+    return Ledger(opening=opening, opening_left=opening_left, left=left)
 
 
 async def recent_purchases(session: AsyncSession, card_id: int, limit: int) -> list[Expense]:
@@ -114,18 +164,47 @@ def _check_amount(amount: Decimal) -> None:
         raise ValueError("Укажите сумму больше нуля")
 
 
-async def pay(session: AsyncSession, card: CreditCard, amount: Decimal, date: dt.date | None = None) -> CreditOperation:
-    """Внесли деньги на карту: долг уменьшается, тратой это не считается. Внести больше долга
-    нельзя — переплата на карте здесь не учитывается."""
+async def _owner(session: AsyncSession, card: CreditCard) -> Member:
+    """Владелец карты — единственный участник «Моих финансов», где она заведена."""
+    member = (await session.execute(select(Member).where(Member.chat_id == card.chat_id))).scalars().first()
+    if member is None:
+        raise ValueError("Нет владельца карты")
+    return member
+
+
+async def _card_expense(
+    session: AsyncSession, card: CreditCard, title: str, amount: Decimal, date: dt.date, **link
+) -> Expense:
+    member = await _owner(session, card)
+    expense = Expense(
+        chat_id=card.chat_id,
+        title=title[:255],
+        amount=amount,
+        category=card.category,
+        subcategory=card.subcategory,
+        expense_date=date,
+        payer_member_id=member.id,
+        split_type="equal",
+        created_by_member_id=member.id,
+        **link,
+    )
+    session.add(expense)
+    await session.flush()
+    session.add(ExpenseShare(expense_id=expense.id, member_id=member.id, amount=amount))
+    await session.flush()
+    return expense
+
+
+async def pay(session: AsyncSession, card: CreditCard, amount: Decimal, date: dt.date | None = None) -> Expense:
+    """Внесли деньги на карту: это трата-погашение в категории карты, долг уменьшается. Внести
+    больше долга нельзя — переплата на карте здесь не учитывается."""
     _check_amount(amount)
     debt = await debt_of(session, card)
     if amount > debt:
         raise ValueError(f"Это больше долга ({ob.fmt_amount(debt, '').strip()})")
-    card.debt -= amount
-    operation = CreditOperation(card_id=card.id, kind="payment", amount=amount, op_date=date or dt.date.today())
-    session.add(operation)
-    await session.flush()
-    return operation
+    return await _card_expense(
+        session, card, f"Погашение · {card.title}", amount, date or dt.date.today(), repays_card_id=card.id
+    )
 
 
 async def extend(
@@ -155,24 +234,11 @@ async def extend(
 
 
 async def interest(session: AsyncSession, card: CreditCard, member: Member, amount: Decimal) -> CreditOperation:
-    """Банк начислил проценты или комиссию: это трата в категории карты, долг растёт."""
+    """Банк начислил проценты или комиссию: покупка «Проценты» в карте, долг растёт. Тратой
+    станет, когда карту погасят."""
     _check_amount(amount)
     today = dt.date.today()
-    expense = Expense(
-        chat_id=card.chat_id,
-        title=f"Проценты · {card.title}"[:255],
-        amount=amount,
-        category=card.category,
-        subcategory=card.subcategory,
-        expense_date=today,
-        payer_member_id=member.id,
-        split_type="equal",
-        created_by_member_id=member.id,
-    )
-    session.add(expense)
-    await session.flush()
-    session.add(ExpenseShare(expense_id=expense.id, member_id=member.id, amount=amount))
-    card.debt += amount
+    expense = await _card_expense(session, card, f"Проценты · {card.title}", amount, today, card_id=card.id)
     operation = CreditOperation(card_id=card.id, kind="interest", amount=amount, op_date=today, expense_id=expense.id)
     session.add(operation)
     await session.flush()
@@ -192,16 +258,16 @@ async def adjust(session: AsyncSession, card: CreditCard, debt: Decimal) -> Cred
 
 
 async def undo(session: AsyncSession, card: CreditCard, operation: CreditOperation) -> None:
-    """Отменить операцию: вернуть долг (или даты) как было и удалить трату процентов."""
+    """Отменить операцию: вернуть долг (или даты) как было и удалить покупку «Проценты»."""
+    expense = await session.get(Expense, operation.expense_id) if operation.expense_id else None
     if operation.kind == "payment":
         card.debt += operation.amount
+    elif operation.kind == "interest" and expense is not None:
+        # Проценты — покупка в карте: удалили её, и долг пересчитался сам
+        await session.execute(delete(ExpenseShare).where(ExpenseShare.expense_id == expense.id))
+        await session.delete(expense)
     elif operation.kind in ("interest", "adjust"):
         card.debt -= operation.amount
-        if operation.expense_id:
-            expense = await session.get(Expense, operation.expense_id)
-            if expense is not None:
-                await session.execute(delete(ExpenseShare).where(ExpenseShare.expense_id == expense.id))
-                await session.delete(expense)
     elif operation.kind == "extend" and operation.note:
         old = json.loads(operation.note)["old"]
         card.grace_until = _parse(old.get("grace_until"))
@@ -213,7 +279,7 @@ async def undo(session: AsyncSession, card: CreditCard, operation: CreditOperati
 
 async def delete_card(session: AsyncSession, card: CreditCard) -> None:
     # Каскад в SQLite срабатывает не на каждом соединении — операции удаляем сами.
-    # Траты процентов и покупки остаются: деньги на них потрачены.
+    # Покупки и проценты остаются обычными тратами: деньги на них потрачены.
     await session.execute(delete(CreditOperation).where(CreditOperation.card_id == card.id))
     await session.execute(update(Expense).where(Expense.card_id == card.id).values(card_id=None))
     await session.execute(update(Expense).where(Expense.repays_card_id == card.id).values(repays_card_id=None))

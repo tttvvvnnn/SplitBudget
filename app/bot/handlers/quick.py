@@ -381,7 +381,7 @@ async def on_quick_button(callback: CallbackQuery) -> None:
                     return
             if action == "card":
                 expense.card_id = card.id if card else None
-                note = "\n💳 Долг карты вырос" if card else "\n👤 Оплачено своими"
+                note = "\n💳 Покупка ушла в карту: тратой станет погашение" if card else "\n👤 Оплачено своими"
                 line = _line(expense, currency, card)
             else:
                 expense.repays_card_id = card.id if card else None

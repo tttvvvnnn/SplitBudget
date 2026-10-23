@@ -75,8 +75,8 @@ class IncomeSummary:
     obligations_pending: Decimal
     saved: Decimal  # отложено на цели в этом месяце (app/shared/goals.py)
     free: Decimal
-    # Кредитки: spent — по деньгам, в нём погашения карт (card_repaid), а покупки с карт и
-    # проценты (spent_card) — нет, пока карту не погасил
+    # Кредитки: в spent есть погашения карт (card_repaid), а покупок по картам и процентов
+    # (spent_card) нет — они живут в карте
     has_cards: bool = False
     spent_card: Decimal = ZERO
     card_repaid: Decimal = ZERO
@@ -102,7 +102,7 @@ async def summary(session: AsyncSession, chat: Chat, month: str, today: dt.date)
     statuses = await _source_statuses(session, chat.id, month, incomes)
     received = sum((i.amount for i in incomes), ZERO)
     expected = sum((st.source.amount for st in statuses if st.income is None and st.source.is_active), ZERO)
-    # По деньгам, как в Плане: покупки с кредитки не трата, пока карту не погасил
+    # Как в Плане: покупки кредиткой живут в карте, а погашения карт — траты
     start, end = month_range(month)
     spent = sum((e.amount for e in await money_entries(session, chat, start, end)), ZERO)
     items = await obligations(session, chat, month)

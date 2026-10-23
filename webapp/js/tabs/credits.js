@@ -1,7 +1,7 @@
 import { state } from "../state.js";
 import { api } from "../api.js";
 import { tg, haptic, toast, confirmAction } from "../telegram.js";
-import { todayISO, fmtMoney, escapeHtml, dayOfMonthLabel } from "../format.js";
+import { todayISO, fmtMoney, escapeHtml, dayOfMonthLabel, categoryIcon } from "../format.js";
 import { openSheet, closeSheet, useMainButtonFor, showFormError } from "../sheet.js";
 import { categoryFieldsHtml, bindCategoryFields, readCategoryFields } from "../category-fields.js";
 import { openPaymentSheet } from "./budgets.js";
@@ -9,11 +9,12 @@ import { openRecurringModal } from "./recurring.js";
 
 /* ---------------- Вкладка «Кредиты» ----------------
    Кредитные карты и кредиты «Моих финансов» (app/shared/credits.py). У карты долг и
-   плавающие даты: срок без процентов и минимальный платёж. «Внести» уменьшает долг (это не
-   трата), «Продлить срок» переносит даты при том же долге, «Начислили %» — трата в категории
-   карты, долг растёт, «Сверить с банком» правит долг руками. Покупки — траты, у которых в
-   «Чем оплачено» выбрана карта (tabs/expenses.js): долг считается с ними. Кредиты — обязательные платежи
-   с остатком долга: платёж записывается тратой и уменьшает остаток. */
+   плавающие даты: срок без процентов и минимальный платёж. Покупки по карте живут в самой
+   карте и тратами не считаются («🛒 Покупка» здесь или «Чем оплачено» → карта в трате).
+   Тратой становится погашение: «Внести» записывает трату «Кредиты», и она закрывает покупки
+   по очереди, от самых старых. «Продлить срок» переносит даты при том же долге, «Начислили %» —
+   покупка «Проценты» в карте, «Сверить с банком» правит долг руками. Кредиты — обязательные
+   платежи с остатком долга: платёж записывается тратой и уменьшает остаток. */
 
 const MONTHS_GEN = ["января", "февраля", "марта", "апреля", "мая", "июня",
   "июля", "августа", "сентября", "октября", "ноября", "декабря"];
@@ -206,16 +207,45 @@ function operationText(o) {
   return `${OP_LABELS.interest} +${fmtMoney(amount)}`;
 }
 
-/* История карты: операции (их можно отменить) и покупки — траты, оплаченные картой (они
-   правятся во вкладке «Траты»). */
+function shortDay(iso) {
+  return iso.split("-").reverse().slice(0, 2).join(".");
+}
+
+/* Что ещё не погашено: погашения закрывают долг по очереди — сначала стартовый долг, потом
+   покупки от самых старых. */
+function unpaidHtml(c) {
+  const opening = Number(c.opening_left);
+  if (!c.unpaid.length && !opening) return "";
+  return `
+    <div class="section-title" style="margin-top:18px;">Не погашено</div>
+    ${opening ? `
+      <div class="deposit-row">
+        <span></span>
+        <span>Долг на начало</span>
+        <span>${fmtMoney(opening)}</span>
+      </div>` : ""}
+    ${c.unpaid.map((p) => {
+      const partly = Number(p.left) < Number(p.amount);
+      return `
+      <div class="deposit-row">
+        <span>${shortDay(p.expense_date)}</span>
+        <span>${categoryIcon(p.category)} ${escapeHtml(p.title)}</span>
+        <span>${fmtMoney(p.left)}${partly ? `<span class="hint-text"> из ${fmtMoney(p.amount)}</span>` : ""}</span>
+      </div>`;
+    }).join("")}`;
+}
+
+/* История карты: операции (их можно отменить), покупки и погашения (их можно удалить —
+   семейные покупки правятся в своём чате). */
 function historyHtml(c) {
+  const own = (p) => p.chat_id === creditsChatId();
   const rows = [
-    ...c.operations.map((o) => ({ date: o.op_date, id: o.id, text: operationText(o), undo: true })),
+    ...c.operations.map((o) => ({ date: o.op_date, id: o.id, text: operationText(o), attr: `data-undo="${o.id}"` })),
     ...c.purchases.map((p) => ({
       date: p.expense_date,
       id: -p.id,
       text: p.is_payment ? `💸 ${p.title} −${fmtMoney(p.amount)}` : `🛒 ${p.title} +${fmtMoney(p.amount)}`,
-      undo: false,
+      attr: own(p) ? `data-expense="${p.id}"` : "",
     })),
   ].sort((a, b) => (a.date === b.date ? b.id - a.id : a.date < b.date ? 1 : -1));
   if (!rows.length) return "";
@@ -225,8 +255,61 @@ function historyHtml(c) {
       <div class="deposit-row">
         <span>${r.date.split("-").reverse().join(".")}</span>
         <span>${escapeHtml(r.text)}</span>
-        ${r.undo ? `<button class="link-btn" data-undo="${r.id}" aria-label="Отменить">✕</button>` : '<span class="link-btn" aria-hidden="true"></span>'}
+        ${r.attr ? `<button class="link-btn" ${r.attr} aria-label="Отменить">✕</button>` : '<span class="link-btn" aria-hidden="true"></span>'}
       </div>`).join("")}`;
+}
+
+/* Покупка по карте: записывается в карту (трата с card_id), тратой станет погашение. */
+function openPurchaseSheet(c) {
+  const overlay = openSheet(`
+    <div class="sheet-title">🛒 Покупка · ${escapeHtml(c.title)}</div>
+    <div class="field">
+      <label>Что купили</label>
+      <input type="text" id="cp-title" placeholder="Продукты, кино…">
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label>Сумма (${escapeHtml(state.chat.currency)})</label>
+        <input type="number" id="cp-amount" min="0" step="0.01">
+      </div>
+      <div class="field">
+        <label>Дата</label>
+        <input type="date" id="cp-date" value="${todayISO()}">
+      </div>
+    </div>
+    ${categoryFieldsHtml("cp", "Продукты", null)}
+    <div class="hint-text" style="margin-bottom:12px;">Покупка останется в карте, чтобы помнить, на что ушёл долг. В тратах месяца её не будет — тратой станет погашение.</div>
+    <div class="error-text" id="cp-error" style="display:none;"></div>
+    <button class="btn" id="cp-submit">Добавить покупку</button>
+  `);
+  bindCategoryFields(overlay, "cp", () => {});
+  const submit = overlay.querySelector("#cp-submit");
+  submit.addEventListener("click", async () => {
+    const errorEl = overlay.querySelector("#cp-error");
+    const title = overlay.querySelector("#cp-title").value.trim();
+    const amount = Number(overlay.querySelector("#cp-amount").value || 0);
+    if (!title) { showFormError(errorEl, "Укажите, что купили"); return; }
+    if (!amount || amount <= 0) { showFormError(errorEl, "Укажите сумму больше нуля"); return; }
+    const { category, subcategory } = readCategoryFields(overlay, "cp");
+    try {
+      const pid = creditsChatId();
+      const me = (await api(`/chats/${pid}/me`)).member.id;
+      const form = new FormData();
+      Object.entries({
+        title, amount: String(amount), category, subcategory: subcategory || "",
+        expense_date: overlay.querySelector("#cp-date").value || todayISO(),
+        payer_member_id: String(me), split_type: "equal", participant_ids: JSON.stringify([me]),
+        card_id: String(c.id),
+      }).forEach(([k, v]) => form.append(k, v));
+      await api(`/chats/${pid}/expenses`, { method: "POST", body: form, isForm: true });
+      haptic("notification", "success");
+      closeSheet(overlay);
+      await renderCreditsTab();
+    } catch (err) {
+      showFormError(errorEl, err.message);
+    }
+  });
+  useMainButtonFor(overlay, submit, "Добавить покупку");
 }
 
 function openCardSheet(c) {
@@ -245,8 +328,12 @@ function openCardSheet(c) {
       <button class="btn secondary" id="cc-extend">📅 Продлить срок</button>
       <button class="btn secondary" id="cc-interest">➕ Начислили %</button>
     </div>
-    <button class="btn secondary" id="cc-adjust" style="margin-top:10px;">🔄 Сверить с банком</button>
-    <div class="hint-text" style="margin-top:8px;">«Внести» уменьшает долг и тратой не считается. «Продлить срок» — долг тот же, новые даты. «Начислили %» запишет трату в категории карты. Покупки добавляются сами: в трате выберите «Чем оплачено» → эту карту.</div>
+    <div class="credit-actions">
+      <button class="btn secondary" id="cc-purchase">🛒 Покупка</button>
+      <button class="btn secondary" id="cc-adjust">🔄 Сверить с банком</button>
+    </div>
+    <div class="hint-text" style="margin-top:8px;">Покупки живут в карте и тратами не считаются. «Внести» запишет трату-погашение — она закроет самые старые покупки. «Начислили %» добавит покупку «Проценты». «Продлить срок» — долг тот же, новые даты.</div>
+    ${unpaidHtml(c)}
     ${historyHtml(c)}
     <button class="btn secondary" id="cc-edit" style="margin-top:18px;">✏️ Изменить карту</button>
   `);
@@ -275,6 +362,20 @@ function openCardSheet(c) {
   overlay.querySelector("#cc-extend").addEventListener("click", () => { closeSheet(overlay); openExtendSheet(c); });
   overlay.querySelector("#cc-adjust").addEventListener("click", () => { closeSheet(overlay); openAdjustSheet(c); });
   overlay.querySelector("#cc-edit").addEventListener("click", () => { closeSheet(overlay); openCardModal(c); });
+  overlay.querySelector("#cc-purchase").addEventListener("click", () => { closeSheet(overlay); openPurchaseSheet(c); });
+  overlay.querySelectorAll("[data-expense]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!(await confirmAction("Удалить эту запись? Долг карты пересчитается."))) return;
+      try {
+        await api(`/chats/${creditsChatId()}/expenses/${btn.dataset.expense}`, { method: "DELETE" });
+        haptic("notification", "success");
+        closeSheet(overlay);
+        await renderCreditsTab();
+      } catch (e) {
+        showFormError(errorEl, e.message);
+      }
+    });
+  });
   overlay.querySelectorAll("[data-undo]").forEach((btn) => {
     btn.addEventListener("click", async () => {
       if (!(await confirmAction("Отменить эту операцию? Долг и даты вернутся как были."))) return;
@@ -393,7 +494,7 @@ function openCardModal(existing) {
         <input type="number" id="cm-min" min="0" step="0.01" value="${num(e.min_payment)}" placeholder="необязательно">
       </div>
     </div>
-    <div class="hint-text" style="margin-bottom:12px;">Даты — из последней выписки. Бот напомнит о них за 7, 3 и 1 день. Платежи по карте и проценты попадут в «План» по категории ниже.</div>
+    <div class="hint-text" style="margin-bottom:12px;">Даты — из последней выписки. Бот напомнит о них за 7, 3 и 1 день. Погашения карты записываются тратами в категории ниже и попадут в эту статью «Плана».</div>
     ${categoryFieldsHtml("cm", e.category || "Кредиты", isEdit ? e.subcategory : "Кредитная карта")}
     ${isEdit ? `<div class="field"><label><input type="checkbox" id="cm-archived" ${e.is_archived ? "checked" : ""}> В архиве (карта закрыта)</label></div>` : ""}
     <div class="error-text" id="cm-error" style="display:none;"></div>
@@ -440,7 +541,7 @@ function openCardModal(existing) {
   const del = overlay.querySelector("#cm-delete");
   if (del) {
     del.addEventListener("click", async () => {
-      if (!(await confirmAction("Удалить карту вместе с историей? Записанные траты процентов останутся. Если карту просто закрыли, лучше отправить её в архив."))) return;
+      if (!(await confirmAction("Удалить карту вместе с историей? Её покупки и проценты станут обычными тратами. Если карту просто закрыли, лучше отправить её в архив."))) return;
       try {
         await api(`/chats/${creditsChatId()}/credit-cards/${e.id}`, { method: "DELETE" });
         closeSheet(overlay);

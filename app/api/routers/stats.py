@@ -32,13 +32,13 @@ async def get_stats(
 ) -> StatsOut:
     start, end = period_or_400(month, date_from, date_to)
     fetch_start, fetch_end = fetch_range(start, end)
-    result = await ctx.session.execute(
+    query = (
         select(
             Expense.expense_date, Expense.category, Expense.subcategory, Expense.amount,
             Expense.title, Expense.recurring_id.is_not(None),
-        ).where(
-            Expense.chat_id == ctx.chat.id, Expense.expense_date >= fetch_start, Expense.expense_date < fetch_end,
-            Expense.repays_card_id.is_(None),  # погашение кредитки — не трата (app/shared/budgets.py)
-        )
+        ).where(Expense.chat_id == ctx.chat.id, Expense.expense_date >= fetch_start, Expense.expense_date < fetch_end)
     )
+    if ctx.chat.is_personal:
+        query = query.where(Expense.card_id.is_(None))  # покупки кредиткой живут в карте
+    result = await ctx.session.execute(query)
     return build_stats(start, end, [Row(*r) for r in result.all()])

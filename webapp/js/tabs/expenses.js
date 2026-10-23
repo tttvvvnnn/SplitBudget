@@ -187,8 +187,7 @@ function renderExpenseList() {
     return true;
   });
 
-  // Погашение кредитки — не трата: покупки с карты уже учтены в день покупки
-  const total = filtered.reduce((s, e) => s + (e.repays_card_id ? 0 : Number(e.amount)), 0);
+  const total = filtered.reduce((s, e) => s + Number(e.amount), 0);
   totalLine.textContent = fmtMoney(total);
 
   const hasAnyFilter = !!(q || category || payer);
@@ -250,7 +249,7 @@ function expenseCardHtml(e) {
               ${participants.map((m) => avatarHtml(m)).join("")}
             </span>` : ""}`;
   return `
-    <div class="card expense-card${e.repays_card_id ? " repayment" : ""}" data-id="${e.id}">
+    <div class="card expense-card" data-id="${e.id}">
       ${thumb}
       <div class="expense-main">
         <div class="expense-title">${escapeHtml(e.title)}</div>
@@ -258,7 +257,7 @@ function expenseCardHtml(e) {
           ${categoryBadgeHtml(e.category, e.subcategory)}${familyMeta}
           ${e.is_recurring ? '<span title="Повторяющаяся">🔁</span>' : ""}
           ${e.card_id ? '<span title="Оплачено кредитной картой">💳</span>' : ""}
-          ${e.repays_card_id ? '<span class="repay-badge" title="Погашение кредитки: покупки с карты уже учтены, в итоги не входит">💸 погашение</span>' : ""}
+          ${e.repays_card_id ? '<span title="Платёж по кредитной карте">💸</span>' : ""}
         </div>
       </div>
       <div class="expense-amount">${fmtMoney(e.amount)}</div>
@@ -305,13 +304,15 @@ function openExpenseModal(existing) {
     <div class="field" id="f-card-field" style="display:none;">
       <label>Чем оплачено</label>
       <select id="f-card"></select>
-      <div class="hint-text">Покупка кредиткой увеличит долг карты во вкладке «💳 Кредиты». Карту видите только вы.</div>
+      <div class="hint-text">${isPersonal()
+        ? "Покупка кредиткой уйдёт в карту (вкладка «💳 Кредиты») и тратой не будет: тратой станет погашение."
+        : "Для семьи это обычная трата, а в «Моих финансах» — покупка в карте: тратой станет погашение. Карту видите только вы."}</div>
     </div>
     ${categoryFieldsHtml("f", existing && existing.category, existing && existing.subcategory)}
     <div class="field" id="f-repays-field" style="display:none;">
       <label>Погашение кредитки</label>
       <select id="f-repays"></select>
-      <div class="hint-text">Платёж по карте уменьшит её долг во вкладке «💳 Кредиты» — «Внести» там нажимать не нужно.</div>
+      <div class="hint-text">Это трата: она уменьшит долг карты и закроет самые старые покупки по ней — «Внести» нажимать не нужно.</div>
     </div>
     <div class="field">
       <label>Дата</label>

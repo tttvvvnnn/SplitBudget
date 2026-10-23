@@ -634,14 +634,17 @@ class CreditOperationOut(BaseModel):
 
 
 class CreditPurchaseOut(BaseModel):
-    """Трата, оплаченная картой (личная или семейная)."""
+    """Покупка по карте (личная или семейная трата с card_id) или трата-погашение."""
 
     id: int
     chat_id: int
     title: str
     amount: Decimal
     expense_date: dt.date
-    is_payment: bool = False  # трата-платёж по карте: долг уменьшился
+    category: str = ""
+    subcategory: str | None = None
+    is_payment: bool = False  # трата-погашение: долг уменьшился
+    left: Decimal | None = None  # у покупки — сколько ещё не погашено
 
     model_config = {"from_attributes": True}
 
@@ -660,7 +663,9 @@ class CreditCardOut(BaseModel):
     subcategory: str | None
     is_archived: bool
     operations: list[CreditOperationOut]
-    purchases: list[CreditPurchaseOut]  # последние покупки
+    purchases: list[CreditPurchaseOut]  # последние покупки и погашения
+    unpaid: list[CreditPurchaseOut] = []  # непогашенные покупки, от старых к новым
+    opening_left: Decimal = Decimal("0")  # непогашенный стартовый долг (гасится первым)
 
 
 class LoanOut(BaseModel):

@@ -488,9 +488,6 @@ button:active, .expense-card:active, .budget-card:active, .obligation-row:active
   margin-top: 2px;
 }
 
-/* Погашение кредитки: в списке видно, но в итоги не входит */
-.expense-card.repayment .expense-amount { color: var(--hint); }
-.repay-badge { color: var(--hint); }
 .expense-amount {
   font-weight: 700;
   font-size: 15px;

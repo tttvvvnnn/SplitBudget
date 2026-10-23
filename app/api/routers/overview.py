@@ -15,7 +15,6 @@ from app.api.auth import get_current_user
 from app.api.routers.stats import period_or_400
 from app.shared.database import get_session
 from app.shared.models import Chat, Income, Member
-from app.shared.budgets import in_budget
 from app.shared.my_spending import my_expenses
 from app.shared.schemas import AllExpenseOut, MonthTotal, StatsOut
 from app.shared.stats import ZERO, Row, build_stats, fetch_range, trend_months
@@ -93,7 +92,7 @@ async def all_stats(
         Row(m.expense.expense_date, m.expense.category, m.expense.subcategory,
             m.expense.amount if full else m.amount, m.expense.title, m.expense.recurring_id is not None)
         for m in rows
-        if (full or m.amount) and in_budget(m.expense)
+        if full or m.amount
     ])
 
     incomes = (

@@ -5,10 +5,6 @@
 - личное пространство («Мои финансы») — сколько владелец на самом деле потратил во всех
   своих тратах, личных и семейных (как во вкладке «Траты» «Моих финансов»,
   см. app/shared/my_spending.py).
-
-Здесь траты считаются по покупке (как в статистике): покупка с кредитки — в день покупки, а
-погашение карты (трата с repays_card_id) не считается, иначе покупка попала бы в траты
-дважды. План и «Свободно» считают деньги по оплате — см. plan.money_entries.
 """
 from __future__ import annotations
 
@@ -31,11 +27,6 @@ def month_range(month: str) -> tuple[dt.date, dt.date]:
     return dt.date(year, mon, 1), dt.date(year + (mon // 12), (mon % 12) + 1, 1)
 
 
-def in_budget(expense: Expense) -> bool:
-    """Трата идёт в статистику и лимиты — всё, кроме погашения кредитки."""
-    return expense.repays_card_id is None
-
-
 async def spending_rows(
     session: AsyncSession, chat: Chat, month: str, exclude_recurring: bool = False
 ) -> list[tuple[str, str | None, Decimal]]:
@@ -48,11 +39,10 @@ async def spending_rows(
         return [
             (m.expense.category, m.expense.subcategory, m.amount)
             for m in await my_expenses(session, chat.id, start, end)
-            if m.amount and in_budget(m.expense) and not (exclude_recurring and m.expense.recurring_id is not None)
+            if m.amount and not (exclude_recurring and m.expense.recurring_id is not None)
         ]
     query = select(Expense.category, Expense.subcategory, Expense.amount).where(
-        Expense.chat_id == chat.id, Expense.expense_date >= start, Expense.expense_date < end,
-        Expense.repays_card_id.is_(None),
+        Expense.chat_id == chat.id, Expense.expense_date >= start, Expense.expense_date < end
     )
     if exclude_recurring:
         query = query.where(Expense.recurring_id.is_(None))

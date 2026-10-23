@@ -10,12 +10,11 @@
   с неё. Если категория в одной статье, а её подкатегория в другой — трата идёт в статью
   с подкатегорией;
 - goal — накопительная: выделенное откладывается на цель по кнопке «Отложил».
-План считает деньги по оплате (money_entries): покупка с кредитки и проценты по ней статьи
-не трогают — свои деньги на них ещё не ушли. Тратой становится погашение карты: «Внести»
-списывается со статьи по категории карты, трата-погашение (repays_card_id) — по своей
-категории, обычно «Кредиты». Так статья «Кредитки» показывает, сколько внесено на карты.
-Статистика, наоборот, считает покупку в день покупки и без погашений (app/shared/budgets.py).
-Траты без статьи и пополнения целей без статьи списываются со «Свободно».
+Покупки кредиткой и проценты по ней живут в карте и статьи не трогают (app/shared/my_spending.py).
+Тратой становится погашение карты — трата «Кредиты» с repays_card_id (так записывается и
+«Внести»); она списывается со статьи своей категории, например «Кредитки». Старые платежи
+«Внести», которые тратой не записывались, идут в статью по категории карты. Траты без статьи
+и пополнения целей без статьи списываются со «Свободно».
 
 Месяц плана начинается с chat.plan_start_day (по умолчанию 1-го). В конце месяца статьи
 обнуляются: всё, что осталось (или ушло в минус), переходит в «Свободно» следующего месяца.
@@ -149,25 +148,13 @@ async def items_of(session: AsyncSession, chat_id: int) -> list[PlanItem]:
 
 
 async def money_entries(session: AsyncSession, chat: Chat, start: dt.date, end: dt.date) -> list[Entry]:
-    """Сколько своих денег ушло в [start, end): траты (твоя доля) без покупок своей кредиткой и
-    процентов по ней, плюс платежи на карты («Внести»; траты-погашения уже среди трат)."""
-    cards = select(CreditCard.id).where(CreditCard.chat_id == chat.id)
-    interest = set(
-        (
-            await session.execute(
-                select(CreditOperation.expense_id).where(
-                    CreditOperation.card_id.in_(cards),
-                    CreditOperation.kind == "interest",
-                    CreditOperation.expense_id.is_not(None),
-                )
-            )
-        ).scalars().all()
-    )
+    """Сколько своих денег ушло в [start, end): траты (твоя доля; покупки кредиткой в них не
+    входят, погашения карт входят) плюс старые платежи «Внести», которые тратой не записывались."""
     # Как и во вкладке «Траты» «Моих финансов»: сколько владелец потратил сам (app/shared/my_spending.py)
     out = [
         Entry(m.expense.expense_date, m.expense.title, m.amount, "expense", m.expense.category, m.expense.subcategory)
         for m in await my_expenses(session, chat.id, start, end)
-        if m.amount and not (m.i_paid and m.expense.card_id) and m.expense.id not in interest
+        if m.amount
     ]
     payments = (
         await session.execute(
