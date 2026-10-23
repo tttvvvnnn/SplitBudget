@@ -57,7 +57,9 @@ async def suggest_category(session: AsyncSession, chat_id: int, title: str) -> S
         return None
 
     result = await session.execute(select(CategoryRule).where(CategoryRule.chat_id == chat_id))
-    rules = result.scalars().all()
+    # «Другое» без подкатегории — не выбор, а «не знаю» (такие правила остались с тех пор,
+    # когда их ещё запоминали): не подсказываем его и не закрываем им словарь и ИИ
+    rules = [r for r in result.scalars().all() if r.category != OTHER or r.subcategory]
     exact = next((r for r in rules if r.keyword == normalized), None)
     if exact is not None:
         return Suggestion(exact.category, exact.subcategory, "learned")

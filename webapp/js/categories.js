@@ -213,6 +213,7 @@ function openTidySheet(onChange) {
   const content = sheet.querySelector("#tidy-content");
   let items = [];
   const seen = new Set();
+  const unknown = new Set();
 
   function label(i) {
     if (i.proposal) {
@@ -223,9 +224,17 @@ function openTidySheet(onChange) {
     return `${categoryIcon(i.category)} ${escapeHtml([i.category, i.subcategory].filter(Boolean).join(" › "))}`;
   }
 
+  function unknownHtml() {
+    if (!unknown.size) return "";
+    return `<div class="hint-text" style="margin-top:10px;">Не понял, куда отнести: ${[...unknown].map(escapeHtml).join(", ")}. Их можно поменять вручную в самой трате.</div>`;
+  }
+
   function render(more) {
     if (!items.length) {
-      content.innerHTML = `<div class="hint-text">Нечего разбирать: для трат в «Другом» подходящей категории не нашлось.</div>`;
+      content.innerHTML = `<div class="hint-text">${unknown.size ? "Подходящей категории не нашлось." : "В «Другом» нет трат без подкатегории."}</div>${unknownHtml()}
+        ${more ? `<button class="btn secondary" id="tidy-more" style="margin-top:10px;">Найти ещё</button>` : ""}`;
+      const moreBtn = content.querySelector("#tidy-more");
+      if (moreBtn) moreBtn.addEventListener("click", () => { moreBtn.disabled = true; moreBtn.textContent = "✨ Ищу…"; load(); });
       return;
     }
     content.innerHTML = `
@@ -235,6 +244,7 @@ function openTidySheet(onChange) {
           <input type="checkbox" data-n="${n}" checked>
           <span><b>${escapeHtml(i.title)}</b>${i.count > 1 ? ` ×${i.count}` : ""} · ${fmtMoney(i.total)}<br>→ ${label(i)}</span>
         </label>`).join("")}
+      ${unknownHtml()}
       ${more ? `<button class="btn secondary" id="tidy-more" style="margin-top:10px;">Найти ещё</button>` : ""}
       <button class="btn" id="tidy-apply" style="margin-top:10px;">Переложить</button>`;
     const moreBtn = content.querySelector("#tidy-more");
@@ -245,6 +255,7 @@ function openTidySheet(onChange) {
   async function load() {
     try {
       const r = await api(`/chats/${state.chatId}/tidy-other`);
+      for (const t of r.unknown || []) unknown.add(t);
       for (const i of r.items) {
         if (!seen.has(i.title.toLowerCase())) { seen.add(i.title.toLowerCase()); items.push(i); }
       }
