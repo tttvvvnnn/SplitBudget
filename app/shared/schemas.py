@@ -458,7 +458,6 @@ class IncomeSummaryOut(BaseModel):
     has_cards: bool
     spent_card: Decimal
     card_repaid: Decimal
-    cash_left: Decimal
     next_title: str | None
     next_date: dt.date | None
     next_amount: Decimal | None
@@ -545,6 +544,7 @@ class PlanItemOut(BaseModel):
     goal_saved: Decimal | None = None
     goal_target: Decimal | None = None
     carried: Decimal = Decimal("0")
+    card_debt: Decimal | None = None  # долг по картам, платежи по которым идут в статью
 
 
 class PlanOut(BaseModel):

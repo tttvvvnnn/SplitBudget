@@ -21,7 +21,7 @@ from app.shared.credits import month_debts
 from app.shared.goals import goals_status
 from app.shared.models import Chat, Expense, Income, Member, MonthlyReport
 from app.shared.obligations import fmt_amount, month_of, obligations
-from app.shared.plan import items_of
+from app.shared.plan import items_of, money_entries
 
 ZERO = Decimal("0")
 MONTHS = (
@@ -84,14 +84,15 @@ async def build_report(session: AsyncSession, chat: Chat, month: str, partial: b
     lines.append(f"Потрачено: <b>{money(total)}</b>{'' if partial else _percent_change(total, before_total)}")
     # Покупки с кредитки — траты в день покупки, а свои деньги уходят, когда гасишь карту
     debts = await month_debts(session, chat, start, end) if chat.is_personal else None
-    if debts and debts.purchases:
-        lines.append(f"💳 Из них в кредит: {money(debts.purchases)}")
+    cash = total
+    if debts and (debts.purchases or debts.paid):
+        cash = sum((e.amount for e in await money_entries(session, chat, start, end)), ZERO)
+        if debts.purchases:
+            lines.append(f"💳 Из них в кредит: {money(debts.purchases)}")
+        lines.append(f"💵 Своих денег ушло: {money(cash)}")
     if chat.is_personal and incomes > 0:
-        left = incomes - total
+        left = incomes - cash
         lines.append(f"Доходы: {money(incomes)} · {'осталось' if left >= 0 else 'перерасход'} {money(abs(left))}")
-        if debts and (debts.purchases or debts.paid):
-            cash = incomes - max(total - debts.purchases, ZERO) - debts.paid
-            lines.append(f"💵 Своих денег осталось: {money(cash)}")
 
     cats = _by_category(now)
     if cats:

@@ -10,11 +10,12 @@
   с неё. Если категория в одной статье, а её подкатегория в другой — трата идёт в статью
   с подкатегорией;
 - goal — накопительная: выделенное откладывается на цель по кнопке «Отложил».
-Кредиты — обычная расходная статья с категорией «Кредиты»: платёж по кредиту и проценты по
-карте записываются тратами. Покупки с кредитки списываются со статей своих категорий в день
-покупки, поэтому погашение карты («Внести» или трата с repays_card_id) в план не попадает —
-иначе покупка списалась бы дважды. Траты без статьи и пополнения целей без статьи
-списываются со «Свободно».
+План считает деньги по оплате (money_entries): покупка с кредитки и проценты по ней статьи
+не трогают — свои деньги на них ещё не ушли. Тратой становится погашение карты: «Внести»
+списывается со статьи по категории карты, трата-погашение (repays_card_id) — по своей
+категории, обычно «Кредиты». Так статья «Кредитки» показывает, сколько внесено на карты.
+Статистика, наоборот, считает покупку в день покупки и без погашений (app/shared/budgets.py).
+Траты без статьи и пополнения целей без статьи списываются со «Свободно».
 
 Месяц плана начинается с chat.plan_start_day (по умолчанию 1-го). В конце месяца статьи
 обнуляются: всё, что осталось (или ушло в минус), переходит в «Свободно» следующего месяца.
@@ -31,15 +32,17 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.shared.credits import cards_of, debt_of
 from app.shared.models import (
     Chat,
+    CreditCard,
+    CreditOperation,
     Goal,
     GoalDeposit,
     Income,
     PlanAlert,
     PlanItem,
 )
-from app.shared.budgets import in_budget
 from app.shared.my_spending import my_expenses
 
 KINDS = ("spend", "goal")
@@ -94,6 +97,7 @@ class ItemStatus:
     goal_saved: Decimal | None = None
     goal_target: Decimal | None = None
     carried: Decimal = ZERO  # только у «Свободно»: остатки статей прошлых месяцев
+    card_debt: Decimal | None = None  # долг по картам, платежи по которым идут в эту статью
 
     @property
     def remaining(self) -> Decimal:
@@ -118,12 +122,12 @@ class PlanSummary:
 
 @dataclass
 class Entry:
-    """Списание плана: трата (твоя доля) или пополнение цели."""
+    """Списание плана: трата (твоя доля), платёж по кредитной карте или пополнение цели."""
 
     date: dt.date
     title: str
     amount: Decimal
-    source: str  # expense | deposit
+    source: str  # expense | card | deposit
     category: str | None = None
     subcategory: str | None = None
     goal_id: int | None = None
@@ -144,6 +148,43 @@ async def items_of(session: AsyncSession, chat_id: int) -> list[PlanItem]:
     return list(result.scalars().all())
 
 
+async def money_entries(session: AsyncSession, chat: Chat, start: dt.date, end: dt.date) -> list[Entry]:
+    """Сколько своих денег ушло в [start, end): траты (твоя доля) без покупок своей кредиткой и
+    процентов по ней, плюс платежи на карты («Внести»; траты-погашения уже среди трат)."""
+    cards = select(CreditCard.id).where(CreditCard.chat_id == chat.id)
+    interest = set(
+        (
+            await session.execute(
+                select(CreditOperation.expense_id).where(
+                    CreditOperation.card_id.in_(cards),
+                    CreditOperation.kind == "interest",
+                    CreditOperation.expense_id.is_not(None),
+                )
+            )
+        ).scalars().all()
+    )
+    # Как и во вкладке «Траты» «Моих финансов»: сколько владелец потратил сам (app/shared/my_spending.py)
+    out = [
+        Entry(m.expense.expense_date, m.expense.title, m.amount, "expense", m.expense.category, m.expense.subcategory)
+        for m in await my_expenses(session, chat.id, start, end)
+        if m.amount and not (m.i_paid and m.expense.card_id) and m.expense.id not in interest
+    ]
+    payments = (
+        await session.execute(
+            select(CreditOperation, CreditCard)
+            .join(CreditCard, CreditCard.id == CreditOperation.card_id)
+            .where(
+                CreditCard.chat_id == chat.id,
+                CreditOperation.kind == "payment",
+                CreditOperation.op_date >= start,
+                CreditOperation.op_date < end,
+            )
+        )
+    ).all()
+    out += [Entry(o.op_date, c.title, o.amount, "card", c.category, c.subcategory) for o, c in payments]
+    return out
+
+
 async def _flows(session: AsyncSession, chat: Chat, start: dt.date, end: dt.date) -> _Flows:
     incomes = (
         await session.execute(
@@ -152,13 +193,7 @@ async def _flows(session: AsyncSession, chat: Chat, start: dt.date, end: dt.date
             )
         )
     ).all()
-    out: list[Entry] = []
-    # Как и во вкладке «Траты» «Моих финансов»: сколько владелец потратил сам (app/shared/my_spending.py)
-    out += [
-        Entry(m.expense.expense_date, m.expense.title, m.amount, "expense", m.expense.category, m.expense.subcategory)
-        for m in await my_expenses(session, chat.id, start, end)
-        if m.amount and in_budget(m.expense)
-    ]
+    out = await money_entries(session, chat, start, end)
     deposits = (
         await session.execute(
             select(GoalDeposit.deposit_date, Goal.title, GoalDeposit.goal_id, GoalDeposit.amount)
@@ -248,6 +283,16 @@ async def _compute(session: AsyncSession, chat: Chat, date: dt.date) -> tuple[Pl
                 st.goal_title, st.goal_saved, st.goal_target = goal.title, saved, goal.target
         statuses.append(st)
 
+    # Долг по картам — у статьи, куда идут платежи по ним: столько ещё предстоит внести
+    debts: dict[int | None, Decimal] = {}
+    for card in await cards_of(session, chat.id):
+        if card.is_archived:
+            continue
+        key = item_for(Entry(start, card.title, ZERO, "card", card.category, card.subcategory))
+        debts[key] = debts.get(key, ZERO) + await debt_of(session, card)
+    for st in statuses:
+        st.card_debt = debts.get(st.id)
+
     free_percent = max(HUNDRED - sum((i.percent for i in items), ZERO), ZERO)
     free = ItemStatus(
         id=None,
@@ -258,6 +303,7 @@ async def _compute(session: AsyncSession, chat: Chat, date: dt.date) -> tuple[Pl
         allocated=income - sum((s.allocated for s in statuses), ZERO) + carried,
         spent=sum((e.amount for e in entries.get(None, [])), ZERO),
         carried=carried,
+        card_debt=debts.get(None),
     )
     statuses.append(free)
     summary_ = PlanSummary(

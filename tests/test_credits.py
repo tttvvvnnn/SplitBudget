@@ -408,12 +408,17 @@ def test_expense_repays_card(client, seeded_chat, auth_header, monkeypatch):
     assert _debt(client, pid, h, card["id"])[0] == 10000.0
 
 
-def test_card_repayment_is_not_spending(client, seeded_chat, auth_header):
-    """Покупка с кредитки — трата в день покупки, погашение карты — не трата (иначе покупка
-    посчиталась бы дважды). На «Доходах» видно, сколько своих денег осталось."""
+def test_card_money_counted_on_payment(client, seeded_chat, auth_header):
+    """Деньги (План, «Свободно», итоги) — по оплате: покупка с кредитки станет тратой, когда
+    внесёшь платёж на карту. Статистика — по покупке: покупка в своей категории, а погашение
+    второй раз не считается."""
     pid, h = _personal(client, seeded_chat, auth_header)
     me = client.get(f"/api/chats/{pid}/me", headers=h).json()["member"]["id"]
     month = TODAY.strftime("%Y-%m")
+    for title, categories in (("Еда", ["Продукты"]), ("Кредитки", ["Кредиты"])):
+        r = client.post(f"/api/chats/{pid}/plan/items", headers=h,
+                        json={"title": title, "kind": "spend", "percent": 20, "categories": categories})
+        assert r.status_code == 201, r.text
     card = _card(client, pid, h, debt=0)
     assert client.post(f"/api/chats/{pid}/income", headers=h, json={"title": "Зарплата", "amount": 150000}).status_code == 201
     assert _post_expense(client, pid, h, me, 1000, title="Кофе").status_code == 201
@@ -427,10 +432,16 @@ def test_card_repayment_is_not_spending(client, seeded_chat, auth_header):
 
     data = client.get(f"/api/chats/{pid}/income?month={month}", headers=h).json()
     assert data["has_cards"] is True
-    assert float(data["spent"]) == 6000.0  # кофе + покупка с карты, без погашения
-    assert float(data["spent_card"]) == 5000.0
+    assert float(data["spent"]) == 1000.0 + 3000.0 + 1000.0  # кофе + погашения, без покупки с карты
     assert float(data["card_repaid"]) == 4000.0
-    assert float(data["cash_left"]) == 150000.0 - 1000.0 - 4000.0
+    assert float(data["spent_card"]) == 5000.0
+    assert float(data["free"]) == 145000.0
+
+    items = {i["title"]: i for i in client.get(f"/api/chats/{pid}/plan", headers=h).json()["items"]}
+    assert float(items["Еда"]["spent"]) == 1000.0
+    assert float(items["Кредитки"]["spent"]) == 4000.0
+    assert float(items["Кредитки"]["card_debt"]) == 1000.0
+    assert items["Еда"]["card_debt"] is None
 
     stats = client.get(f"/api/chats/{pid}/stats?month={month}", headers=h).json()
     assert float(stats["total"]) == 6000.0
@@ -448,4 +459,5 @@ def test_card_repayment_is_not_spending(client, seeded_chat, auth_header):
     text = asyncio.run(run())
     assert "Потрачено: <b>6 000 RUB</b>" in text
     assert "💳 Из них в кредит: 5 000 RUB" in text
-    assert "💵 Своих денег осталось: 145 000 RUB" in text
+    assert "💵 Своих денег ушло: 5 000 RUB" in text
+    assert "Доходы: 150 000 RUB · осталось 145 000 RUB" in text

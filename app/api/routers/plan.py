@@ -44,6 +44,7 @@ def _out(s: plan.PlanSummary) -> PlanOut:
                 goal_saved=i.goal_saved,
                 goal_target=i.goal_target,
                 carried=i.carried,
+                card_debt=i.card_debt,
             )
             for i in s.items
         ],

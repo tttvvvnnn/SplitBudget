@@ -52,7 +52,6 @@ async def income_summary(month: str, ctx: ChatContext = Depends(get_chat_context
         has_cards=s.has_cards,
         spent_card=s.spent_card,
         card_repaid=s.card_repaid,
-        cash_left=s.cash_left,
         next_title=s.next_title,
         next_date=s.next_date,
         next_amount=s.next_amount,
