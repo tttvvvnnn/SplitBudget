@@ -1,11 +1,14 @@
 """Обязательные платежи месяца и отметка «оплачено / пропустить / вернуть»."""
 from __future__ import annotations
 
+import datetime as dt
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 
 from app.api.dependencies import ChatContext, get_chat_context
 from app.bot.notify import notify_budget_alerts, notify_payment_marked
+from app.shared import loans
 from app.shared import obligations as ob
 from app.shared.budgets import alerts_after_expense, month_range
 from app.shared.models import RecurringExpense, RecurringPayment
@@ -45,7 +48,7 @@ async def list_obligations(month: str, ctx: ChatContext = Depends(get_chat_conte
                 amount=o.amount,
                 share=o.share,
                 counts=o.counts,
-                debt=o.recurring.debt,
+                debt=loans.remaining(o.recurring, dt.date.today()),
                 end_month=o.recurring.end_month,
             )
             for o in items

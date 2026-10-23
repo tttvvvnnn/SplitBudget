@@ -554,3 +554,57 @@ def test_orphan_rows_migration(tmp_path, monkeypatch):
     assert conn.execute("SELECT recurring_id, month, due_date, reminders_sent FROM recurring_payments").fetchall() == [
         (5, "2026-10", "2026-10-31", "")]
     assert conn.execute("SELECT count(*) FROM recurring_participants").fetchone() == (0,)
+
+
+def test_loan_interest_accrues_daily():
+    """Проценты на тело каждый день копятся сверху; платёж гасит сначала их, потом тело."""
+    from decimal import Decimal as D
+
+    from app.shared import loans
+    from app.shared.models import RecurringExpense, RecurringPayment
+
+    start = dt.date(2026, 10, 1)
+    loan = RecurringExpense(kind="loan", debt=D("100000"), rate=D("36.5"), interest=D("0"), interest_from=start)
+    assert loans.daily(loan) == D("100.00")
+    assert loans.accrued(loan, start + dt.timedelta(days=10)) == D("1000.00")
+    assert loans.remaining(loan, start + dt.timedelta(days=10)) == D("101000.00")
+
+    payment = RecurringPayment(amount=D("1500"))
+    loans.apply_payment(loan, payment, D("1500"), start + dt.timedelta(days=10))
+    assert (loan.debt, loan.interest, payment.interest_paid) == (D("99500.00"), D("0.00"), D("1000.00"))
+    # дальше проценты идут уже от меньшего тела
+    assert loans.accrued(loan, start + dt.timedelta(days=11)) == D("99.50")
+
+    loans.undo_payment(loan, payment, start + dt.timedelta(days=10))
+    assert (loan.debt, loan.interest) == (D("100000.00"), D("1000.00"))
+
+
+def test_loan_tranches(client, seeded_chat, auth_header):
+    pid, h = _personal(client, seeded_chat, auth_header)
+    me = client.get(f"/api/chats/{pid}/me", headers=h).json()["member"]["id"]
+    r = client.post(f"/api/chats/{pid}/recurring", headers=h, json={
+        "title": "Образовательный", "amount": 0, "payer_member_id": me, "day_of_month": 31, "kind": "loan",
+        "debt": 100000, "loan_amount": 100000, "rate": 36.5, "participants": [{"member_id": me}],
+        "category": "Кредиты"})
+    assert r.status_code == 201, r.text
+    rid = r.json()["id"]
+    [loan] = client.get(f"/api/chats/{pid}/credits", headers=h).json()["loans"]
+    assert float(loan["rate"]) == 36.5 and float(loan["daily_interest"]) == 100.0
+    assert float(loan["interest"]) == 0 and float(loan["debt"]) == 100000.0
+
+    # Транш, выданный два дня назад: тело больше, проценты на него — с даты выдачи
+    url = f"/api/chats/{pid}/loans/{rid}/tranches"
+    two_days_ago = (TODAY - dt.timedelta(days=2)).isoformat()
+    t = client.post(url, headers=h, json={"amount": 50000, "tranche_date": two_days_ago})
+    assert t.status_code == 201, t.text
+    [loan] = client.get(f"/api/chats/{pid}/credits", headers=h).json()["loans"]
+    assert float(loan["body"]) == 150000.0 and float(loan["loan_amount"]) == 150000.0
+    assert float(loan["interest"]) == 100.0 and float(loan["debt"]) == 150100.0
+    assert [x["tranche_date"] for x in loan["tranches"]] == [two_days_ago]
+
+    future = (TODAY + dt.timedelta(days=1)).isoformat()
+    assert client.post(url, headers=h, json={"amount": 1, "tranche_date": future}).status_code == 400
+
+    assert client.delete(f"{url}/{t.json()['id']}", headers=h).status_code == 204
+    [loan] = client.get(f"/api/chats/{pid}/credits", headers=h).json()["loans"]
+    assert float(loan["body"]) == 100000.0 and float(loan["interest"]) == 0 and loan["tranches"] == []

@@ -161,10 +161,28 @@ function openRecurringModal(existing, opts = {}) {
       <input type="number" id="r-amount" min="0" step="0.01" value="${existing && Number(existing.amount) ? existing.amount : ""}" placeholder="необязательно">
       <div class="hint-text">Без суммы — только напоминание: в день платежа бот спросит, сколько внесли.</div>
     </div>
-    <div class="field" id="r-debt-field">
-      <label>Остаток долга (${escapeHtml(state.chat.currency)})</label>
-      <input type="number" id="r-debt" min="0" step="0.01" value="${existing && existing.debt !== null ? existing.debt : ""}" placeholder="необязательно">
-      <div class="hint-text">Каждый оплаченный платёж уменьшает остаток. Видно во вкладке «💳 Кредиты».</div>
+    <div id="r-debt-field">
+      <div class="field-row">
+        <div class="field">
+          <label>Сумма кредита (${escapeHtml(state.chat.currency)})</label>
+          <input type="number" id="r-loan-amount" min="0" step="0.01" value="${existing && existing.loan_amount !== null && existing.loan_amount !== undefined ? Number(existing.loan_amount) : ""}" placeholder="необязательно">
+        </div>
+        <div class="field">
+          <label>Ставка, % годовых</label>
+          <input type="number" id="r-rate" min="0" step="0.001" value="${existing && existing.rate !== null && existing.rate !== undefined ? Number(existing.rate) : ""}" placeholder="без процентов">
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>Остаток без % (${escapeHtml(state.chat.currency)})</label>
+          <input type="number" id="r-debt" min="0" step="0.01" value="${existing && existing.debt !== null && existing.debt !== undefined ? Number(existing.debt) : ""}" placeholder="необязательно">
+        </div>
+        <div class="field">
+          <label>Начисленные %</label>
+          <input type="number" id="r-interest" min="0" step="0.01" value="${existing && existing.interest !== null && existing.interest !== undefined ? Number(existing.interest) : ""}" placeholder="0">
+        </div>
+      </div>
+      <div class="hint-text" style="margin-bottom:12px;">Остаток без % — тело кредита. Проценты начисляются на него каждый день и копятся сверху; платёж гасит сначала их, потом тело. Новый транш — в карточке кредита во вкладке «💳 Кредиты».</div>
     </div>
     <div id="r-category-wrap">
       ${categoryFieldsHtml("r", existing && existing.category, existing && existing.subcategory)}
@@ -332,6 +350,16 @@ function openRecurringModal(existing, opts = {}) {
       end_month: ["loan", "other"].includes(kind) ? endMonth : "",
       debt: kind === "loan" && debtRaw !== "" ? Number(debtRaw) : null,
     };
+    if (kind === "loan") {
+      const num = (id) => { const v = overlay.querySelector(id).value; return v === "" ? null : Number(v); };
+      payload.loan_amount = num("#r-loan-amount");
+      payload.rate = num("#r-rate");
+      const interest = num("#r-interest");
+      // Проценты отправляем, только если их поправили: иначе они бы сбросились на момент открытия формы
+      if (!isEdit || String(interest ?? "") !== String(existing.interest !== null ? Number(existing.interest) : "")) {
+        payload.interest = interest ?? 0;
+      }
+    }
     if (!isEdit && !payload.end_month) payload.end_month = null;
     if (isEdit) payload.is_active = overlay.querySelector("#r-active").checked;
 

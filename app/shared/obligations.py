@@ -21,6 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.shared import loans
 from app.shared.autocategory import normalize
 from app.shared.budgets import month_range
 from app.shared.crud import CENT, build_custom_shares, build_equal_shares, load_recurring_participants
@@ -248,8 +249,7 @@ async def pay(
         for member_id, share in shares:
             session.add(ExpenseShare(expense_id=expense.id, member_id=member_id, amount=share))
         expense_id = expense.id
-    if recurring.debt is not None:  # остаток по кредиту
-        recurring.debt = max(recurring.debt - amount, ZERO)
+    loans.apply_payment(recurring, payment, amount, dt.date.today())  # остаток по кредиту
 
     payment.status = "paid"
     payment.amount = amount
@@ -279,8 +279,7 @@ async def reset(session: AsyncSession, payment: RecurringPayment) -> None:
             expense = await session.get(Expense, payment.expense_id)
             if expense is not None:
                 await session.delete(expense)
-        if recurring.debt is not None and payment.amount:
-            recurring.debt += payment.amount
+        loans.undo_payment(recurring, payment, dt.date.today())
     payment.status = "pending"
     payment.amount = None
     payment.expense_id = None
@@ -398,7 +397,7 @@ def payment_text(recurring: RecurringExpense, chat: Chat, payment: RecurringPaym
     if recurring.amount:
         text += f" — <b>{fmt_amount(recurring.amount, chat.currency)}</b>"
     if recurring.debt is not None:
-        text += f"\n{debt_label(recurring)}: {fmt_amount(recurring.debt, chat.currency)}"
+        text += f"\n{debt_label(recurring)}: {fmt_amount(loans.remaining(recurring, today), chat.currency)}"
     return text
 
 

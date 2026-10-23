@@ -188,7 +188,14 @@ class RecurringExpense(Base):
     # только в старых записях до миграции.
     kind: Mapped[str] = mapped_column(String(16), default="other")
     end_month: Mapped[str | None] = mapped_column(String(7), nullable=True)  # последний платёж, 'YYYY-MM'
-    debt: Mapped[Decimal | None] = mapped_column(MoneyType, nullable=True)  # остаток долга по кредиту
+    debt: Mapped[Decimal | None] = mapped_column(MoneyType, nullable=True)  # остаток долга (тело) по кредиту
+    # Проценты по кредиту: ставка годовых, на тело каждый день начисляется debt × rate / 365.
+    # interest — набежавшие и не уплаченные проценты на дату interest_from, дальше они
+    # досчитываются на лету (app/shared/loans.py). loan_amount — сумма кредита (все транши).
+    loan_amount: Mapped[Decimal | None] = mapped_column(MoneyType, nullable=True)
+    rate: Mapped[Decimal | None] = mapped_column(Numeric(7, 3), nullable=True)
+    interest: Mapped[Decimal | None] = mapped_column(MoneyType, nullable=True)
+    interest_from: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     last_generated_month: Mapped[str | None] = mapped_column(String(7), nullable=True)  # 'YYYY-MM'
     created_by_member_id: Mapped[int] = mapped_column(ForeignKey("members.id", ondelete="CASCADE"))
@@ -316,6 +323,19 @@ class RecurringPayment(Base):
     reminders_sent: Mapped[str] = mapped_column(String(32), default="")  # например "7,3"
     asked: Mapped[bool] = mapped_column(Boolean, default=False)  # спросили «Оплачено?» в день платежа
     paid_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    interest_paid: Mapped[Decimal | None] = mapped_column(MoneyType, nullable=True)  # из платежа на проценты
+
+
+class LoanTranche(Base):
+    """Транш кредита: с даты выдачи тело кредита (RecurringExpense.debt) больше на amount."""
+
+    __tablename__ = "loan_tranches"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    recurring_id: Mapped[int] = mapped_column(ForeignKey("recurring_expenses.id", ondelete="CASCADE"))
+    tranche_date: Mapped[dt.date] = mapped_column(Date)
+    amount: Mapped[Decimal] = mapped_column(MoneyType)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
 
 
 class IncomeSource(Base):

@@ -9,7 +9,8 @@ from sqlalchemy import select
 from app.api.dependencies import ChatContext, get_chat_context
 from app.shared.crud import build_custom_shares, build_equal_shares
 from app.shared.models import Member, RecurringExpense, RecurringParticipant, RecurringPayment
-from app.shared import subscriptions
+from app.shared import loans, subscriptions
+from app.shared.loans import ZERO
 from app.shared.obligations import due_date_for
 from app.shared.schemas import (
     RecurringCreate,
@@ -63,6 +64,9 @@ def _to_out(r: RecurringExpense, participants: list[RecurringParticipant]) -> Re
         kind=r.kind,
         end_month=r.end_month,
         debt=r.debt,
+        loan_amount=r.loan_amount,
+        rate=r.rate,
+        interest=loans.accrued(r, dt.date.today()) if r.debt is not None else None,
         participants=[
             RecurringParticipantIn(member_id=p.member_id, custom_amount=p.custom_amount)
             for p in participants
@@ -108,6 +112,11 @@ async def create_recurring(payload: RecurringCreate, ctx: ChatContext = Depends(
         debt=payload.debt if payload.kind == "loan" else None,
         created_by_member_id=ctx.member.id,
     )
+    if payload.kind == "loan":
+        recurring.loan_amount = payload.loan_amount
+        recurring.rate = payload.rate or None
+        recurring.interest = payload.interest or ZERO
+        recurring.interest_from = dt.date.today()
     ctx.session.add(recurring)
     await ctx.session.flush()
     for p in payload.participants:
@@ -163,10 +172,21 @@ async def update_recurring(
         recurring.kind = payload.kind
     if payload.end_month is not None:
         recurring.end_month = payload.end_month or None
-    if "debt" in payload.model_fields_set:
-        recurring.debt = payload.debt
-    if recurring.kind != "loan":
-        recurring.debt = None
+    if recurring.kind == "loan":
+        # Проценты до сегодня — по старым телу и ставке, дальше по новым
+        today = dt.date.today()
+        loans.accrue(recurring, today)
+        if "debt" in payload.model_fields_set:
+            recurring.debt = payload.debt
+        if "loan_amount" in payload.model_fields_set:
+            recurring.loan_amount = payload.loan_amount
+        if "rate" in payload.model_fields_set:
+            recurring.rate = payload.rate or None
+        if payload.interest is not None:  # сверили с банком
+            recurring.interest = payload.interest
+    else:
+        recurring.debt = recurring.loan_amount = recurring.rate = recurring.interest = None
+        recurring.interest_from = None
 
     if payload.participants is not None:
         ids = {p.member_id for p in payload.participants} | {recurring.payer_member_id}

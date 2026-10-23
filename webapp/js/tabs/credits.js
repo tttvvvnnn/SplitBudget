@@ -106,6 +106,7 @@ function cardHtml(c) {
 function loanHtml(l) {
   const meta = [`Платёж ${Number(l.amount) ? fmtMoney(l.amount) : "без суммы"} · ${dayOfMonthLabel(l.day_of_month)}`];
   if (l.end_month) meta.push(`до ${monthShort(l.end_month)}`);
+  if (l.rate !== null) meta.push(`${Number(l.rate)}%${Number(l.interest) ? `, набежало ${fmtMoney(l.interest)}` : ""}`);
   let status = "";
   if (!l.is_active) status = "остановлен";
   else if (l.payment_status === "paid") status = `✅ в этом месяце оплачен${l.next_due ? ` · следующий ${dateLabel(l.next_due)}` : ""}`;
@@ -168,17 +169,90 @@ async function renderCreditsTab() {
   });
 }
 
-/* Кредит: платёж этого месяца — та же шторка, что в «Платежах»; без платежа — правка кредита. */
-async function openLoan(l) {
-  if (l.payment_id && l.payment_status) {
-    openPaymentSheet({
-      kind: "loan", chat_id: creditsChatId(), payment_id: l.payment_id, title: l.title,
-      due_date: l.payment_due, status: l.payment_status, amount: l.payment_amount, share: l.payment_amount,
-      debt: l.debt, end_month: l.end_month, chat_title: null,
-    }, renderCreditsTab, () => editLoan(l));
-    return;
+/* Кредит: остаток с процентами, платёж этого месяца, транши. */
+function loanSummary(l) {
+  const lines = [];
+  if (l.debt !== null) {
+    const interest = Number(l.interest || 0);
+    lines.push(`Остаток ${fmtMoney(l.debt)}${interest ? ` (тело ${fmtMoney(l.body)} + проценты ${fmtMoney(interest)})` : ""}`);
   }
-  await editLoan(l);
+  const terms = [];
+  if (l.loan_amount !== null) terms.push(`Сумма кредита ${fmtMoney(l.loan_amount)}`);
+  if (l.rate !== null) terms.push(`${Number(l.rate)}% годовых, +${fmtMoney(l.daily_interest)} в день`);
+  if (terms.length) lines.push(terms.join(" · "));
+  return lines;
+}
+
+function openLoan(l) {
+  const base = `/chats/${creditsChatId()}/loans/${l.recurring_id}/tranches`;
+  const hasPayment = l.payment_id && l.payment_status;
+  const overlay = openSheet(`
+    <div class="sheet-title">🏦 ${escapeHtml(l.title)}</div>
+    <div class="hint-text" style="margin-bottom:12px;">${loanSummary(l).join("<br>") || "Остаток не указан"}</div>
+    ${hasPayment ? '<button class="btn" id="lo-pay">💸 Платёж этого месяца</button>' : ""}
+    ${l.debt !== null ? `
+    <div class="section-title" style="margin-top:18px;">Новый транш</div>
+    <div class="field-row">
+      <div class="field">
+        <label>Сумма (${escapeHtml(state.chat.currency)})</label>
+        <input type="number" id="lo-amount" min="0" step="0.01">
+      </div>
+      <div class="field">
+        <label>Дата выдачи</label>
+        <input type="date" id="lo-date" value="${todayISO()}" max="${todayISO()}">
+      </div>
+    </div>
+    <div class="error-text" id="lo-error" style="display:none;"></div>
+    <button class="btn secondary" id="lo-tranche">＋ Транш</button>
+    <div class="hint-text" style="margin-top:8px;">Транш увеличит тело и сумму кредита, проценты на него пойдут с даты выдачи.</div>
+    ${l.tranches.length ? `
+      <div class="section-title" style="margin-top:18px;">Транши</div>
+      ${l.tranches.map((t) => `
+        <div class="deposit-row">
+          <span>${t.tranche_date.split("-").reverse().join(".")}</span>
+          <span>+${fmtMoney(t.amount)}</span>
+          <button class="link-btn" data-tranche="${t.id}" aria-label="Удалить">✕</button>
+        </div>`).join("")}` : ""}` : ""}
+    <button class="btn secondary" id="lo-edit" style="margin-top:18px;">✏️ Изменить кредит</button>
+  `);
+  const errorEl = overlay.querySelector("#lo-error");
+  async function run(path, body, method) {
+    try {
+      await api(path, { method, body });
+      haptic("notification", "success");
+      closeSheet(overlay);
+      await renderCreditsTab();
+    } catch (e) {
+      showFormError(errorEl, e.message);
+    }
+  }
+  if (hasPayment) {
+    overlay.querySelector("#lo-pay").addEventListener("click", () => {
+      closeSheet(overlay);
+      openPaymentSheet({
+        kind: "loan", chat_id: creditsChatId(), payment_id: l.payment_id, title: l.title,
+        due_date: l.payment_due, status: l.payment_status, amount: l.payment_amount, share: l.payment_amount,
+        debt: l.debt, end_month: l.end_month, chat_title: null,
+      }, renderCreditsTab, () => editLoan(l));
+    });
+  }
+  const trancheBtn = overlay.querySelector("#lo-tranche");
+  if (trancheBtn) {
+    trancheBtn.addEventListener("click", () => {
+      const amount = Number(overlay.querySelector("#lo-amount").value || 0);
+      const date = overlay.querySelector("#lo-date").value;
+      if (!amount || amount <= 0) { showFormError(errorEl, "Укажите сумму транша"); return; }
+      if (!date) { showFormError(errorEl, "Укажите дату выдачи"); return; }
+      run(base, { amount, tranche_date: date }, "POST");
+    });
+  }
+  overlay.querySelectorAll("[data-tranche]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!(await confirmAction("Удалить транш? Тело и проценты пересчитаются."))) return;
+      run(`${base}/${btn.dataset.tranche}`, undefined, "DELETE");
+    });
+  });
+  overlay.querySelector("#lo-edit").addEventListener("click", () => { closeSheet(overlay); editLoan(l); });
 }
 
 async function editLoan(l) {
