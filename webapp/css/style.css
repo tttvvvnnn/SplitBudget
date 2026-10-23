@@ -797,6 +797,113 @@ button:active, .expense-card:active, .budget-card:active, .obligation-row:active
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--link) 15%, transparent);
 }
 
+/* ---------------- Выпадающие списки (js/select.js) ----------------
+   Нативный <select> скрыт, вместо него кнопка .dd-btn в стиле полей и стеклянное меню. */
+select.dd-native { display: none !important; }
+
+.dd-btn {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 12px;
+  border-radius: 10px;
+  border: 1.5px solid var(--field-border);
+  background: var(--field-bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+.dd-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.dd-chevron {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  margin: -4px 2px 0 0;
+  border-right: 2px solid var(--hint);
+  border-bottom: 2px solid var(--hint);
+  transform: rotate(45deg);
+  transition: transform 0.2s ease;
+}
+.dd-btn.open .dd-chevron { transform: rotate(-135deg); margin-top: 4px; }
+.dd-btn:focus-visible,
+.dd-btn.open {
+  outline: none;
+  border-color: var(--link);
+  box-shadow: 0 0 0 3px rgba(36, 129, 204, 0.15);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--link) 15%, transparent);
+}
+.dd-btn:disabled { opacity: 0.55; cursor: default; }
+
+.dd-menu {
+  position: fixed;
+  z-index: 60;
+  width: max-content;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 6px;
+  border-radius: 16px;
+  /* плотнее шторки: поля формы под меню не должны просвечивать сквозь пункты */
+  background: color-mix(in srgb, var(--card-solid) 94%, transparent);
+  -webkit-backdrop-filter: var(--glass-blur-strong);
+  backdrop-filter: var(--glass-blur-strong);
+  border: 1px solid var(--glass-edge);
+  box-shadow: var(--glass-highlight), 0 18px 44px rgba(15, 40, 80, 0.2), 0 2px 6px rgba(15, 40, 80, 0.08);
+  transform-origin: top center;
+  animation: dd-in 0.16s ease-out;
+}
+@keyframes dd-in { from { opacity: 0; transform: scale(0.97) translateY(-4px); } }
+.dd-menu.up { transform-origin: bottom center; animation-name: dd-in-up; }
+@keyframes dd-in-up { from { opacity: 0; transform: scale(0.97) translateY(4px); } }
+
+.dd-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 15px;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.dd-item-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.dd-item.active { background: color-mix(in srgb, var(--link) 10%, transparent); }
+.dd-item.selected { color: var(--link); font-weight: 600; }
+.dd-item.selected .dd-check {
+  width: 6px;
+  height: 11px;
+  flex-shrink: 0;
+  margin: -3px 3px 0 0;
+  border-right: 2px solid var(--link);
+  border-bottom: 2px solid var(--link);
+  transform: rotate(45deg);
+}
+.dd-item.disabled { opacity: 0.45; cursor: default; }
+.dd-group {
+  padding: 10px 12px 4px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--hint);
+}
+.dd-empty { padding: 12px; color: var(--hint); font-size: 14px; }
+@media (hover: hover) {
+  .dd-btn:not(:disabled):hover { border-color: color-mix(in srgb, var(--link) 45%, var(--field-border)); }
+}
+
 .chip-row {
   display: flex;
   flex-wrap: wrap;
