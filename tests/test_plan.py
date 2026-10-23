@@ -236,8 +236,9 @@ def _card(client, pid, h, debt=50000):
     return r.json()["id"]
 
 
-def test_card_payment_goes_to_item_by_category(client, seeded_chat, auth_header):
-    """Кредит — обычная статья с категорией; деньги, внесённые на карту, списываются с неё же."""
+def test_card_payment_not_in_plan(client, seeded_chat, auth_header):
+    """Кредит — обычная статья с категорией. Погашение кредитки в план не попадает: покупки
+    с карты уже списаны со статей своих категорий."""
     pid, me, h = _personal(client, seeded_chat, auth_header)
     _item(client, pid, h, title="Кредитки", kind="spend", percent=30, categories=["Кредиты"])
     _income(client, pid, h, 100000)
@@ -245,12 +246,11 @@ def test_card_payment_goes_to_item_by_category(client, seeded_chat, auth_header)
     assert client.post(f"/api/chats/{pid}/credit-cards/{card_id}/pay", headers=h, json={"amount": 12000}).status_code == 200
     _expense(client, pid, me, h, 3000, "Кредиты", subcategory="Кредит")
     items = _by_title(client.get(f"/api/chats/{pid}/plan", headers=h).json())
-    assert float(items["Кредитки"]["spent"]) == 15000.0
+    assert float(items["Кредитки"]["spent"]) == 3000.0
     assert float(items["Свободно"]["spent"]) == 0.0
 
     entries = client.get(f"/api/chats/{pid}/plan/entries?item_id={items['Кредитки']['id']}", headers=h).json()
-    assert sorted((e["title"], e["source"], float(e["amount"])) for e in entries) == [
-        ("Кредитка Тбанк", "card", 12000.0), ("Кредиты", "expense", 3000.0)]
+    assert [(e["title"], e["source"], float(e["amount"])) for e in entries] == [("Кредиты", "expense", 3000.0)]
     assert client.post(f"/api/chats/{pid}/plan/items", headers=h, json={
         "title": "Долг", "kind": "debt", "percent": 1}).status_code == 422
 

@@ -488,6 +488,9 @@ button:active, .expense-card:active, .budget-card:active, .obligation-row:active
   margin-top: 2px;
 }
 
+/* Погашение кредитки: в списке видно, но в итоги не входит */
+.expense-card.repayment .expense-amount { color: var(--hint); }
+.repay-badge { color: var(--hint); }
 .expense-amount {
   font-weight: 700;
   font-size: 15px;
@@ -1526,6 +1529,18 @@ select.dd-native { display: none !important; }
   justify-content: space-between;
   font-size: 14px;
   padding: 3px 0;
+}
+.free-cash {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.free-cash-total {
+  display: flex;
+  justify-content: space-between;
+  font-size: 15px;
+  padding: 2px 0 4px;
+  font-variant-numeric: tabular-nums;
 }
 .free-next {
   margin-top: 10px;

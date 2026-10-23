@@ -36,6 +36,9 @@ async def get_stats(
         select(
             Expense.expense_date, Expense.category, Expense.subcategory, Expense.amount,
             Expense.title, Expense.recurring_id.is_not(None),
-        ).where(Expense.chat_id == ctx.chat.id, Expense.expense_date >= fetch_start, Expense.expense_date < fetch_end)
+        ).where(
+            Expense.chat_id == ctx.chat.id, Expense.expense_date >= fetch_start, Expense.expense_date < fetch_end,
+            Expense.repays_card_id.is_(None),  # погашение кредитки — не трата (app/shared/budgets.py)
+        )
     )
     return build_stats(start, end, [Row(*r) for r in result.all()])

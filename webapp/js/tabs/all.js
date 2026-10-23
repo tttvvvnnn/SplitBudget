@@ -155,7 +155,7 @@ function renderList(items) {
   });
 
   document.getElementById("total-line").textContent =
-    fmtMoney(filtered.reduce((s, e) => s + shownAmount(e), 0));
+    fmtMoney(filtered.reduce((s, e) => s + (e.repays_card_id ? 0 : shownAmount(e)), 0));
 
   if (filtered.length === 0) {
     list.innerHTML = `<div class="empty-state">${items.length ? "Ничего не найдено." : "Трат за этот месяц пока нет.<br>Нажмите «+», чтобы добавить первую."}</div>`;
@@ -191,7 +191,7 @@ function cardHtml(e) {
     ? `<div class="amount-sub">на вас ${fmtMoney(e.my_share)}</div>`
     : `<div class="amount-sub">из ${fmtMoney(e.amount)}</div>`;
   return `
-    <div class="card expense-card" data-id="${e.id}" data-chat="${e.chat_id}">
+    <div class="card expense-card${e.repays_card_id ? " repayment" : ""}" data-id="${e.id}" data-chat="${e.chat_id}">
       ${thumb}
       <div class="expense-main">
         <div class="expense-title">${escapeHtml(e.title)}</div>
@@ -200,7 +200,7 @@ function cardHtml(e) {
           <span>${escapeHtml(spaceLabel(e))}${payer}</span>
           ${e.is_recurring ? '<span title="Повторяющаяся">🔁</span>' : ""}
           ${e.card_id ? '<span title="Оплачено кредитной картой">💳</span>' : ""}
-          ${e.repays_card_id ? '<span title="Платёж по кредитной карте">💸</span>' : ""}
+          ${e.repays_card_id ? '<span class="repay-badge" title="Погашение кредитки: покупки с карты уже учтены, в итоги не входит">💸 погашение</span>' : ""}
         </div>
       </div>
       <div class="expense-amount">

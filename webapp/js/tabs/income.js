@@ -21,6 +21,27 @@ function incomeChatId() {
   return state.personalChatId;
 }
 
+/* Свои деньги рядом с бюджетом: покупка с кредитки — трата в день покупки, а из кармана
+   деньги уходят, когда гасишь карту. Разница между «Свободно» и «Своих денег осталось» —
+   это рост долга по картам (плюс ожидаемые доходы и платежи впереди, если они есть). */
+function cashHtml(data) {
+  if (!data.has_cards) return "";
+  const cash = Number(data.cash_left);
+  const debtChange = Number(data.spent_card) - Number(data.card_repaid);
+  const extra = Number(data.expected) > 0 || Number(data.obligations_pending) > 0;
+  return `
+      <div class="free-cash">
+        <div class="free-cash-total"><span>💵 Своих денег осталось</span><b class="${cash < 0 ? "negative" : ""}">${fmtMoney(cash)}</b></div>
+        <div class="free-rows">
+          ${Number(data.card_repaid) > 0 ? `<div><span>💳 Погашено кредиток</span><span>−${fmtMoney(data.card_repaid)}</span></div>` : ""}
+          <div><span>💳 Долг по картам за месяц</span><span>${debtChange > 0 ? "+" : debtChange < 0 ? "−" : ""}${fmtMoney(Math.abs(debtChange))}</span></div>
+        </div>
+        <div class="hint-text">${debtChange > 0
+          ? `Покупки с кредиток уже в тратах, но свои деньги на них ещё не ушли: ${fmtMoney(debtChange)} предстоит погасить.`
+          : "Погашение кредитки — не трата: сами покупки уже учтены в тратах в день покупки."}${extra ? " «Свободно» ещё учитывает ожидаемые доходы и платежи впереди." : ""}</div>
+      </div>`;
+}
+
 async function renderIncomeTab() {
   const content = document.getElementById("content");
   let data;
@@ -64,10 +85,14 @@ async function renderIncomeTab() {
       <div class="free-rows">
         <div><span>Получено</span><span>+${fmtMoney(data.received)}</span></div>
         ${Number(data.expected) > 0 ? `<div><span>Ожидается</span><span>+${fmtMoney(data.expected)}</span></div>` : ""}
-        <div><span>Траты</span><span>−${fmtMoney(data.spent)}</span></div>
+        ${data.has_cards ? `
+        <div><span>Траты своими деньгами</span><span>−${fmtMoney(Number(data.spent) - Number(data.spent_card))}</span></div>
+        <div><span>💳 Траты с кредиток</span><span>−${fmtMoney(data.spent_card)}</span></div>` : `
+        <div><span>Траты</span><span>−${fmtMoney(data.spent)}</span></div>`}
         ${Number(data.obligations_pending) > 0 ? `<div><span>📌 Платежи впереди</span><span>−${fmtMoney(data.obligations_pending)}</span></div>` : ""}
         ${Number(data.saved) !== 0 ? `<div><span>🐷 Отложено на цели</span><span>−${fmtMoney(data.saved)}</span></div>` : ""}
       </div>
+      ${cashHtml(data)}
       ${untilNext}
     </div>
     </div>

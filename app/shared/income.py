@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.shared.autocategory import normalize
 from app.shared.budgets import month_range, spending
+from app.shared.credits import month_debts
 from app.shared.goals import saved_in_month
 from app.shared.models import Chat, Income, IncomeAsk, IncomeSource
 from app.shared.obligations import Notice, day_in_month, fmt_amount, month_of, next_month, obligations
@@ -73,6 +74,11 @@ class IncomeSummary:
     obligations_pending: Decimal
     saved: Decimal  # отложено на цели в этом месяце (app/shared/goals.py)
     free: Decimal
+    # Кредитки: покупки с карт (и проценты) уже в spent, а свои деньги уходят при погашении
+    has_cards: bool = False
+    spent_card: Decimal = ZERO
+    card_repaid: Decimal = ZERO
+    cash_left: Decimal = ZERO  # своих денег осталось: получено − траты своими − погашено − отложено
     next_title: str | None = None
     next_date: dt.date | None = None
     next_amount: Decimal | None = None
@@ -110,6 +116,13 @@ async def summary(session: AsyncSession, chat: Chat, month: str, today: dt.date)
         saved=saved,
         free=received + expected - spent - obligations_pending - saved,
     )
+    start, end = month_range(month)
+    debts = await month_debts(session, chat, start, end) if chat.is_personal else None
+    result.has_cards = bool(debts and (debts.cards_start or debts.cards_end or debts.purchases or debts.paid))
+    if debts:
+        result.spent_card = min(debts.purchases, spent)
+        result.card_repaid = debts.paid
+    result.cash_left = received - (spent - result.spent_card) - result.card_repaid - saved
     if month != month_of(today):
         return result
 

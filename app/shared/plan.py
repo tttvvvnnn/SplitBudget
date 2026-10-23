@@ -10,10 +10,11 @@
   с неё. Если категория в одной статье, а её подкатегория в другой — трата идёт в статью
   с подкатегорией;
 - goal — накопительная: выделенное откладывается на цель по кнопке «Отложил».
-Кредиты и кредитки — обычные расходные статьи с категорией «Кредиты»: платёж по кредиту
-записывается тратой, а деньги, внесённые на кредитную карту (это тратой не считается),
-попадают в статью по категории карты (app/shared/credits.py). Траты без статьи и пополнения целей без
-статьи списываются со «Свободно».
+Кредиты — обычная расходная статья с категорией «Кредиты»: платёж по кредиту и проценты по
+карте записываются тратами. Покупки с кредитки списываются со статей своих категорий в день
+покупки, поэтому погашение карты («Внести» или трата с repays_card_id) в план не попадает —
+иначе покупка списалась бы дважды. Траты без статьи и пополнения целей без статьи
+списываются со «Свободно».
 
 Месяц плана начинается с chat.plan_start_day (по умолчанию 1-го). В конце месяца статьи
 обнуляются: всё, что осталось (или ушло в минус), переходит в «Свободно» следующего месяца.
@@ -32,14 +33,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.shared.models import (
     Chat,
-    CreditCard,
-    CreditOperation,
     Goal,
     GoalDeposit,
     Income,
     PlanAlert,
     PlanItem,
 )
+from app.shared.budgets import in_budget
 from app.shared.my_spending import my_expenses
 
 KINDS = ("spend", "goal")
@@ -118,12 +118,12 @@ class PlanSummary:
 
 @dataclass
 class Entry:
-    """Списание плана: трата (твоя доля), платёж по кредитной карте или пополнение цели."""
+    """Списание плана: трата (твоя доля) или пополнение цели."""
 
     date: dt.date
     title: str
     amount: Decimal
-    source: str  # expense | card | deposit
+    source: str  # expense | deposit
     category: str | None = None
     subcategory: str | None = None
     goal_id: int | None = None
@@ -157,22 +157,8 @@ async def _flows(session: AsyncSession, chat: Chat, start: dt.date, end: dt.date
     out += [
         Entry(m.expense.expense_date, m.expense.title, m.amount, "expense", m.expense.category, m.expense.subcategory)
         for m in await my_expenses(session, chat.id, start, end)
-        if m.amount
+        if m.amount and in_budget(m.expense)
     ]
-    # Платёж по кредитной карте тратой не записывается, но деньги из плана уходят
-    cards = (
-        await session.execute(
-            select(CreditOperation, CreditCard)
-            .join(CreditCard, CreditCard.id == CreditOperation.card_id)
-            .where(
-                CreditCard.chat_id == chat.id,
-                CreditOperation.kind == "payment",
-                CreditOperation.op_date >= start,
-                CreditOperation.op_date < end,
-            )
-        )
-    ).all()
-    out += [Entry(o.op_date, c.title, o.amount, "card", c.category, c.subcategory) for o, c in cards]
     deposits = (
         await session.execute(
             select(GoalDeposit.deposit_date, Goal.title, GoalDeposit.goal_id, GoalDeposit.amount)

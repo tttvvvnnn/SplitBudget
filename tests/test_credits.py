@@ -406,3 +406,46 @@ def test_expense_repays_card(client, seeded_chat, auth_header, monkeypatch):
     assert f"qe:repay:{eid}:0" in buttons and not any(b.startswith("qe:card:") for b in buttons)
     asyncio.run(quick.on_quick_button(_callback(pid, f"qe:repay:{eid}:0", log)))
     assert _debt(client, pid, h, card["id"])[0] == 10000.0
+
+
+def test_card_repayment_is_not_spending(client, seeded_chat, auth_header):
+    """Покупка с кредитки — трата в день покупки, погашение карты — не трата (иначе покупка
+    посчиталась бы дважды). На «Доходах» видно, сколько своих денег осталось."""
+    pid, h = _personal(client, seeded_chat, auth_header)
+    me = client.get(f"/api/chats/{pid}/me", headers=h).json()["member"]["id"]
+    month = TODAY.strftime("%Y-%m")
+    card = _card(client, pid, h, debt=0)
+    assert client.post(f"/api/chats/{pid}/income", headers=h, json={"title": "Зарплата", "amount": 150000}).status_code == 201
+    assert _post_expense(client, pid, h, me, 1000, title="Кофе").status_code == 201
+    assert _post_expense(client, pid, h, me, 5000, card_id=card["id"], title="Продукты").status_code == 201
+    repay = {"title": "Т-Банк", "amount": "3000", "category": "Кредиты", "expense_date": TODAY.isoformat(),
+             "payer_member_id": str(me), "split_type": "equal", "participant_ids": json.dumps([me]),
+             "repays_card_id": str(card["id"])}
+    assert client.post(f"/api/chats/{pid}/expenses", headers=h, data=repay).status_code == 201
+    assert client.post(f"/api/chats/{pid}/credit-cards/{card['id']}/pay", headers=h, json={"amount": 1000}).status_code == 200
+    assert _debt(client, pid, h, card["id"])[0] == 1000.0
+
+    data = client.get(f"/api/chats/{pid}/income?month={month}", headers=h).json()
+    assert data["has_cards"] is True
+    assert float(data["spent"]) == 6000.0  # кофе + покупка с карты, без погашения
+    assert float(data["spent_card"]) == 5000.0
+    assert float(data["card_repaid"]) == 4000.0
+    assert float(data["cash_left"]) == 150000.0 - 1000.0 - 4000.0
+
+    stats = client.get(f"/api/chats/{pid}/stats?month={month}", headers=h).json()
+    assert float(stats["total"]) == 6000.0
+    assert "Кредиты" not in [c["category"] for c in stats["by_category"]]
+    all_stats = client.get(f"/api/all/stats?month={month}", headers=h).json()
+    assert float(all_stats["total"]) == 6000.0
+
+    from app.shared.models import Chat
+    from app.shared.report import build_report
+
+    async def run():
+        async with async_session_maker() as session:
+            return await build_report(session, await session.get(Chat, pid), month, True)
+
+    text = asyncio.run(run())
+    assert "Потрачено: <b>6 000 RUB</b>" in text
+    assert "💳 Из них в кредит: 5 000 RUB" in text
+    assert "💵 Своих денег осталось: 145 000 RUB" in text

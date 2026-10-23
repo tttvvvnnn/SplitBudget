@@ -455,6 +455,10 @@ class IncomeSummaryOut(BaseModel):
     obligations_pending: Decimal
     saved: Decimal
     free: Decimal
+    has_cards: bool
+    spent_card: Decimal
+    card_repaid: Decimal
+    cash_left: Decimal
     next_title: str | None
     next_date: dt.date | None
     next_amount: Decimal | None

@@ -187,7 +187,8 @@ function renderExpenseList() {
     return true;
   });
 
-  const total = filtered.reduce((s, e) => s + Number(e.amount), 0);
+  // Погашение кредитки — не трата: покупки с карты уже учтены в день покупки
+  const total = filtered.reduce((s, e) => s + (e.repays_card_id ? 0 : Number(e.amount)), 0);
   totalLine.textContent = fmtMoney(total);
 
   const hasAnyFilter = !!(q || category || payer);
@@ -249,7 +250,7 @@ function expenseCardHtml(e) {
               ${participants.map((m) => avatarHtml(m)).join("")}
             </span>` : ""}`;
   return `
-    <div class="card expense-card" data-id="${e.id}">
+    <div class="card expense-card${e.repays_card_id ? " repayment" : ""}" data-id="${e.id}">
       ${thumb}
       <div class="expense-main">
         <div class="expense-title">${escapeHtml(e.title)}</div>
@@ -257,7 +258,7 @@ function expenseCardHtml(e) {
           ${categoryBadgeHtml(e.category, e.subcategory)}${familyMeta}
           ${e.is_recurring ? '<span title="Повторяющаяся">🔁</span>' : ""}
           ${e.card_id ? '<span title="Оплачено кредитной картой">💳</span>' : ""}
-          ${e.repays_card_id ? '<span title="Платёж по кредитной карте">💸</span>' : ""}
+          ${e.repays_card_id ? '<span class="repay-badge" title="Погашение кредитки: покупки с карты уже учтены, в итоги не входит">💸 погашение</span>' : ""}
         </div>
       </div>
       <div class="expense-amount">${fmtMoney(e.amount)}</div>
