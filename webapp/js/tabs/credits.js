@@ -1,7 +1,7 @@
 import { state } from "../state.js";
 import { api } from "../api.js";
 import { tg, haptic, toast, confirmAction } from "../telegram.js";
-import { todayISO, fmtMoney, escapeHtml } from "../format.js";
+import { todayISO, fmtMoney, escapeHtml, dayOfMonthLabel } from "../format.js";
 import { openSheet, closeSheet, useMainButtonFor, showFormError } from "../sheet.js";
 import { categoryFieldsHtml, bindCategoryFields, readCategoryFields } from "../category-fields.js";
 import { openPaymentSheet } from "./budgets.js";
@@ -103,7 +103,7 @@ function cardHtml(c) {
 }
 
 function loanHtml(l) {
-  const meta = [`Платёж ${Number(l.amount) ? fmtMoney(l.amount) : "без суммы"} · ${l.day_of_month}-го`];
+  const meta = [`Платёж ${Number(l.amount) ? fmtMoney(l.amount) : "без суммы"} · ${dayOfMonthLabel(l.day_of_month)}`];
   if (l.end_month) meta.push(`до ${monthShort(l.end_month)}`);
   let status = "";
   if (!l.is_active) status = "остановлен";

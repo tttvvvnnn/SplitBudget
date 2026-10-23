@@ -1,7 +1,7 @@
 import { state } from "../state.js";
 import { api } from "../api.js";
 import { tg, haptic, toast, confirmAction } from "../telegram.js";
-import { monthLabel, shiftMonth, todayISO, fmtMoney, escapeHtml } from "../format.js";
+import { monthLabel, shiftMonth, todayISO, fmtMoney, escapeHtml, dayOptionsHtml, dayOfMonthLabel } from "../format.js";
 import { openSheet, closeSheet, useMainButtonFor, showFormError } from "../sheet.js";
 
 /* ---------------- Вкладка «Доходы» ----------------
@@ -79,7 +79,7 @@ async function renderIncomeTab() {
         <div class="card income-row" data-source="${s.id}">
           <div class="ob-main">
             <div class="ob-title">${escapeHtml(s.title)}</div>
-            <div class="hint-text">каждое ${s.day_of_month} число${s.is_active ? "" : " · остановлен"}</div>
+            <div class="hint-text">${dayOfMonthLabel(s.day_of_month)}${s.is_active ? "" : " · остановлен"}</div>
           </div>
           <div class="ob-right">
             <div class="ob-amount">${fmtMoney(s.amount)}</div>
@@ -209,8 +209,8 @@ function openSourceModal(existing) {
         <input type="number" id="s-amount" min="0" step="0.01" value="${existing ? Number(existing.amount) : ""}">
       </div>
       <div class="field">
-        <label>День (1–28)</label>
-        <input type="number" id="s-day" min="1" max="28" value="${existing ? existing.day_of_month : 10}">
+        <label>День</label>
+        <select id="s-day">${dayOptionsHtml(existing ? existing.day_of_month : 10)}</select>
       </div>
     </div>
     ${isEdit ? `<div class="field"><label><input type="checkbox" id="s-active" ${existing.is_active ? "checked" : ""}> Активен</label></div>` : ""}
@@ -227,7 +227,7 @@ function openSourceModal(existing) {
     const day = Number(overlay.querySelector("#s-day").value);
     if (!title) { showFormError(errorEl, "Укажите название"); return; }
     if (!amount || amount <= 0) { showFormError(errorEl, "Укажите сумму больше нуля"); return; }
-    if (!day || day < 1 || day > 28) { showFormError(errorEl, "День должен быть от 1 до 28"); return; }
+    if (!day || day < 1 || day > 31) { showFormError(errorEl, "Выберите день"); return; }
     const body = { title, amount, day_of_month: day, is_active: isEdit ? overlay.querySelector("#s-active").checked : true };
     try {
       if (isEdit) await api(`/chats/${incomeChatId()}/income-sources/${existing.id}`, { method: "PATCH", body });

@@ -12,6 +12,7 @@ from sqlalchemy import select
 from app.shared.database import async_session_maker
 from app.shared.models import Chat, Member, SubscriptionHint
 from app.shared import subscriptions
+from app.shared.obligations import day_label
 
 logger = logging.getLogger(__name__)
 router = Router(name="subscriptions")
@@ -61,7 +62,7 @@ async def on_subscription_button(callback: CallbackQuery) -> None:
             recurring = await subscriptions.accept(session, chat, candidate, member.id)
             await session.commit()
             text = (
-                f"📌 «{recurring.title}» теперь обязательный платёж, {recurring.day_of_month}-го числа. "
+                f"📌 «{recurring.title}» теперь обязательный платёж, {day_label(recurring.day_of_month)}. "
                 "Изменить или удалить — во вкладке «📌 Платежи»."
             )
         else:

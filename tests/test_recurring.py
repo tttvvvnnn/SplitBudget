@@ -89,3 +89,29 @@ def test_recurring_without_amount(client, seeded_chat, auth_header):
     r = client.post(url, headers=h, json={**base, "split_type": "custom",
                                           "participants": [{"member_id": a, "custom_amount": 0}]})
     assert r.status_code == 400
+
+
+def test_last_day_of_month(client, seeded_chat, auth_header):
+    """31 — «последний день месяца»: в коротких месяцах платёж приходится на последний день."""
+    import datetime as dt
+
+    from app.shared.obligations import day_in_month, day_label
+
+    assert day_in_month(31, "2026-02") == dt.date(2026, 2, 28)
+    assert day_in_month(31, "2028-02") == dt.date(2028, 2, 29)
+    assert day_in_month(30, "2026-02") == dt.date(2026, 2, 28)
+    assert day_in_month(31, "2026-04") == dt.date(2026, 4, 30)
+    assert day_in_month(31, "2026-05") == dt.date(2026, 5, 31)
+    assert day_in_month(15, "2026-02") == dt.date(2026, 2, 15)
+    assert day_label(31) == "в последний день месяца"
+    assert day_label(5) == "5-го числа"
+
+    a = seeded_chat.alice_member_id
+    base = {"title": "Кредит", "amount": 1000, "payer_member_id": a, "kind": "loan",
+            "participants": [{"member_id": a}]}
+    h = auth_header(seeded_chat.alice_init_data)
+    r = client.post(f"/api/chats/{seeded_chat.chat_id}/recurring", headers=h, json={**base, "day_of_month": 31})
+    assert r.status_code == 201, r.text
+    assert r.json()["day_of_month"] == 31
+    r = client.post(f"/api/chats/{seeded_chat.chat_id}/recurring", headers=h, json={**base, "day_of_month": 32})
+    assert r.status_code == 422

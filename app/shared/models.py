@@ -176,7 +176,7 @@ class RecurringExpense(Base):
     subcategory: Mapped[str | None] = mapped_column(String(64), nullable=True)
     payer_member_id: Mapped[int] = mapped_column(ForeignKey("members.id", ondelete="CASCADE"))
     split_type: Mapped[str] = mapped_column(String(16), default="equal")
-    day_of_month: Mapped[int] = mapped_column(default=1)  # 1..28
+    day_of_month: Mapped[int] = mapped_column(default=1)  # 1..31, больше дней в месяце — последний день
     # Тип обязательного платежа: rent | loan | subscription | other. Кредитные карты живут
     # отдельно (CreditCard): у них плавающие даты, а не день месяца. Бывший вид card остался
     # только в старых записях до миграции.
@@ -322,7 +322,7 @@ class IncomeSource(Base):
     chat_id: Mapped[int] = mapped_column(ForeignKey("chats.id", ondelete="CASCADE"))
     title: Mapped[str] = mapped_column(String(255))
     amount: Mapped[Decimal] = mapped_column(MoneyType)
-    day_of_month: Mapped[int] = mapped_column(default=1)  # 1..28
+    day_of_month: Mapped[int] = mapped_column(default=1)  # 1..31, больше дней в месяце — последний день
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
 

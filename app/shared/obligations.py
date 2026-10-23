@@ -59,9 +59,22 @@ def counts_as_expense(recurring: RecurringExpense) -> bool:
     return recurring.kind != "card"
 
 
+LAST_DAY = 31  # день месяца 31 — «последний день месяца»
+
+
+def day_in_month(day: int, month: str) -> dt.date:
+    """day-е число месяца; если такого нет (30-е в феврале, 31-е в апреле) — последний день."""
+    start, end = month_range(month)
+    return start.replace(day=min(day, (end - dt.timedelta(days=1)).day))
+
+
+def day_label(day: int) -> str:
+    """«15-го числа» / «в последний день месяца»."""
+    return "в последний день месяца" if day >= LAST_DAY else f"{day}-го числа"
+
+
 def due_date_for(recurring: RecurringExpense, month: str) -> dt.date:
-    start, _ = month_range(month)
-    return start.replace(day=recurring.day_of_month)
+    return day_in_month(recurring.day_of_month, month)
 
 
 def applies_in_month(recurring: RecurringExpense, month: str) -> bool:
