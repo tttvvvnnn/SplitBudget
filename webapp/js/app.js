@@ -6,6 +6,7 @@
      format.js        — даты, деньги, escapeHtml, иконки категорий
      api.js           — запросы к /api и загрузка картинок с авторизацией
      members.js       — подписи и аватарки участников
+     select.js        — выпадающие списки в стиле приложения вместо нативных <select>
      sheet.js         — шторки (bottom sheet), нативная MainButton, ошибки форм
      member-modals.js — добавление/переименование/список участников
      brand.js         — знак бренда, светлая/тёмная тема
@@ -20,6 +21,7 @@ import { loadCategories } from "./categories.js";
 import { loadVersionBadge, renderShell, renderTab, PERSONAL_ONLY_TABS } from "./shell.js";
 import { initTheme } from "./brand.js";
 import { renderLogin } from "./login.js";
+import "./select.js";
 
 initTheme();
 
