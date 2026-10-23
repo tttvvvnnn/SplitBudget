@@ -122,6 +122,8 @@ async def list_expenses(
     date_to: dt.date | None = None,
 ):
     query = select(Expense).where(Expense.chat_id == ctx.chat.id)
+    if ctx.chat.is_personal:
+        query = query.where(Expense.card_id.is_(None))  # покупки кредиткой — в карте (вкладка «Кредиты»)
     if month:
         try:
             year, mon = (int(p) for p in month.split("-"))

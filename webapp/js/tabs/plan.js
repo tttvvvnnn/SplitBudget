@@ -184,6 +184,10 @@ function openItemSheet(it, plan, isCurrent) {
     if (carried) notes.push(`${carried > 0 ? "Перенесено" : "Перерасход"} с прошлых месяцев: ${fmtMoney(Math.abs(carried))}`);
     notes.push("Сюда списываются траты без статьи");
   }
+  if (it.card_debt !== null && it.card_debt !== undefined) {
+    // Покупки с кредитки списываются отсюда, когда вносишь платёж на карту
+    notes.push(`💳 Долг по картам: ${fmtMoney(it.card_debt)} — станет тратой этой статьи, когда внесёте платёж`);
+  }
   const canSave = it.kind === "goal" && it.goal_title && remaining > 0 && isCurrent;
   const overlay = openSheet(`
     <div class="sheet-title">${itemIcon(it)} ${escapeHtml(it.title)} <span class="plan-pct">${pctText(it.percent)}</span></div>

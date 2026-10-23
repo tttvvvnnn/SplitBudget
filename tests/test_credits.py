@@ -43,10 +43,13 @@ def test_card_operations(client, seeded_chat, auth_header):
     assert card["next_deadline"] == (TODAY + dt.timedelta(days=14)).isoformat()
     url = f"/api/chats/{pid}/credit-cards/{card['id']}"
 
-    # Внести — долг меньше, трат нет
+    # Внести — трата-погашение в категории карты, долг меньше
     card = client.post(f"{url}/pay", headers=h, json={"amount": 4000}).json()
     assert float(card["debt"]) == 80000.0
-    assert _expenses(client, pid, h) == []
+    [repay] = _expenses(client, pid, h)
+    assert repay["title"] == "Погашение · Т-Банк" and repay["category"] == "Кредиты"
+    assert repay["repays_card_id"] == card["id"] and float(repay["amount"]) == 4000.0
+    assert float(card["opening_left"]) == 80000.0
     r = client.post(f"{url}/pay", headers=h, json={"amount": 90000})
     assert r.status_code == 400 and "больше долга" in r.json()["detail"]
 
@@ -57,23 +60,25 @@ def test_card_operations(client, seeded_chat, auth_header):
     assert card["grace_until"] == new_grace and card["payment_date"] is None and card["min_payment"] is None
     assert client.post(f"{url}/extend", headers=h, json={}).status_code == 400
 
-    # Начислили проценты — трата в категории карты, долг вырос
+    # Начислили проценты — покупка в карте (не трата), долг вырос
     card = client.post(f"{url}/interest", headers=h, json={"amount": 1500}).json()
     assert float(card["debt"]) == 81500.0
-    [expense] = _expenses(client, pid, h)
-    assert expense["title"] == "Проценты · Т-Банк" and expense["category"] == "Кредиты"
+    assert [e["title"] for e in _expenses(client, pid, h)] == ["Погашение · Т-Банк"]
+    assert [(p["title"], float(p["left"])) for p in card["unpaid"]] == [("Проценты · Т-Банк", 1500.0)]
 
     # Сверить с банком
     card = client.post(f"{url}/adjust", headers=h, json={"debt": 82000}).json()
     assert float(card["debt"]) == 82000.0
-    assert [o["kind"] for o in card["operations"]] == ["adjust", "interest", "extend", "payment"]
+    assert [o["kind"] for o in card["operations"]] == ["adjust", "interest", "extend"]
 
-    # Отмена операций в обратном порядке возвращает всё как было
+    # Отмена операций в обратном порядке возвращает всё как было (погашение — трата, её удаляют как трату)
     for op in card["operations"]:
         card = client.delete(f"{url}/operations/{op['id']}", headers=h).json()
-    assert float(card["debt"]) == 84000.0
+    assert float(card["debt"]) == 80000.0
     assert card["payment_date"] == (TODAY + dt.timedelta(days=14)).isoformat()
     assert float(card["min_payment"]) == 4200.0
+    assert client.delete(f"/api/chats/{pid}/expenses/{repay['id']}", headers=h).status_code == 204
+    assert float(_debt(client, pid, h, card["id"])[0]) == 84000.0
     assert _expenses(client, pid, h) == []
 
     # Правка карты долг не трогает
@@ -406,3 +411,98 @@ def test_expense_repays_card(client, seeded_chat, auth_header, monkeypatch):
     assert f"qe:repay:{eid}:0" in buttons and not any(b.startswith("qe:card:") for b in buttons)
     asyncio.run(quick.on_quick_button(_callback(pid, f"qe:repay:{eid}:0", log)))
     assert _debt(client, pid, h, card["id"])[0] == 10000.0
+
+
+def test_card_purchases_live_in_card(client, seeded_chat, auth_header):
+    """Покупки кредиткой — не траты «Моих финансов», они живут в карте. Тратой становится
+    погашение, и оно закрывает самые старые покупки по очереди."""
+    pid, h = _personal(client, seeded_chat, auth_header)
+    me = client.get(f"/api/chats/{pid}/me", headers=h).json()["member"]["id"]
+    month = TODAY.strftime("%Y-%m")
+    r = client.post(f"/api/chats/{pid}/plan/items", headers=h,
+                    json={"title": "Кредитки", "kind": "spend", "percent": 20, "categories": ["Кредиты"]})
+    assert r.status_code == 201, r.text
+    card = _card(client, pid, h, title="Озон", debt=0)
+    assert client.post(f"/api/chats/{pid}/income", headers=h, json={"title": "Зарплата", "amount": 150000}).status_code == 201
+    assert _post_expense(client, pid, h, me, 1000, title="Кофе").status_code == 201
+
+    def purchase(amount, title, days_ago, category):
+        data = {"title": title, "amount": str(amount), "category": category,
+                "expense_date": (TODAY - dt.timedelta(days=days_ago)).isoformat(),
+                "payer_member_id": str(me), "split_type": "equal", "participant_ids": json.dumps([me]),
+                "card_id": str(card["id"])}
+        r = client.post(f"/api/chats/{pid}/expenses", headers=h, data=data)
+        assert r.status_code == 201, r.text
+
+    purchase(10000, "Продукты", 9, "Продукты")
+    purchase(5000, "Кино", 5, "Развлечения")
+    # Покупок нет ни в тратах, ни в статистике, ни в «Свободно»
+    assert [e["title"] for e in _expenses(client, pid, h)] == ["Кофе"]
+    assert float(client.get(f"/api/chats/{pid}/stats?month={month}", headers=h).json()["total"]) == 1000.0
+    assert float(client.get(f"/api/all/stats?month={month}", headers=h).json()["total"]) == 1000.0
+    assert [e["title"] for e in client.get(f"/api/all/expenses?month={month}", headers=h).json()] == ["Кофе"]
+
+    # Погашение 7500 закрывает 7500 из самой старой покупки
+    out = client.post(f"/api/chats/{pid}/credit-cards/{card['id']}/pay", headers=h, json={"amount": 7500}).json()
+    assert float(out["debt"]) == 7500.0
+    assert [(p["title"], float(p["left"]), float(p["amount"])) for p in out["unpaid"]] == [
+        ("Продукты", 2500.0, 10000.0), ("Кино", 5000.0, 5000.0)]
+
+    data = client.get(f"/api/chats/{pid}/income?month={month}", headers=h).json()
+    assert float(data["spent"]) == 1000.0 + 7500.0
+    assert float(data["card_repaid"]) == 7500.0
+    assert float(data["free"]) == 150000.0 - 8500.0
+    stats = client.get(f"/api/chats/{pid}/stats?month={month}", headers=h).json()
+    assert {c["category"]: float(c["total"]) for c in stats["by_category"]}.get("Кредиты") == 7500.0
+
+    items = {i["title"]: i for i in client.get(f"/api/chats/{pid}/plan", headers=h).json()["items"]}
+    assert float(items["Кредитки"]["spent"]) == 7500.0
+    assert float(items["Кредитки"]["card_debt"]) == 7500.0
+
+    # Проценты — тоже покупка в карте, гасятся в свою очередь
+    out = client.post(f"/api/chats/{pid}/credit-cards/{card['id']}/interest", headers=h, json={"amount": 300}).json()
+    assert [p["title"] for p in out["unpaid"]][-1] == "Проценты · Озон"
+    assert sorted(e["title"] for e in _expenses(client, pid, h)) == ["Кофе", "Погашение · Озон"]
+
+
+def test_family_card_purchase_not_in_my_finances(client, seeded_chat, auth_header):
+    """Семейная трата твоей кредиткой: в семье — обычная трата, в «Моих финансах» — покупка в карте."""
+    pid, h = _personal(client, seeded_chat, auth_header)
+    month = TODAY.strftime("%Y-%m")
+    card = _card(client, pid, h, debt=0)
+    alice, bob = seeded_chat.alice_member_id, seeded_chat.bob_member_id
+    r = _post_expense(client, seeded_chat.chat_id, h, alice, 2000, card_id=card["id"], participants=[alice, bob])
+    assert r.status_code == 201, r.text
+    family = client.get(f"/api/chats/{seeded_chat.chat_id}/expenses?month={month}", headers=h).json()
+    assert [float(e["amount"]) for e in family] == [2000.0]
+    assert client.get(f"/api/all/expenses?month={month}", headers=h).json() == []
+    assert _debt(client, pid, h, card["id"])[0] == 2000.0
+
+
+def test_old_interest_moves_into_card(tmp_path, monkeypatch):
+    """Старые проценты — трата и +долг карты — становятся покупкой в карте, общий долг тот же."""
+    db = tmp_path / "interest.sqlite3"
+    cfg = Config(str(ROOT / "alembic.ini"))
+    cfg.set_main_option("script_location", str(ROOT / "migrations"))
+    monkeypatch.setattr("app.shared.config.settings.DATABASE_PATH", str(db))
+
+    command.upgrade(cfg, "d5f9b3a7e142")
+    con = sqlite3.connect(db)
+    con.execute("insert into chats(id, title, currency, created_at, is_personal, plan_start_day)"
+                " values (7, 'Мои финансы', 'RUB', '2026-01-01', 1, 1)")
+    con.execute("insert into members(id, chat_id, tg_user_id, full_name, is_active, is_hidden, added_at)"
+                " values (2, 7, 7, 'A', 1, 0, '2026-01-01')")
+    con.execute("insert into credit_cards(id, chat_id, title, debt, category, is_archived, reminders_sent, created_at)"
+                " values (1, 7, 'Т-Банк', 11500, 'Кредиты', 0, '', '2026-01-01')")
+    con.execute("insert into expenses(id, chat_id, title, amount, category, expense_date, payer_member_id,"
+                " split_type, created_by_member_id, created_at, updated_at) values (5, 7, 'Проценты · Т-Банк', 1500,"
+                " 'Кредиты', '2026-10-01', 2, 'equal', 2, '2026-10-01', '2026-10-01')")
+    con.execute("insert into credit_operations(card_id, kind, amount, op_date, expense_id, created_at)"
+                " values (1, 'interest', 1500, '2026-10-01', 5, '2026-10-01')")
+    con.commit()
+    con.close()
+
+    command.upgrade(cfg, "e6a2c4f8b051")
+    con = sqlite3.connect(db)
+    assert con.execute("select card_id from expenses where id = 5").fetchone() == (1,)
+    assert con.execute("select debt from credit_cards where id = 1").fetchone() == (10000,)

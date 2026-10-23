@@ -19,10 +19,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.shared.autocategory import normalize
-from app.shared.budgets import month_range, spending
+from app.shared.budgets import month_range
+from app.shared.credits import month_debts
 from app.shared.goals import saved_in_month
 from app.shared.models import Chat, Income, IncomeAsk, IncomeSource
 from app.shared.obligations import Notice, day_in_month, fmt_amount, month_of, next_month, obligations
+from app.shared.plan import money_entries
 
 ZERO = Decimal("0")
 
@@ -73,6 +75,11 @@ class IncomeSummary:
     obligations_pending: Decimal
     saved: Decimal  # отложено на цели в этом месяце (app/shared/goals.py)
     free: Decimal
+    # Кредитки: в spent есть погашения карт (card_repaid), а покупок по картам и процентов
+    # (spent_card) нет — они живут в карте
+    has_cards: bool = False
+    spent_card: Decimal = ZERO
+    card_repaid: Decimal = ZERO
     next_title: str | None = None
     next_date: dt.date | None = None
     next_amount: Decimal | None = None
@@ -95,7 +102,9 @@ async def summary(session: AsyncSession, chat: Chat, month: str, today: dt.date)
     statuses = await _source_statuses(session, chat.id, month, incomes)
     received = sum((i.amount for i in incomes), ZERO)
     expected = sum((st.source.amount for st in statuses if st.income is None and st.source.is_active), ZERO)
-    spent = (await spending(session, chat, month)).get(("", None), ZERO)
+    # Как в Плане: покупки кредиткой живут в карте, а погашения карт — траты
+    start, end = month_range(month)
+    spent = sum((e.amount for e in await money_entries(session, chat, start, end)), ZERO)
     items = await obligations(session, chat, month)
     pending = [o for o in items if o.counts and o.payment.status == "pending"]
     obligations_pending = sum((o.share for o in pending), ZERO)
@@ -110,6 +119,11 @@ async def summary(session: AsyncSession, chat: Chat, month: str, today: dt.date)
         saved=saved,
         free=received + expected - spent - obligations_pending - saved,
     )
+    debts = await month_debts(session, chat, start, end) if chat.is_personal else None
+    result.has_cards = bool(debts and (debts.cards_start or debts.cards_end or debts.purchases or debts.paid))
+    if debts:
+        result.spent_card = debts.purchases
+        result.card_repaid = min(debts.paid, spent)
     if month != month_of(today):
         return result
 

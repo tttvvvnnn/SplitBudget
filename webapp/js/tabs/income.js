@@ -21,6 +21,21 @@ function incomeChatId() {
   return state.personalChatId;
 }
 
+/* Покупки кредиткой живут в карте (tabs/credits.js), тратой становится погашение. Здесь видно,
+   сколько куплено в кредит за месяц и насколько вырос долг — этих денег ещё нет в тратах. */
+function cardsHtml(data) {
+  if (!data.has_cards || Number(data.spent_card) <= 0) return "";
+  const debtChange = Number(data.spent_card) - Number(data.card_repaid);
+  return `
+      <div class="free-cash">
+        <div class="free-rows">
+          <div><span>💳 Куплено в кредит</span><span>${fmtMoney(data.spent_card)}</span></div>
+          <div><span>💳 Долг по картам за месяц</span><span>${debtChange > 0 ? "+" : debtChange < 0 ? "−" : ""}${fmtMoney(Math.abs(debtChange))}</span></div>
+        </div>
+        <div class="hint-text">В тратах и «Свободно» этого нет: тратой станет погашение карты.</div>
+      </div>`;
+}
+
 async function renderIncomeTab() {
   const content = document.getElementById("content");
   let data;
@@ -64,10 +79,14 @@ async function renderIncomeTab() {
       <div class="free-rows">
         <div><span>Получено</span><span>+${fmtMoney(data.received)}</span></div>
         ${Number(data.expected) > 0 ? `<div><span>Ожидается</span><span>+${fmtMoney(data.expected)}</span></div>` : ""}
-        <div><span>Траты</span><span>−${fmtMoney(data.spent)}</span></div>
+        ${Number(data.card_repaid) > 0 ? `
+        <div><span>Траты своими деньгами</span><span>−${fmtMoney(Number(data.spent) - Number(data.card_repaid))}</span></div>
+        <div><span>💳 Погашено кредиток</span><span>−${fmtMoney(data.card_repaid)}</span></div>` : `
+        <div><span>Траты</span><span>−${fmtMoney(data.spent)}</span></div>`}
         ${Number(data.obligations_pending) > 0 ? `<div><span>📌 Платежи впереди</span><span>−${fmtMoney(data.obligations_pending)}</span></div>` : ""}
         ${Number(data.saved) !== 0 ? `<div><span>🐷 Отложено на цели</span><span>−${fmtMoney(data.saved)}</span></div>` : ""}
       </div>
+      ${cardsHtml(data)}
       ${untilNext}
     </div>
     </div>

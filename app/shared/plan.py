@@ -10,10 +10,11 @@
   с неё. Если категория в одной статье, а её подкатегория в другой — трата идёт в статью
   с подкатегорией;
 - goal — накопительная: выделенное откладывается на цель по кнопке «Отложил».
-Кредиты и кредитки — обычные расходные статьи с категорией «Кредиты»: платёж по кредиту
-записывается тратой, а деньги, внесённые на кредитную карту (это тратой не считается),
-попадают в статью по категории карты (app/shared/credits.py). Траты без статьи и пополнения целей без
-статьи списываются со «Свободно».
+Покупки кредиткой и проценты по ней живут в карте и статьи не трогают (app/shared/my_spending.py).
+Тратой становится погашение карты — трата «Кредиты» с repays_card_id (так записывается и
+«Внести»); она списывается со статьи своей категории, например «Кредитки». Старые платежи
+«Внести», которые тратой не записывались, идут в статью по категории карты. Траты без статьи
+и пополнения целей без статьи списываются со «Свободно».
 
 Месяц плана начинается с chat.plan_start_day (по умолчанию 1-го). В конце месяца статьи
 обнуляются: всё, что осталось (или ушло в минус), переходит в «Свободно» следующего месяца.
@@ -30,6 +31,7 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.shared.credits import cards_of, debt_of
 from app.shared.models import (
     Chat,
     CreditCard,
@@ -94,6 +96,7 @@ class ItemStatus:
     goal_saved: Decimal | None = None
     goal_target: Decimal | None = None
     carried: Decimal = ZERO  # только у «Свободно»: остатки статей прошлых месяцев
+    card_debt: Decimal | None = None  # долг по картам, платежи по которым идут в эту статью
 
     @property
     def remaining(self) -> Decimal:
@@ -144,23 +147,16 @@ async def items_of(session: AsyncSession, chat_id: int) -> list[PlanItem]:
     return list(result.scalars().all())
 
 
-async def _flows(session: AsyncSession, chat: Chat, start: dt.date, end: dt.date) -> _Flows:
-    incomes = (
-        await session.execute(
-            select(Income.income_date, Income.amount).where(
-                Income.chat_id == chat.id, Income.income_date >= start, Income.income_date < end
-            )
-        )
-    ).all()
-    out: list[Entry] = []
+async def money_entries(session: AsyncSession, chat: Chat, start: dt.date, end: dt.date) -> list[Entry]:
+    """Сколько своих денег ушло в [start, end): траты (твоя доля; покупки кредиткой в них не
+    входят, погашения карт входят) плюс старые платежи «Внести», которые тратой не записывались."""
     # Как и во вкладке «Траты» «Моих финансов»: сколько владелец потратил сам (app/shared/my_spending.py)
-    out += [
+    out = [
         Entry(m.expense.expense_date, m.expense.title, m.amount, "expense", m.expense.category, m.expense.subcategory)
         for m in await my_expenses(session, chat.id, start, end)
         if m.amount
     ]
-    # Платёж по кредитной карте тратой не записывается, но деньги из плана уходят
-    cards = (
+    payments = (
         await session.execute(
             select(CreditOperation, CreditCard)
             .join(CreditCard, CreditCard.id == CreditOperation.card_id)
@@ -172,7 +168,19 @@ async def _flows(session: AsyncSession, chat: Chat, start: dt.date, end: dt.date
             )
         )
     ).all()
-    out += [Entry(o.op_date, c.title, o.amount, "card", c.category, c.subcategory) for o, c in cards]
+    out += [Entry(o.op_date, c.title, o.amount, "card", c.category, c.subcategory) for o, c in payments]
+    return out
+
+
+async def _flows(session: AsyncSession, chat: Chat, start: dt.date, end: dt.date) -> _Flows:
+    incomes = (
+        await session.execute(
+            select(Income.income_date, Income.amount).where(
+                Income.chat_id == chat.id, Income.income_date >= start, Income.income_date < end
+            )
+        )
+    ).all()
+    out = await money_entries(session, chat, start, end)
     deposits = (
         await session.execute(
             select(GoalDeposit.deposit_date, Goal.title, GoalDeposit.goal_id, GoalDeposit.amount)
@@ -262,6 +270,16 @@ async def _compute(session: AsyncSession, chat: Chat, date: dt.date) -> tuple[Pl
                 st.goal_title, st.goal_saved, st.goal_target = goal.title, saved, goal.target
         statuses.append(st)
 
+    # Долг по картам — у статьи, куда идут платежи по ним: столько ещё предстоит внести
+    debts: dict[int | None, Decimal] = {}
+    for card in await cards_of(session, chat.id):
+        if card.is_archived:
+            continue
+        key = item_for(Entry(start, card.title, ZERO, "card", card.category, card.subcategory))
+        debts[key] = debts.get(key, ZERO) + await debt_of(session, card)
+    for st in statuses:
+        st.card_debt = debts.get(st.id)
+
     free_percent = max(HUNDRED - sum((i.percent for i in items), ZERO), ZERO)
     free = ItemStatus(
         id=None,
@@ -272,6 +290,7 @@ async def _compute(session: AsyncSession, chat: Chat, date: dt.date) -> tuple[Pl
         allocated=income - sum((s.allocated for s in statuses), ZERO) + carried,
         spent=sum((e.amount for e in entries.get(None, [])), ZERO),
         carried=carried,
+        card_debt=debts.get(None),
     )
     statuses.append(free)
     summary_ = PlanSummary(

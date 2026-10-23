@@ -237,7 +237,7 @@ def _card(client, pid, h, debt=50000):
 
 
 def test_card_payment_goes_to_item_by_category(client, seeded_chat, auth_header):
-    """Кредит — обычная статья с категорией; деньги, внесённые на карту, списываются с неё же."""
+    """Кредит — обычная статья с категорией; «Внести» — трата-погашение в категории карты."""
     pid, me, h = _personal(client, seeded_chat, auth_header)
     _item(client, pid, h, title="Кредитки", kind="spend", percent=30, categories=["Кредиты"])
     _income(client, pid, h, 100000)
@@ -250,7 +250,7 @@ def test_card_payment_goes_to_item_by_category(client, seeded_chat, auth_header)
 
     entries = client.get(f"/api/chats/{pid}/plan/entries?item_id={items['Кредитки']['id']}", headers=h).json()
     assert sorted((e["title"], e["source"], float(e["amount"])) for e in entries) == [
-        ("Кредитка Тбанк", "card", 12000.0), ("Кредиты", "expense", 3000.0)]
+        ("Кредиты", "expense", 3000.0), ("Погашение · Кредитка Тбанк", "expense", 12000.0)]
     assert client.post(f"/api/chats/{pid}/plan/items", headers=h, json={
         "title": "Долг", "kind": "debt", "percent": 1}).status_code == 422
 

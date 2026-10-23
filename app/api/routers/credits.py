@@ -4,10 +4,11 @@ from __future__ import annotations
 import datetime as dt
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
 
 from app.api.dependencies import ChatContext, get_chat_context
 from app.shared import credits
-from app.shared.models import CreditCard, CreditOperation
+from app.shared.models import CreditCard, CreditOperation, Expense
 from app.shared.schemas import (
     CreditAdjustIn,
     CreditAmountIn,
@@ -35,6 +36,19 @@ async def _card_out(ctx: ChatContext, card: CreditCard, today: dt.date) -> Credi
     operations = await credits.operations_of(ctx.session, card.id, RECENT_OPERATIONS)
     purchases = await credits.recent_purchases(ctx.session, card.id, RECENT_OPERATIONS)
     debt = await credits.debt_of(ctx.session, card)
+    ledger = await credits.ledger(ctx.session, card)
+    unpaid_ids = [i for i, left in ledger.left.items() if left > 0]
+    unpaid = (
+        await ctx.session.execute(
+            select(Expense).where(Expense.id.in_(unpaid_ids)).order_by(Expense.expense_date, Expense.id)
+        )
+    ).scalars().all() if unpaid_ids else []
+
+    def purchase_out(e: Expense) -> CreditPurchaseOut:
+        return CreditPurchaseOut.model_validate(e).model_copy(
+            update={"is_payment": e.repays_card_id == card.id, "left": ledger.left.get(e.id)}
+        )
+
     return CreditCardOut(
         id=card.id,
         title=card.title,
@@ -49,10 +63,9 @@ async def _card_out(ctx: ChatContext, card: CreditCard, today: dt.date) -> Credi
         subcategory=card.subcategory,
         is_archived=card.is_archived,
         operations=[CreditOperationOut.model_validate(o) for o in operations],
-        purchases=[
-            CreditPurchaseOut.model_validate(e).model_copy(update={"is_payment": e.repays_card_id == card.id})
-            for e in purchases
-        ],
+        purchases=[purchase_out(e) for e in purchases],
+        unpaid=[purchase_out(e) for e in unpaid],
+        opening_left=ledger.opening_left,
     )
 
 

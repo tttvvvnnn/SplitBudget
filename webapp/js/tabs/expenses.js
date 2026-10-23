@@ -304,13 +304,15 @@ function openExpenseModal(existing) {
     <div class="field" id="f-card-field" style="display:none;">
       <label>Чем оплачено</label>
       <select id="f-card"></select>
-      <div class="hint-text">Покупка кредиткой увеличит долг карты во вкладке «💳 Кредиты». Карту видите только вы.</div>
+      <div class="hint-text">${isPersonal()
+        ? "Покупка кредиткой уйдёт в карту (вкладка «💳 Кредиты») и тратой не будет: тратой станет погашение."
+        : "Для семьи это обычная трата, а в «Моих финансах» — покупка в карте: тратой станет погашение. Карту видите только вы."}</div>
     </div>
     ${categoryFieldsHtml("f", existing && existing.category, existing && existing.subcategory)}
     <div class="field" id="f-repays-field" style="display:none;">
       <label>Погашение кредитки</label>
       <select id="f-repays"></select>
-      <div class="hint-text">Платёж по карте уменьшит её долг во вкладке «💳 Кредиты» — «Внести» там нажимать не нужно.</div>
+      <div class="hint-text">Это трата: она уменьшит долг карты и закроет самые старые покупки по ней — «Внести» нажимать не нужно.</div>
     </div>
     <div class="field">
       <label>Дата</label>
