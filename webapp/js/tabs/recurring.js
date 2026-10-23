@@ -1,7 +1,7 @@
 import { state, isPersonal, hideFamilyOnly } from "../state.js";
 import { api } from "../api.js";
 import { tg, haptic, toast, confirmAction } from "../telegram.js";
-import { fmtMoney, escapeHtml, todayMonth } from "../format.js";
+import { fmtMoney, escapeHtml, todayMonth, dayOptionsHtml, dayOfMonthLabel } from "../format.js";
 import { memberLabel } from "../members.js";
 import { openSheet, closeSheet, useMainButtonFor, showFormError } from "../sheet.js";
 import { openAddMemberModal } from "../member-modals.js";
@@ -66,7 +66,7 @@ async function renderRecurringTab() {
           <div class="expense-title">${escapeHtml(r.title)}</div>
           <div class="expense-meta">
             ${categoryBadgeHtml(r.category, r.subcategory)}
-            каждое ${r.day_of_month} число${isPersonal() ? "" : ` · ${escapeHtml(memberLabel(r.payer_member_id))}`}
+            ${dayOfMonthLabel(r.day_of_month)}${isPersonal() ? "" : ` · ${escapeHtml(memberLabel(r.payer_member_id))}`}
             ${extra.length ? ` · ${extra.join(" · ")}` : ""}
             ${r.is_active ? "" : " · остановлено"}
           </div>
@@ -170,8 +170,9 @@ function openRecurringModal(existing, opts = {}) {
       ${categoryFieldsHtml("r", existing && existing.category, existing && existing.subcategory)}
     </div>
     <div class="field">
-      <label>День платежа (1–28)</label>
-      <input type="number" id="r-day" min="1" max="28" value="${existing ? existing.day_of_month : 1}">
+      <label>День платежа</label>
+      <select id="r-day">${dayOptionsHtml(existing ? existing.day_of_month : 1)}</select>
+      <div class="hint-text">29–30 число в коротком месяце, как и «последний день», придётся на последний день месяца.</div>
     </div>
     <div class="field" id="r-end-field">
       <label>Последний платёж</label>
@@ -305,7 +306,7 @@ function openRecurringModal(existing, opts = {}) {
     if (!title) { showFormError(errorEl, "Укажите название"); return; }
     if (amount < 0) { showFormError(errorEl, "Сумма не может быть меньше нуля"); return; }
     if (!amount && splitType === "custom") { showFormError(errorEl, "Без суммы платёж можно делить только поровну"); return; }
-    if (!day || day < 1 || day > 28) { showFormError(errorEl, "День месяца должен быть от 1 до 28"); return; }
+    if (!day || day < 1 || day > 31) { showFormError(errorEl, "Выберите день платежа"); return; }
 
     let participants;
     if (splitType === "equal") {

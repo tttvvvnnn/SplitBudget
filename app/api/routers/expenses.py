@@ -108,6 +108,7 @@ def _to_out(expense: Expense, shares: list[ExpenseShare], viewer: Member) -> Exp
         is_recurring=expense.recurring_id is not None,
         # Чем оплатил плательщик — его личное дело: остальным карта не показывается
         card_id=expense.card_id if expense.payer_member_id == viewer.id else None,
+        repays_card_id=expense.repays_card_id if expense.payer_member_id == viewer.id else None,
     )
 
 
@@ -166,6 +167,7 @@ async def create_expense(
     participant_ids: str | None = Form(None),  # JSON-массив id, для split_type='equal'
     custom_shares: str | None = Form(None),  # JSON-массив {member_id, amount}, для 'custom'
     card_id: str | None = Form(None),  # оплачено своей кредитной картой
+    repays_card_id: str | None = Form(None),  # платёж по своей кредитной карте
     photo: UploadFile | None = File(None),
 ):
     try:
@@ -200,6 +202,7 @@ async def create_expense(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     card = await _card_for(ctx, card_id or "", payer_member_id)
+    repays = await _card_for(ctx, repays_card_id or "", payer_member_id)
 
     photo_filename = None
     if photo is not None and photo.filename:
@@ -217,6 +220,7 @@ async def create_expense(
         split_type=split_type,
         created_by_member_id=ctx.member.id,
         card_id=card,
+        repays_card_id=repays,
     )
     ctx.session.add(expense)
     await ctx.session.flush()
@@ -373,6 +377,7 @@ async def update_expense(
     participant_ids: str | None = Form(None),
     custom_shares: str | None = Form(None),
     card_id: str | None = Form(None),  # "" — своими деньгами
+    repays_card_id: str | None = Form(None),  # "" — не платёж по карте
     photo: UploadFile | None = File(None),
 ):
     expense = await ctx.session.get(Expense, expense_id)
@@ -447,6 +452,13 @@ async def update_expense(
         payer = await ctx.session.get(Member, expense.payer_member_id)
         if card is None or payer is None or payer.tg_user_id != card.chat_id:
             expense.card_id = None
+    if repays_card_id is not None:
+        expense.repays_card_id = await _card_for(ctx, repays_card_id, expense.payer_member_id)
+    elif expense.repays_card_id is not None and payer_member_id is not None:
+        card = await ctx.session.get(CreditCard, expense.repays_card_id)
+        payer = await ctx.session.get(Member, expense.payer_member_id)
+        if card is None or payer is None or payer.tg_user_id != card.chat_id:
+            expense.repays_card_id = None
 
     if photo is not None and photo.filename:
         expense.photo_path = await _save_photo(ctx.chat.id, photo)

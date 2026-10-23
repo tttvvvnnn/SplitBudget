@@ -200,6 +200,7 @@ function cardHtml(e) {
           <span>${escapeHtml(spaceLabel(e))}${payer}</span>
           ${e.is_recurring ? '<span title="Повторяющаяся">🔁</span>' : ""}
           ${e.card_id ? '<span title="Оплачено кредитной картой">💳</span>' : ""}
+          ${e.repays_card_id ? '<span title="Платёж по кредитной карте">💸</span>' : ""}
         </div>
       </div>
       <div class="expense-amount">

@@ -50,4 +50,19 @@ function escapeHtml(str) {
   ));
 }
 
-export { todayMonth, todayISO, categoryIcon, monthLabel, shiftMonth, fmtMoney, escapeHtml };
+/* День платежа или дохода: 1–30 или 31 — «последний день месяца» (в коротких месяцах платёж
+   приходится на последний день, см. day_in_month в app/shared/obligations.py). */
+const LAST_DAY = 31;
+
+function dayOptionsHtml(selected) {
+  const days = Array.from({ length: 30 }, (_, i) => i + 1)
+    .map((d) => `<option value="${d}" ${d === selected ? "selected" : ""}>${d}</option>`);
+  return days.join("") + `<option value="${LAST_DAY}" ${selected >= LAST_DAY ? "selected" : ""}>Последний день месяца</option>`;
+}
+
+/* «каждое 15 число» / «в последний день месяца» */
+function dayOfMonthLabel(day) {
+  return day >= LAST_DAY ? "в последний день месяца" : `каждое ${day} число`;
+}
+
+export { dayOptionsHtml, dayOfMonthLabel, todayMonth, todayISO, categoryIcon, monthLabel, shiftMonth, fmtMoney, escapeHtml };

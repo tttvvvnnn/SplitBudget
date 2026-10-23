@@ -22,14 +22,13 @@ from app.shared.autocategory import normalize
 from app.shared.budgets import month_range, spending
 from app.shared.goals import saved_in_month
 from app.shared.models import Chat, Income, IncomeAsk, IncomeSource
-from app.shared.obligations import Notice, fmt_amount, month_of, next_month, obligations
+from app.shared.obligations import Notice, day_in_month, fmt_amount, month_of, next_month, obligations
 
 ZERO = Decimal("0")
 
 
 def source_date(source: IncomeSource, month: str) -> dt.date:
-    start, _ = month_range(month)
-    return start.replace(day=source.day_of_month)
+    return day_in_month(source.day_of_month, month)
 
 
 async def _incomes(session: AsyncSession, chat_id: int, month: str) -> list[Income]:

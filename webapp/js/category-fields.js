@@ -95,6 +95,7 @@ function setCategory(root, prefix, category, subcategory) {
   const subSelect = root.querySelector(`#${prefix}-subcategory`);
   subSelect.innerHTML = subcategoryOptionsHtml(category, subcategory);
   subSelect.dataset.last = subSelect.value;
+  catSelect.dispatchEvent(new Event("categoryset")); // не "change": это не выбор пользователя
 }
 
 function readCategoryFields(root, prefix) {

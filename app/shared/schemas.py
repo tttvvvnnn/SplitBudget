@@ -188,6 +188,7 @@ class ExpenseOut(BaseModel):
     created_at: dt.datetime
     is_recurring: bool
     card_id: int | None = None  # своя кредитная карта; чужая не показывается
+    repays_card_id: int | None = None  # платёж по своей кредитной карте
 
 
 class AllExpenseOut(BaseModel):
@@ -210,6 +211,7 @@ class AllExpenseOut(BaseModel):
     i_paid: bool
     is_recurring: bool
     card_id: int | None = None  # оплачено своей кредитной картой
+    repays_card_id: int | None = None  # платёж по своей кредитной карте
 
 
 class BalanceEntry(BaseModel):
@@ -280,7 +282,7 @@ class RecurringCreate(BaseModel):
     subcategory: str | None = None
     payer_member_id: int
     split_type: str = "equal"
-    day_of_month: int = Field(default=1, ge=1, le=28)
+    day_of_month: int = Field(default=1, ge=1, le=31)  # 31 — последний день месяца
     participants: list[RecurringParticipantIn] = Field(default_factory=list)
     kind: str = "other"
     end_month: str | None = None  # последний платёж кредита, 'YYYY-MM'
@@ -304,7 +306,7 @@ class RecurringUpdate(BaseModel):
     subcategory: str | None = None  # "" — убрать подкатегорию
     payer_member_id: int | None = None
     split_type: str | None = None
-    day_of_month: int | None = Field(default=None, ge=1, le=28)
+    day_of_month: int | None = Field(default=None, ge=1, le=31)
     participants: list[RecurringParticipantIn] | None = None
     is_active: bool | None = None
     kind: str | None = None
@@ -428,7 +430,7 @@ class IncomeOut(BaseModel):
 class IncomeSourceIn(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     amount: Decimal = Field(gt=0)
-    day_of_month: int = Field(ge=1, le=28)
+    day_of_month: int = Field(ge=1, le=31)  # 31 — последний день месяца
     is_active: bool = True
 
 
@@ -635,6 +637,7 @@ class CreditPurchaseOut(BaseModel):
     title: str
     amount: Decimal
     expense_date: dt.date
+    is_payment: bool = False  # трата-платёж по карте: долг уменьшился
 
     model_config = {"from_attributes": True}
 

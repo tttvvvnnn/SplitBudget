@@ -125,13 +125,23 @@ def _single_markup(
             InlineKeyboardButton(text="↩️ Отменить", callback_data=f"qe:undo:{expense_id}"),
         ]
     )
-    card_buttons = [
-        InlineKeyboardButton(text=f"💳 {card.title}", callback_data=f"qe:card:{expense_id}:{card.id}")
-        for card in (cards or [])[:MAX_CARD_BUTTONS]
-        if card.id != expense.card_id
-    ]
-    if expense.card_id and cards:
-        card_buttons.append(InlineKeyboardButton(text="👤 Своими", callback_data=f"qe:card:{expense_id}:0"))
+    if any(card.category == expense.category for card in cards or []):
+        # Трата в категории карты («Кредиты») — скорее платёж по карте, чем покупка ею
+        card_buttons = [
+            InlineKeyboardButton(text=f"💸 Погасить {card.title}", callback_data=f"qe:repay:{expense_id}:{card.id}")
+            for card in (cards or [])[:MAX_CARD_BUTTONS]
+            if card.id != expense.repays_card_id
+        ]
+        if expense.repays_card_id:
+            card_buttons.append(InlineKeyboardButton(text="✖️ Не платёж", callback_data=f"qe:repay:{expense_id}:0"))
+    else:
+        card_buttons = [
+            InlineKeyboardButton(text=f"💳 {card.title}", callback_data=f"qe:card:{expense_id}:{card.id}")
+            for card in (cards or [])[:MAX_CARD_BUTTONS]
+            if card.id != expense.card_id
+        ]
+        if expense.card_id and cards:
+            card_buttons.append(InlineKeyboardButton(text="👤 Своими", callback_data=f"qe:card:{expense_id}:0"))
     if card_buttons:
         rows.append(card_buttons)
     for chat in family_chats[:MAX_FAMILY_BUTTONS]:
@@ -356,7 +366,7 @@ async def on_quick_button(callback: CallbackQuery) -> None:
                 f"{_header(chat)}\n{_line(expense, currency, card)}\n🧠 Запомнил на будущее",
                 _single_markup(expense, family, cards),
             )
-        elif action == "card" and len(nums) == 2 and _in_private(callback):
+        elif action in ("card", "repay") and len(nums) == 2 and _in_private(callback):
             # Картой — только трату, которую оплатил сам, и только своей картой
             payer = await session.get(Member, expense.payer_member_id)
             if payer is None or payer.tg_user_id != callback.from_user.id:
@@ -369,13 +379,19 @@ async def on_quick_button(callback: CallbackQuery) -> None:
                 except ValueError as exc:
                     await callback.answer(str(exc), show_alert=True)
                     return
-            expense.card_id = card.id if card else None
+            if action == "card":
+                expense.card_id = card.id if card else None
+                note = "\n💳 Долг карты вырос" if card else "\n👤 Оплачено своими"
+                line = _line(expense, currency, card)
+            else:
+                expense.repays_card_id = card.id if card else None
+                note = f"\n💸 Долг карты «{escape(card.title)}» уменьшился" if card else "\n✖️ Не платёж по карте"
+                line = _line(expense, currency)
             await session.commit()
             family = await _family_chats(session, callback.from_user.id) if chat.is_personal else []
             await _edit(
                 callback,
-                f"{_header(chat)}\n{_line(expense, currency, card)}"
-                + ("\n💳 Долг карты вырос" if card else "\n👤 Оплачено своими"),
+                f"{_header(chat)}\n{line}{note}",
                 _single_markup(expense, family, await _cards(session, callback.from_user.id)),
             )
         elif action == "fam" and len(nums) == 2 and chat.is_personal:

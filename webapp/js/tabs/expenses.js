@@ -257,6 +257,7 @@ function expenseCardHtml(e) {
           ${categoryBadgeHtml(e.category, e.subcategory)}${familyMeta}
           ${e.is_recurring ? '<span title="Повторяющаяся">🔁</span>' : ""}
           ${e.card_id ? '<span title="Оплачено кредитной картой">💳</span>' : ""}
+          ${e.repays_card_id ? '<span title="Платёж по кредитной карте">💸</span>' : ""}
         </div>
       </div>
       <div class="expense-amount">${fmtMoney(e.amount)}</div>
@@ -306,6 +307,11 @@ function openExpenseModal(existing) {
       <div class="hint-text">Покупка кредиткой увеличит долг карты во вкладке «💳 Кредиты». Карту видите только вы.</div>
     </div>
     ${categoryFieldsHtml("f", existing && existing.category, existing && existing.subcategory)}
+    <div class="field" id="f-repays-field" style="display:none;">
+      <label>Погашение кредитки</label>
+      <select id="f-repays"></select>
+      <div class="hint-text">Платёж по карте уменьшит её долг во вкладке «💳 Кредиты» — «Внести» там нажимать не нужно.</div>
+    </div>
     <div class="field">
       <label>Дата</label>
       <input type="date" id="f-date" value="${existing ? existing.expense_date : todayISO()}">
@@ -458,6 +464,8 @@ function openExpenseModal(existing) {
       form.append("card_id", cardField.value());
       rememberCard(cardField.value());
     }
+    if (cardField.repaysVisible()) form.append("repays_card_id", cardField.repaysValue());
+    else if (cardField.mine() && existing && existing.repays_card_id) form.append("repays_card_id", "");
 
     if (splitType === "equal") {
       const ids = Array.from(selectedIds);
@@ -529,16 +537,28 @@ function lastCard() {
 function bindCardField(overlay, existing) {
   const field = overlay.querySelector("#f-card-field");
   const select = overlay.querySelector("#f-card");
+  const repaysField = overlay.querySelector("#f-repays-field");
+  const repays = overlay.querySelector("#f-repays");
+  const category = overlay.querySelector("#f-category");
   const payer = overlay.querySelector("#f-payer");
   let cards = [];
   const isMine = () => Number(payer.value) === state.member.id;
-  const update = () => { field.style.display = cards.length && isMine() ? "block" : "none"; };
+  // «Погашение кредитки» — только для трат в категории карты (обычно «Кредиты»)
+  const isRepayment = () => cards.some((c) => c.category === category.value);
+  const update = () => {
+    field.style.display = cards.length && isMine() ? "block" : "none";
+    repaysField.style.display = cards.length && isMine() && isRepayment() ? "block" : "none";
+  };
   payer.addEventListener("change", update);
+  category.addEventListener("change", update);
+  category.addEventListener("categoryset", update);
 
   (async () => {
     try {
       const data = await api(`/chats/${state.personalChatId}/credits`);
-      cards = data.cards.filter((c) => !c.is_archived || (existing && existing.card_id === c.id));
+      cards = data.cards.filter(
+        (c) => !c.is_archived || (existing && (existing.card_id === c.id || existing.repays_card_id === c.id)),
+      );
     } catch (e) {
       return; // без карт — просто без поля
     }
@@ -547,12 +567,20 @@ function bindCardField(overlay, existing) {
     select.innerHTML = '<option value="">👤 Свои деньги</option>' + cards
       .map((c) => `<option value="${c.id}" ${known && String(c.id) === current ? "selected" : ""}>💳 ${escapeHtml(c.title)}</option>`)
       .join("");
+    // Новую трату в «Кредитах» сразу предлагаем как платёж по первой карте
+    const repaid = existing ? String(existing.repays_card_id || "") : String(cards[0] ? cards[0].id : "");
+    repays.innerHTML = '<option value="">Нет, это не платёж по карте</option>' + cards
+      .map((c) => `<option value="${c.id}" ${String(c.id) === repaid ? "selected" : ""}>💳 ${escapeHtml(c.title)}</option>`)
+      .join("");
     update();
   })();
 
   return {
     visible: () => field.style.display !== "none",
     value: () => select.value,
+    mine: () => cards.length > 0 && isMine(),
+    repaysVisible: () => repaysField.style.display !== "none",
+    repaysValue: () => repays.value,
   };
 }
 

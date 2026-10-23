@@ -360,3 +360,49 @@ def test_debts_in_monthly_report(client, seeded_chat, auth_header):
     text = asyncio.run(run())
     assert "💳 Кредитки: долг 10 000 RUB → 7 000 RUB (покупки +2 000 RUB, внесено −5 000 RUB)" in text
     assert "🏦 Остаток по кредитам: 50 000 RUB" in text
+
+
+def test_expense_repays_card(client, seeded_chat, auth_header, monkeypatch):
+    """Трата в «Кредитах» с repays_card_id — платёж по карте: долг уменьшается, «Внести» не нужно."""
+    pid, h = _personal(client, seeded_chat, auth_header)
+    me = client.get(f"/api/chats/{pid}/me", headers=h).json()["member"]["id"]
+    card = _card(client, pid, h, title="Сплит", debt=10000)
+    data = {"title": "Сплит", "amount": "3888", "category": "Кредиты", "expense_date": TODAY.isoformat(),
+            "payer_member_id": str(me), "split_type": "equal", "participant_ids": json.dumps([me]),
+            "repays_card_id": str(card["id"])}
+    r = client.post(f"/api/chats/{pid}/expenses", headers=h, data=data)
+    assert r.status_code == 201, r.text
+    expense = r.json()
+    assert expense["repays_card_id"] == card["id"] and expense["card_id"] is None
+    debt, out = _debt(client, pid, h, card["id"])
+    assert debt == 6112.0
+    assert [(p["title"], p["is_payment"]) for p in out["purchases"]] == [("Сплит", True)]
+
+    # Поправили сумму — долг пересчитался; сняли отметку — вернулся
+    client.patch(f"/api/chats/{pid}/expenses/{expense['id']}", headers=h, data={"amount": "4000"})
+    assert _debt(client, pid, h, card["id"])[0] == 6000.0
+    client.patch(f"/api/chats/{pid}/expenses/{expense['id']}", headers=h, data={"repays_card_id": ""})
+    assert _debt(client, pid, h, card["id"])[0] == 10000.0
+
+    # Чужой картой нельзя
+    bob_h = auth_header(seeded_chat.bob_init_data)
+    bad = {**data, "payer_member_id": str(seeded_chat.bob_member_id),
+           "participant_ids": json.dumps([seeded_chat.bob_member_id])}
+    assert client.post(f"/api/chats/{seeded_chat.chat_id}/expenses", headers=bob_h, data=bad).status_code == 400
+
+    # Бот: трата в «Кредитах» — кнопки «Погасить», а не «оплачено картой»
+    from app.bot.handlers import quick
+
+    async def silent(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(quick, "notify_budget_alerts", silent)
+    log = []
+    eid = expense["id"]
+    asyncio.run(quick.on_quick_button(_callback(pid, f"qe:repay:{eid}:{card['id']}", log)))
+    assert "Долг карты «Сплит» уменьшился" in log[-1][0]
+    assert _debt(client, pid, h, card["id"])[0] == 6000.0
+    buttons = [b.callback_data for row in log[-1][1].inline_keyboard for b in row]
+    assert f"qe:repay:{eid}:0" in buttons and not any(b.startswith("qe:card:") for b in buttons)
+    asyncio.run(quick.on_quick_button(_callback(pid, f"qe:repay:{eid}:0", log)))
+    assert _debt(client, pid, h, card["id"])[0] == 10000.0

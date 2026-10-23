@@ -1,7 +1,8 @@
 """Кредиты и кредитные карты «Моих финансов».
 
 Кредитная карта (CreditCard) — счёт с долгом. Долг = собственный учёт карты (card.debt) плюс
-покупки — траты, оплаченные картой (Expense.card_id): трату поправили или удалили, и долг
+покупки — траты, оплаченные картой (Expense.card_id), минус траты-платежи по карте
+(Expense.repays_card_id, категория «Кредиты»): трату поправили или удалили, и долг
 пересчитался сам. Учёт карты меняют операции (CreditOperation):
 «Внести» уменьшает долг и тратой не считается, «Продлить срок» переносит даты, не трогая
 долг, «Начислили %» записывает трату в категории карты и увеличивает долг, «Сверить с
@@ -20,7 +21,7 @@ import json
 from dataclasses import dataclass
 from decimal import Decimal
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.shared import obligations as ob
@@ -40,13 +41,17 @@ REMINDER_DAYS = (7, 3, 1, 0)
 
 
 async def purchases_total(session: AsyncSession, card_ids: list[int]) -> dict[int, Decimal]:
-    """Сумма покупок по каждой карте."""
+    """На сколько траты изменили долг каждой карты: покупки минус траты-платежи."""
     if not card_ids:
         return {}
-    result = await session.execute(
-        select(Expense.card_id, func.sum(Expense.amount)).where(Expense.card_id.in_(card_ids)).group_by(Expense.card_id)
-    )
-    return {card_id: Decimal(total) for card_id, total in result.all()}
+    totals: dict[int, Decimal] = {}
+    for column, sign in ((Expense.card_id, 1), (Expense.repays_card_id, -1)):
+        result = await session.execute(
+            select(column, func.sum(Expense.amount)).where(column.in_(card_ids)).group_by(column)
+        )
+        for card_id, total in result.all():
+            totals[card_id] = totals.get(card_id, ZERO) + sign * Decimal(total)
+    return totals
 
 
 async def debt_of(session: AsyncSession, card: CreditCard) -> Decimal:
@@ -54,9 +59,10 @@ async def debt_of(session: AsyncSession, card: CreditCard) -> Decimal:
 
 
 async def recent_purchases(session: AsyncSession, card_id: int, limit: int) -> list[Expense]:
+    """Последние покупки картой и траты-платежи по ней."""
     result = await session.execute(
         select(Expense)
-        .where(Expense.card_id == card_id)
+        .where(or_(Expense.card_id == card_id, Expense.repays_card_id == card_id))
         .order_by(Expense.expense_date.desc(), Expense.id.desc())
         .limit(limit)
     )
@@ -210,6 +216,7 @@ async def delete_card(session: AsyncSession, card: CreditCard) -> None:
     # Траты процентов и покупки остаются: деньги на них потрачены.
     await session.execute(delete(CreditOperation).where(CreditOperation.card_id == card.id))
     await session.execute(update(Expense).where(Expense.card_id == card.id).values(card_id=None))
+    await session.execute(update(Expense).where(Expense.repays_card_id == card.id).values(repays_card_id=None))
     await session.delete(card)
     await session.flush()
 
@@ -406,6 +413,16 @@ async def month_debts(session: AsyncSession, chat: Chat, start: dt.date, end: dt
             elif date >= start:
                 in_month += amount
                 purchases += amount
+        for date, amount in (
+            await session.execute(
+                select(Expense.expense_date, Expense.amount).where(Expense.repays_card_id.in_(ids))
+            )
+        ).all():
+            if date >= end:
+                after -= amount
+            elif date >= start:
+                in_month -= amount
+                paid += amount
         for kind, date, amount in (
             await session.execute(
                 select(CreditOperation.kind, CreditOperation.op_date, CreditOperation.amount).where(

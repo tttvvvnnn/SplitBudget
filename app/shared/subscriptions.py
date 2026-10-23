@@ -29,7 +29,7 @@ from app.shared.models import (
     RecurringParticipant,
     SubscriptionHint,
 )
-from app.shared.obligations import Notice, fmt_amount, month_of
+from app.shared.obligations import Notice, day_label, fmt_amount, month_of
 
 MIN_MONTHS = 3
 MAX_PER_MONTH = 2
@@ -111,7 +111,7 @@ async def find_candidates(session: AsyncSession, chat: Chat, today: dt.date) -> 
                 amount=last.amount,
                 category=last.category,
                 subcategory=last.subcategory,
-                day_of_month=min(last.expense_date.day, 28),
+                day_of_month=last.expense_date.day,
                 months=streak,
                 last_expense_id=last.id,
             )
@@ -189,7 +189,7 @@ async def due_subscription_asks(session: AsyncSession, today: dt.date) -> list[N
                 Notice(
                     chat.id,
                     f"📺 {prefix}«{escape(c.title)}» — {fmt_amount(c.amount, chat.currency)} уже {c.months}-й месяц "
-                    f"подряд. Похоже на подписку: сделать обязательным платежом ({c.day_of_month}-го числа)? "
+                    f"подряд. Похоже на подписку: сделать обязательным платежом ({day_label(c.day_of_month)})? "
                     "Тогда бот будет напоминать и спрашивать «Оплачено?», а сумма заранее учтётся в лимитах.",
                     buttons=[[("📌 Сделать платежом", f"sub:add:{hint.id}"), ("✖️ Не подписка", f"sub:no:{hint.id}")]],
                 )
