@@ -116,7 +116,8 @@ class AiProposalOut(BaseModel):
 class CategorySuggestionOut(BaseModel):
     category: str | None  # None — только предложение новой категории
     subcategory: str | None
-    source: str  # 'learned' — выучено по тратам этого чата, 'dictionary' — словарь магазинов, 'ai' — ИИ
+    source: str  # 'learned' — выучено по тратам этого чата, 'dictionary' — словарь магазинов, 'ai' — ИИ,
+    # 'ai_unknown' — ИИ спросили, но он не узнал название (category тогда None)
     proposal: AiProposalOut | None = None
 
 

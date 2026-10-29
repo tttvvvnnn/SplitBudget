@@ -593,7 +593,12 @@ function bindCardField(overlay, existing) {
    новую категорию или подкатегорию — тогда под полями плашка «Создать / Не надо». Как только
    категорию выбрали руками — больше не трогаем. При редактировании траты не подбираем. */
 const AI_DELAY_MS = 900;
-const HINTS = { learned: "🪄 Как в прошлый раз", dictionary: "🪄 Подобрано по названию", ai: "✨ Подобрал ИИ — проверьте" };
+const HINTS = {
+  learned: "🪄 Как в прошлый раз",
+  dictionary: "🪄 Подобрано по названию",
+  ai: "✨ Подобрал ИИ — проверьте",
+  ai_unknown: "✨ ИИ не узнал название — выберите категорию, в следующий раз подставлю её",
+};
 
 function proposalLabel(p) {
   const where = [p.category, p.subcategory].filter(Boolean).join(" › ");
@@ -654,7 +659,7 @@ function bindAutoCategory(overlay, isEdit) {
       setCategory(overlay, "f", s.category, s.subcategory || "");
       showCategoryHint(overlay, "f", HINTS[s.source] || HINTS.dictionary);
     } else {
-      showCategoryHint(overlay, "f", "");
+      showCategoryHint(overlay, "f", s && s.source === "ai_unknown" ? HINTS.ai_unknown : "");
     }
     if (s && s.proposal) showProposal(title, s.proposal);
     return s;
