@@ -99,7 +99,8 @@ def test_parallel_first_payment(client, auth_header):
     async def _one():
         async with async_session_maker() as session:
             chat = await session.get(Chat, chat_id)
-            items = await ob.obligations(session, chat, ob.month_of(dt.date.today()))
+            # следующий месяц: в этом аренды с 28-го может уже не быть, если сегодня позже 28-го
+            items = await ob.obligations(session, chat, ob.next_month(ob.month_of(dt.date.today())))
             await session.commit()
             return len(items)
 
