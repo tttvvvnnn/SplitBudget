@@ -15,6 +15,20 @@ document.addEventListener("keydown", (ev) => {
   else top.remove();
 });
 
+/* Закрыть шторку кликом мимо окна — но только если и нажатие, и отпускание были на фоне.
+   Иначе на ПК окно закрывалось, когда выделяешь текст в поле и отпускаешь мышь за окном:
+   браузер шлёт click общему предку, то есть подложке. */
+function closeOnBackdropClick(overlay, close) {
+  let downOnBackdrop = false;
+  overlay.addEventListener("pointerdown", (ev) => {
+    downOnBackdrop = ev.target === overlay;
+  });
+  overlay.addEventListener("click", (ev) => {
+    if (ev.target === overlay && downOnBackdrop) close();
+    downOnBackdrop = false;
+  });
+}
+
 function openSheet(innerHtml) {
   // на всякий случай сбрасываем нативные кнопки от предыдущей шторки, если та не закрылась
   // штатно (не должно случаться, но так спокойнее)
@@ -24,9 +38,7 @@ function openSheet(innerHtml) {
   const overlay = document.createElement("div");
   overlay.className = "sheet-overlay";
   overlay.innerHTML = `<div class="sheet"><div class="sheet-handle"></div>${innerHtml}</div>`;
-  overlay.addEventListener("click", (ev) => {
-    if (ev.target === overlay) closeSheet(overlay);
-  });
+  closeOnBackdropClick(overlay, () => closeSheet(overlay));
   overlay._close = () => closeSheet(overlay);
   document.body.appendChild(overlay);
 
@@ -100,9 +112,7 @@ function openTextPromptModal({ title, hint, label, initialValue, placeholder, su
       <div class="error-text" id="tp-error" style="display:none;"></div>
       <button class="btn" id="tp-submit">${escapeHtml(submitLabel)}</button>
     </div>`;
-  overlay.addEventListener("click", (ev) => {
-    if (ev.target === overlay) overlay.remove();
-  });
+  closeOnBackdropClick(overlay, () => overlay.remove());
   document.body.appendChild(overlay);
 
   const input = overlay.querySelector("#tp-value");
