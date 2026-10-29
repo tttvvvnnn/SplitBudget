@@ -2,16 +2,18 @@
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import json
 
 import httpx
 import pytest
+from sqlalchemy import select
 
 from app.shared import ai_category
 from app.shared.ai_category import AiAnswer, _parse_many, resolve
 from app.shared.config import settings
 from app.shared.database import async_session_maker
-from app.shared.models import CategoryRule
+from app.shared.models import AiGuess, CategoryRule
 
 TREE = [
     ("Продукты", "🛒", ["Супермаркет", "Алкоголь"]),
@@ -325,3 +327,27 @@ def test_tidy_ignores_old_other_rules(client, seeded_chat, auth_header, fake_ai)
     assert item["source"] == "ai" and item["proposal"]["subcategory"] == "Фото на документы"
     # и при вводе новой траты тоже спрашиваем ИИ, а не подставляем «Другое»
     assert _suggest(client, seeded_chat, headers, "Фото на документы")["source"] == "ai"
+
+
+def test_unknown_is_shown_and_asked_again_next_day(client, seeded_chat, auth_header, fake_ai):
+    calls, answers = fake_ai
+    headers = auth_header(seeded_chat.alice_init_data)
+    # ИИ не узнал «OFM» — форма об этом говорит, а не молчит
+    assert _suggest(client, seeded_chat, headers, "OFM") == {
+        "category": None, "subcategory": None, "source": "ai_unknown", "proposal": None,
+    }
+    assert _suggest(client, seeded_chat, headers, "OFM")["source"] == "ai_unknown"
+    assert len(calls) == 1  # в тот же день — из кэша
+
+    async def _age():
+        async with async_session_maker() as session:
+            row = (await session.execute(
+                select(AiGuess).where(AiGuess.chat_id == seeded_chat.chat_id, AiGuess.keyword == "ofm")
+            )).scalar_one()
+            row.created_at -= dt.timedelta(days=2)
+            await session.commit()
+
+    asyncio.run(_age())
+    answers["ofm"] = AiAnswer("existing", "Дом", "Ремонт и мебель")
+    assert _suggest(client, seeded_chat, headers, "OFM")["category"] == "Дом"
+    assert len(calls) == 2

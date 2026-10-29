@@ -14,7 +14,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies import ChatContext, get_chat_context
 from app.api.routers.categories import nodes_out
 from app.bot.notify import notify_budget_alerts, notify_expense_deleted, notify_new_expense
-from app.shared.ai_category import apply_proposal, apply_tidy, cached_proposal, decline, suggest_with_ai, tidy_other
+from app.shared.ai_category import (
+    ai_unknown,
+    apply_proposal,
+    apply_tidy,
+    cached_proposal,
+    decline,
+    suggest_with_ai,
+    tidy_other,
+)
 from app.shared.autocategory import learn_category, suggest_category
 from app.shared.budgets import alerts_after_expense
 from app.shared.config import settings
@@ -277,6 +285,9 @@ async def category_suggestion(title: str, ai: bool = False, ctx: ChatContext = D
     if ai:
         suggestion = await suggest_with_ai(ctx.session, ctx.chat, title)
         await ctx.session.commit()  # кэш ответа ИИ
+        if suggestion is None and await ai_unknown(ctx.session, ctx.chat.id, title):
+            # ИИ спросили, но он не узнал название — мини-апп так и пишет, а не молчит
+            return CategorySuggestionOut(category=None, subcategory=None, source="ai_unknown")
     else:
         suggestion = await suggest_category(ctx.session, ctx.chat.id, title)
     if suggestion is None:

@@ -40,6 +40,7 @@ MIN_TITLE = 3
 EXAMPLES = 30
 BATCH = 15  # трат в одном запросе к ИИ
 MAX_RETRY_WAIT = 3.0  # секунд: дольше на 429 не ждём
+UNKNOWN_TTL = dt.timedelta(days=1)  # «не знаю» переспрашиваем: ИИ отвечает не всегда одинаково
 
 SYSTEM_PROMPT = """Ты подбираешь категории для трат в приложении семейного бюджета. Тебе дают \
 список категорий пользователя (категория: подкатегории), примеры того, как пользователь раньше \
@@ -263,7 +264,11 @@ async def ai_guess_many(session: AsyncSession, chat: Chat, titles: list[str]) ->
         row = cached.get(keyword)
         if row is not None and row.action == DECLINED:  # от подкатегории отказались — категория остаётся
             answers[keyword] = resolve(AiAnswer("existing", row.category), tree) if row.category else AiAnswer("unknown")
-        elif row is not None and row.tree_hash == tree_hash:
+        elif (
+            row is not None
+            and row.tree_hash == tree_hash
+            and not (row.action == "unknown" and row.created_at < dt.datetime.now(dt.UTC).replace(tzinfo=None) - UNKNOWN_TTL)
+        ):
             answers[keyword] = resolve(AiAnswer(row.action, row.category, row.subcategory, row.icon), tree)
         else:
             pending.append(keyword)
@@ -319,6 +324,14 @@ async def suggest_with_ai(session: AsyncSession, chat: Chat, title: str) -> Sugg
     if suggestion is not None:
         return suggestion
     return _to_suggestion(await ai_guess(session, chat, title))
+
+
+async def ai_unknown(session: AsyncSession, chat_id: int, title: str) -> bool:
+    """ИИ уже ответил, что не знает, что это за трата (из кэша)."""
+    result = await session.execute(
+        select(AiGuess.action).where(AiGuess.chat_id == chat_id, AiGuess.keyword == normalize(title)[:255])
+    )
+    return result.scalar_one_or_none() == "unknown"
 
 
 async def cached_proposal(session: AsyncSession, chat_id: int, title: str) -> AiAnswer | None:
