@@ -84,6 +84,8 @@ def test_subscription_hints(client, auth_header):
 
 def test_parallel_first_payment(client, auth_header):
     """Несколько запросов сразу создают первый платёж месяца — без 500."""
+    # срок — последний день месяца: платёж со сроком раньше даты создания в этом месяце не
+    # заводится, и с «28-м» тест падал бы 29–31 числа
     from tests.conftest import make_init_data
 
     headers = auth_header(make_init_data({"id": PERSONAL_TG_ID + 1, "first_name": "Тест"}))
@@ -91,7 +93,7 @@ def test_parallel_first_payment(client, auth_header):
     me = client.get(f"/api/chats/{chat_id}/me", headers=headers).json()["member"]["id"]
     r = client.post(
         f"/api/chats/{chat_id}/recurring", headers=headers,
-        json={"title": "Аренда", "amount": "1000", "category": "Дом", "day_of_month": 28, "kind": "rent",
+        json={"title": "Аренда", "amount": "1000", "category": "Дом", "day_of_month": 31, "kind": "rent",
               "payer_member_id": me, "participants": [{"member_id": me}]},
     )
     assert r.status_code == 201, r.text
