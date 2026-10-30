@@ -9,6 +9,13 @@ ENV APP_VERSION=${APP_VERSION} \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
+# Pango и шрифты — для WeasyPrint (PDF-отчёт, app/shared/pdf_report.py): Inter и DejaVu для
+# текста, Noto Color Emoji — для иконок категорий
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libpango-1.0-0 libpangoft2-1.0-0 \
+       fonts-inter fonts-dejavu-core fonts-noto-color-emoji \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

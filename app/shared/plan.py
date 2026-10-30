@@ -192,7 +192,7 @@ async def _flows(session: AsyncSession, chat: Chat, start: dt.date, end: dt.date
     return _Flows(incomes=[(d, a) for d, a in incomes], outflows=out)
 
 
-async def _compute(session: AsyncSession, chat: Chat, date: dt.date) -> tuple[PlanSummary, dict[int | None, list[Entry]]]:
+async def compute(session: AsyncSession, chat: Chat, date: dt.date) -> tuple[PlanSummary, dict[int | None, list[Entry]]]:
     """План на месяц плана, в который попадает date, и списания каждой статьи
     (ключ None — «Свободно»)."""
     start_day = chat.plan_start_day or 1
@@ -308,12 +308,12 @@ async def _compute(session: AsyncSession, chat: Chat, date: dt.date) -> tuple[Pl
 
 async def summary(session: AsyncSession, chat: Chat, date: dt.date) -> PlanSummary:
     """План на месяц плана, в который попадает date."""
-    return (await _compute(session, chat, date))[0]
+    return (await compute(session, chat, date))[0]
 
 
 async def item_entries(session: AsyncSession, chat: Chat, date: dt.date, item_id: int | None) -> list[Entry]:
     """На что ушли деньги статьи (None — «Свободно») в месяце плана, свежие сверху."""
-    return (await _compute(session, chat, date))[1].get(item_id, [])
+    return (await compute(session, chat, date))[1].get(item_id, [])
 
 
 async def savings_for_income(session: AsyncSession, income: Income) -> list[tuple[PlanItem, Goal, Decimal]]:

@@ -23,7 +23,10 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r requirements-dev.txt
+        # Pango — для WeasyPrint (PDF-отчёт), как в Dockerfile
+        run: |
+          sudo apt-get update -q && sudo apt-get install -yq libpango-1.0-0 libpangoft2-1.0-0
+          pip install -r requirements-dev.txt
 
       - name: Byte-compile check
         run: python -m py_compile $(find app migrations tests -name "*.py")
