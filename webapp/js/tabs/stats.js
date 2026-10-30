@@ -1,6 +1,6 @@
 import { state, isPersonal } from "../state.js";
 import { api } from "../api.js";
-import { haptic } from "../telegram.js";
+import { haptic, toast } from "../telegram.js";
 import { categoryIcon, monthLabel, shiftMonth, todayMonth, todayISO, fmtMoney, escapeHtml } from "../format.js";
 import { openSheet } from "../sheet.js";
 import { shareMode, shareToggleHtml, bindShareToggle } from "./all.js";
@@ -209,6 +209,7 @@ async function renderStatsTab() {
         <div class="label">${period.label}</div>
         <button data-dir="1" aria-label="Следующий период">›</button>
       </div>`}
+    ${personal && period.month ? `<button class="link-btn pdf-btn" id="stats-pdf">📄 Выгрузить в PDF</button>` : ""}
     ${personal ? shareToggleHtml() : ""}
     <div class="total-line">${fmtMoney(cur)}</div>
     <div class="total-delta">${headerDeltas}</div>
@@ -360,6 +361,8 @@ async function renderStatsTab() {
     });
   });
   bindShareToggle(content, () => renderStatsTab());
+  const pdfBtn = content.querySelector("#stats-pdf");
+  if (pdfBtn) pdfBtn.addEventListener("click", () => exportPdf(pdfBtn, period.month));
   content.querySelectorAll(".month-picker button").forEach((b) => {
     b.addEventListener("click", async () => {
       haptic("selection");
@@ -375,6 +378,40 @@ async function renderStatsTab() {
   }
   drawTrend(ctx);
   drawIncomeTrend(ctx);
+}
+
+/* PDF-отчёт за месяц плана (app/shared/pdf_report.py), в котором выбранный месяц: для текущего —
+   месяц плана с сегодняшним днём, для прошлых — с последним днём месяца. В Telegram файл
+   присылает бот в личку (мини-апп не умеет скачивать), в браузере он просто скачивается. */
+async function exportPdf(btn, month) {
+  const [y, m] = month.split("-").map(Number);
+  const date = [todayISO(), isoDate(y, m, lastDay(y, m))].sort()[0];
+  const theme = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "⏳ Готовлю PDF…";
+  try {
+    if (state.initData) {
+      await api(`/chats/${state.personalChatId}/report/send`, { method: "POST", body: { date, theme } });
+      haptic("notification", "success");
+      btn.textContent = "✓ Отправил в чат с ботом";
+    } else {
+      const res = await api(`/chats/${state.personalChatId}/report.pdf?date=${date}&theme=${theme}`);
+      const name = (/filename="([^"]+)"/.exec(res.headers.get("content-disposition") || "") || [])[1] || "SplitBudget.pdf";
+      const url = URL.createObjectURL(await res.blob());
+      const a = Object.assign(document.createElement("a"), { href: url, download: name });
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      btn.textContent = label;
+    }
+  } catch (e) {
+    btn.textContent = label;
+    toast(e.message);
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 /* Доходы против расходов (только «Мои финансы»; расходы — ваши траты, как в «Доходах»). */

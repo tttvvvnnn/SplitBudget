@@ -1579,6 +1579,8 @@ select.dd-native { display: none !important; }
 }
 
 /* «Убрать из списка» в подзаголовке шапки и «🙈 Скрытые» в переключателе — см. shell.js */
+.pdf-btn { display: block; margin: -4px auto 8px; color: var(--link); }
+.pdf-btn:disabled { opacity: 0.6; cursor: default; }
 .link-btn.inline {
   font-size: 13px;
   padding: 0;
@@ -1943,6 +1945,7 @@ select.dd-native { display: none !important; }
   .tab-toolbar .period-dates { margin: 0; }
   .tab-toolbar .total-line { margin: 0 0 0 auto; font-size: 26px; }
   .tab-toolbar .total-delta { margin: 0; text-align: right; }
+  .tab-toolbar .pdf-btn { margin: 0; }
   .tab-toolbar .top-actions { padding: 0; margin: 0; }
   /* в «Тратах» итог не первый — «Фильтр/Категории» стоят за ним справа */
   .tab-toolbar .total-line + .top-actions { margin-left: 4px; }
