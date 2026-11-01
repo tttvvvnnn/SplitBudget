@@ -448,6 +448,24 @@ class PlanItem(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
 
 
+class PlanItemMonth(Base):
+    """Процент статьи плана с месяца плана period (app/shared/plan.py).
+
+    В месяце действует последняя запись с period раньше конца месяца: новый месяц
+    наследует проценты прошлого, а правка в месяце пишет запись этого месяца и прошлые
+    месяцы не трогает. percent=None — статьи в плане с этого месяца нет (удалена).
+    У статьи без записей (созданной до помесячного плана) процент PlanItem.percent во
+    всех месяцах."""
+
+    __tablename__ = "plan_item_months"
+    __table_args__ = (UniqueConstraint("item_id", "period", name="uq_plan_item_month"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    item_id: Mapped[int] = mapped_column(ForeignKey("plan_items.id", ondelete="CASCADE"))
+    period: Mapped[dt.date] = mapped_column(Date)
+    percent: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
+
+
 class PlanAlert(Base):
     """Какие уведомления «статья почти исчерпана / превышена» уже отправлены в периоде."""
 

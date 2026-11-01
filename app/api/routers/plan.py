@@ -62,9 +62,11 @@ async def _item(ctx: ChatContext, item_id: int) -> PlanItem:
     return item
 
 
-async def _validate(ctx: ChatContext, payload: PlanItemIn, item_id: int | None) -> None:
-    others = [i for i in await plan.items_of(ctx.session, ctx.chat.id) if i.id != item_id]
-    total = sum((i.percent for i in others), plan.ZERO) + payload.percent
+async def _validate(ctx: ChatContext, payload: PlanItemIn, item_id: int | None, date: dt.date) -> None:
+    # Проценты у каждого месяца свои: проверяем по статьям того месяца, который правим
+    month = [(i, p) for i, p in await plan.month_items(ctx.session, ctx.chat, date) if i.id != item_id]
+    others = [i for i, _ in month]
+    total = sum((p for _, p in month), plan.ZERO) + payload.percent
     if total > plan.HUNDRED:
         free = plan.HUNDRED - (total - payload.percent)
         raise HTTPException(status_code=400, detail=f"Сумма процентов больше 100%: свободно ещё {free.normalize():f}%")
@@ -92,9 +94,9 @@ async def _validate(ctx: ChatContext, payload: PlanItemIn, item_id: int | None) 
 
 
 def _apply(item: PlanItem, payload: PlanItemIn) -> None:
+    """Всё, кроме процента: название, вид, категории и цель у статьи общие для всех месяцев."""
     item.title = payload.title.strip()[:255]
     item.kind = payload.kind
-    item.percent = payload.percent
     item.categories = json.dumps(list(dict.fromkeys(payload.categories)) if payload.kind == "spend" else [], ensure_ascii=False)
     item.goal_id = payload.goal_id if payload.kind == "goal" else None
     item.recurring_ids = "[]"
@@ -124,32 +126,48 @@ async def get_entries(
 
 
 @router.post("/chats/{chat_id}/plan/items", response_model=PlanOut, status_code=201)
-async def create_item(payload: PlanItemIn, ctx: ChatContext = Depends(get_chat_context)) -> PlanOut:
+async def create_item(
+    payload: PlanItemIn, date: dt.date | None = None, ctx: ChatContext = Depends(get_chat_context)
+) -> PlanOut:
+    """date — любой день месяца плана, с которого статья появляется (по умолчанию сегодня)."""
     _personal(ctx)
-    await _validate(ctx, payload, None)
+    date = date or dt.date.today()
+    await _validate(ctx, payload, None, date)
     items = await plan.items_of(ctx.session, ctx.chat.id)
-    item = PlanItem(chat_id=ctx.chat.id, position=max((i.position for i in items), default=-1) + 1)
+    item = PlanItem(chat_id=ctx.chat.id, position=max((i.position for i in items), default=-1) + 1,
+                    percent=payload.percent)
     _apply(item, payload)
     ctx.session.add(item)
+    await plan.set_percent(ctx.session, ctx.chat, item, date, payload.percent)
     await ctx.session.commit()
-    return await _summary(ctx)
+    return await _summary(ctx, date)
 
 
 @router.patch("/chats/{chat_id}/plan/items/{item_id}", response_model=PlanOut)
-async def update_item(item_id: int, payload: PlanItemIn, ctx: ChatContext = Depends(get_chat_context)) -> PlanOut:
+async def update_item(
+    item_id: int, payload: PlanItemIn, date: dt.date | None = None, ctx: ChatContext = Depends(get_chat_context)
+) -> PlanOut:
+    """Процент меняется только в месяце date (и следующих); прошлые месяцы не трогаем."""
+    date = date or dt.date.today()
     item = await _item(ctx, item_id)
-    await _validate(ctx, payload, item.id)
+    await _validate(ctx, payload, item.id, date)
     _apply(item, payload)
+    await plan.set_percent(ctx.session, ctx.chat, item, date, payload.percent)
     await ctx.session.commit()
-    return await _summary(ctx)
+    return await _summary(ctx, date)
 
 
 @router.delete("/chats/{chat_id}/plan/items/{item_id}", response_model=PlanOut)
-async def delete_item(item_id: int, ctx: ChatContext = Depends(get_chat_context)) -> PlanOut:
+async def delete_item(item_id: int, date: dt.date | None = None, ctx: ChatContext = Depends(get_chat_context)) -> PlanOut:
+    """Статья пропадает с месяца date; в прошлых месяцах она остаётся. Если ни в одном
+    месяце её не остаётся, удаляем совсем."""
+    date = date or dt.date.today()
     item = await _item(ctx, item_id)
-    await ctx.session.delete(item)
+    await plan.set_percent(ctx.session, ctx.chat, item, date, None)
+    if not await plan.is_used(ctx.session, item):
+        await ctx.session.delete(item)
     await ctx.session.commit()
-    return await _summary(ctx)
+    return await _summary(ctx, date)
 
 
 @router.put("/chats/{chat_id}/plan/order", response_model=PlanOut)
