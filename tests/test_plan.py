@@ -120,31 +120,118 @@ def test_validation(client, seeded_chat, auth_header):
     assert client.get(f"/api/chats/{pid}/plan", headers=bob).status_code == 403
 
 
-def test_month_end_leftovers_go_to_free(client, seeded_chat, auth_header):
-    """Статьи обнуляются, остатки и перерасходы прошлого месяца сходятся в «Свободно»."""
-    pid, me, h = _personal(client, seeded_chat, auth_header)
-    _item(client, pid, h, title="Еда", kind="spend", percent=20, categories=["Продукты"])
-
-    async def backdate():
+def _old_item(pid, **fields):
+    """Статья из времён до помесячного плана: без записей PlanItemMonth."""
+    async def run():
         async with async_session_maker() as session:
-            await session.execute(
-                update(PlanItem).where(PlanItem.chat_id == pid).values(created_at=dt.datetime.combine(PREV, dt.time()))
-            )
+            item = PlanItem(chat_id=pid, created_at=dt.datetime.combine(PREV, dt.time()), **fields)
+            session.add(item)
             await session.commit()
+            return item.id
 
-    asyncio.run(backdate())
+    return asyncio.run(run())
+
+
+def _plan(client, pid, h, date=TODAY):
+    return client.get(f"/api/chats/{pid}/plan?date={date.isoformat()}", headers=h).json()
+
+
+def test_month_end_leftovers_carry_over_by_percent(client, seeded_chat, auth_header):
+    """Статьи обнуляются, остатки и перерасходы прошлого месяца сходятся в один перенос, и он
+    делится по процентам нового месяца как текущие деньги."""
+    pid, me, h = _personal(client, seeded_chat, auth_header)
+    _old_item(pid, title="Еда", kind="spend", percent=20, categories='["Продукты"]')
     _income(client, pid, h, 10000, PREV)
     _expense(client, pid, me, h, 3000, "Продукты", PREV)  # Еда: 2 000 выделено, −1 000
     _expense(client, pid, me, h, 1000, "Другое", PREV)  # Свободно: 8 000 − 1 000 = 7 000
 
-    before = _by_title(client.get(f"/api/chats/{pid}/plan?date={PREV.isoformat()}", headers=h).json())
+    before = _by_title(_plan(client, pid, h, PREV))
     assert float(before["Еда"]["remaining"]) == -1000.0 and float(before["Свободно"]["remaining"]) == 7000.0
 
-    now = client.get(f"/api/chats/{pid}/plan", headers=h).json()
+    now = _plan(client, pid, h)
     items = _by_title(now)
     assert float(now["carried"]) == 6000.0
-    assert float(items["Еда"]["allocated"]) == 0.0 and float(items["Еда"]["spent"]) == 0.0
-    assert float(items["Свободно"]["allocated"]) == 6000.0 and float(items["Свободно"]["carried"]) == 6000.0
+    # 6 000 перенесено и разложено: 20% — в «Еду», 80% — в «Свободно»
+    assert float(items["Еда"]["allocated"]) == 1200.0 and float(items["Еда"]["spent"]) == 0.0
+    assert float(items["Свободно"]["allocated"]) == 4800.0 and float(items["Свободно"]["carried"]) == 0.0
+
+    _income(client, pid, h, 5000)  # перенос и поступления месяца делятся вместе
+    items = _by_title(_plan(client, pid, h))
+    assert float(items["Еда"]["allocated"]) == 2200.0 and float(items["Свободно"]["allocated"]) == 8800.0
+
+
+def test_overspend_carry_reduces_free(client, seeded_chat, auth_header):
+    """Минус прошлого месяца не делится по статьям, а уменьшает «Свободно»."""
+    pid, me, h = _personal(client, seeded_chat, auth_header)
+    _old_item(pid, title="Еда", kind="spend", percent=50, categories='["Продукты"]')
+    _income(client, pid, h, 1000, PREV)
+    _expense(client, pid, me, h, 1500, "Продукты", PREV)
+    _income(client, pid, h, 2000)
+
+    now = _plan(client, pid, h)
+    items = _by_title(now)
+    assert float(now["carried"]) == -500.0
+    assert float(items["Еда"]["allocated"]) == 1000.0
+    assert float(items["Свободно"]["allocated"]) == 500.0 and float(items["Свободно"]["carried"]) == -500.0
+
+
+def test_percent_change_is_per_month(client, seeded_chat, auth_header):
+    """Новый месяц начинается с процентов прошлого; правка меняет только свой месяц и следующие."""
+    pid, _, h = _personal(client, seeded_chat, auth_header)
+    item_id = _old_item(pid, title="Еда", kind="spend", percent=20, categories='["Продукты"]')
+    nxt = plan.period_end(plan.period_start(1, TODAY))
+    body = {"title": "Еда", "kind": "spend", "percent": 30, "categories": ["Продукты"]}
+
+    assert float(_by_title(_plan(client, pid, h))["Еда"]["percent"]) == 20.0  # унаследовано
+    r = client.patch(f"/api/chats/{pid}/plan/items/{item_id}?date={TODAY.isoformat()}", headers=h, json=body)
+    assert r.status_code == 200, r.text
+    assert float(_by_title(r.json())["Еда"]["percent"]) == 30.0
+    assert float(_by_title(_plan(client, pid, h, PREV))["Еда"]["percent"]) == 20.0  # прошлый месяц как был
+    assert float(_by_title(_plan(client, pid, h, nxt))["Еда"]["percent"]) == 30.0  # следующий — копия
+
+    # Правка прошлого месяца не трогает текущий
+    r = client.patch(f"/api/chats/{pid}/plan/items/{item_id}?date={PREV.isoformat()}", headers=h,
+                     json={**body, "percent": 10})
+    assert r.status_code == 200, r.text
+    assert float(_by_title(_plan(client, pid, h, PREV))["Еда"]["percent"]) == 10.0
+    assert float(_by_title(_plan(client, pid, h))["Еда"]["percent"]) == 30.0
+
+    # Лимит 100% считается по месяцу, который правим
+    r = client.post(f"/api/chats/{pid}/plan/items?date={TODAY.isoformat()}", headers=h,
+                    json={"title": "Бензин", "kind": "spend", "percent": 75, "categories": ["Транспорт"]})
+    assert r.status_code == 400
+    r = client.post(f"/api/chats/{pid}/plan/items?date={PREV.isoformat()}", headers=h,
+                    json={"title": "Бензин", "kind": "spend", "percent": 75, "categories": ["Транспорт"]})
+    assert r.status_code == 201, r.text
+    # Статья, добавленная в прошлом месяце, в текущий не переходит
+    assert "Бензин" in _by_title(_plan(client, pid, h, PREV))
+    assert "Бензин" not in _by_title(_plan(client, pid, h))
+
+
+def test_new_and_deleted_items_by_month(client, seeded_chat, auth_header):
+    pid, me, h = _personal(client, seeded_chat, auth_header)
+    old_id = _old_item(pid, title="Еда", kind="spend", percent=20, categories='["Продукты"]')
+    new = _by_title(_item(client, pid, h, title="Кино", kind="spend", percent=5, categories=["Развлечения"]))["Кино"]
+    assert "Кино" not in _by_title(_plan(client, pid, h, PREV))  # в прошлом месяце статьи ещё не было
+
+    # Удалённая в этом месяце статья остаётся в прошлом
+    r = client.delete(f"/api/chats/{pid}/plan/items/{old_id}?date={TODAY.isoformat()}", headers=h)
+    assert r.status_code == 200, r.text
+    assert "Еда" not in _by_title(r.json())
+    assert "Еда" in _by_title(_plan(client, pid, h, PREV))
+    # Траты её категорий в этом месяце идут в «Свободно»
+    _expense(client, pid, me, h, 100, "Продукты")
+    assert float(_by_title(_plan(client, pid, h))["Свободно"]["spent"]) == 100.0
+
+    # Статья, которой нет ни в одном месяце, удаляется совсем
+    r = client.delete(f"/api/chats/{pid}/plan/items/{new['id']}", headers=h)
+    assert r.status_code == 200, r.text
+
+    async def exists():
+        async with async_session_maker() as session:
+            return await session.get(PlanItem, new["id"]) is not None, await session.get(PlanItem, old_id) is not None
+
+    assert asyncio.run(exists()) == (False, True)
 
 
 def test_start_day():

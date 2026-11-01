@@ -16,10 +16,16 @@
 «Внести», которые тратой не записывались, идут в статью по категории карты. Траты без статьи
 и пополнения целей без статьи списываются со «Свободно».
 
-Месяц плана начинается с chat.plan_start_day (по умолчанию 1-го). В конце месяца статьи
-обнуляются: всё, что осталось (или ушло в минус), переходит в «Свободно» следующего месяца.
-Так происходит взаимозачёт: перерасход одной статьи покрывается остатками других. Хранить
-перенос не нужно — он считается от начала плана как доходы минус все списания.
+Месяц плана начинается с chat.plan_start_day (по умолчанию 1-го). Проценты статей у каждого
+месяца свои (PlanItemMonth): новый месяц начинается с процентов прошлого, правка меняет только
+свой месяц и следующие, прошлые месяцы остаются как были. Статья, добавленная в месяце, в
+прошлых месяцах не видна; удалённая пропадает с месяца удаления.
+
+В конце месяца статьи обнуляются: всё, что осталось (или ушло в минус), — взаимозачёт: перерасход
+одной статьи покрывается остатками других. Итоговый остаток переходит в новый месяц как
+текущие деньги и делится по процентам нового месяца вместе с поступлениями. Минус (потрачено
+больше, чем было) не делится, а уменьшает «Свободно». Хранить перенос не нужно — он считается
+от начала плана как доходы минус все списания.
 """
 from __future__ import annotations
 
@@ -41,6 +47,7 @@ from app.shared.models import (
     Income,
     PlanAlert,
     PlanItem,
+    PlanItemMonth,
 )
 from app.shared.my_spending import my_expenses
 
@@ -95,7 +102,7 @@ class ItemStatus:
     goal_title: str | None = None
     goal_saved: Decimal | None = None
     goal_target: Decimal | None = None
-    carried: Decimal = ZERO  # только у «Свободно»: остатки статей прошлых месяцев
+    carried: Decimal = ZERO  # только у «Свободно»: перерасход прошлых месяцев (минус переноса)
     card_debt: Decimal | None = None  # долг по картам, платежи по которым идут в эту статью
 
     @property
@@ -145,6 +152,86 @@ async def items_of(session: AsyncSession, chat_id: int) -> list[PlanItem]:
         select(PlanItem).where(PlanItem.chat_id == chat_id).order_by(PlanItem.position, PlanItem.id)
     )
     return list(result.scalars().all())
+
+
+async def _months_of(session: AsyncSession, item_ids: list[int]) -> dict[int, list[PlanItemMonth]]:
+    out: dict[int, list[PlanItemMonth]] = {i: [] for i in item_ids}
+    if item_ids:
+        rows = await session.execute(
+            select(PlanItemMonth).where(PlanItemMonth.item_id.in_(item_ids)).order_by(PlanItemMonth.period)
+        )
+        for row in rows.scalars().all():
+            out[row.item_id].append(row)
+    return out
+
+
+def _percent_in(item: PlanItem, months: list[PlanItemMonth], end: dt.date) -> Decimal | None:
+    """Процент статьи в месяце плана, который кончается end; None — статьи в нём нет."""
+    if not months:
+        return item.percent  # статья из времён до помесячного плана — во всех месяцах
+    percent = None
+    for m in months:
+        if m.period < end:
+            percent = m.percent
+    return percent
+
+
+async def month_items(session: AsyncSession, chat: Chat, date: dt.date) -> list[tuple[PlanItem, Decimal]]:
+    """Статьи месяца плана, в который попадает date, с их процентами в этом месяце."""
+    end = period_end(period_start(chat.plan_start_day or 1, date))
+    items = await items_of(session, chat.id)
+    months = await _months_of(session, [i.id for i in items])
+    out = []
+    for item in items:
+        percent = _percent_in(item, months[item.id], end)
+        if percent is not None:
+            out.append((item, percent))
+    return out
+
+
+async def set_percent(
+    session: AsyncSession, chat: Chat, item: PlanItem, date: dt.date, percent: Decimal | None, today: dt.date | None = None
+) -> None:
+    """Задать процент статьи (None — убрать статью) в месяце плана, куда попадает date.
+
+    Следующие месяцы наследуют новое значение. Если месяц уже прошёл, следующий за ним
+    сохраняет прежний процент: правка прошлого не меняет текущий план. Новую статью
+    (item.id ещё нет) сначала нужно добавить в сессию — id получим через flush."""
+    start_day = chat.plan_start_day or 1
+    start = period_start(start_day, date)
+    end = period_end(start)
+    if item.id is None:
+        await session.flush()
+        months: list[PlanItemMonth] = []
+    else:
+        months = (await _months_of(session, [item.id]))[item.id]
+        if not months:
+            # Статья до помесячного плана: её процент остаётся за всеми прошлыми месяцами
+            months = [PlanItemMonth(item_id=item.id, period=dt.date(2000, 1, 1), percent=item.percent)]
+            session.add(months[0])
+    past = start < period_start(start_day, today or dt.date.today())
+    next_end = period_end(end)
+    next_before = _percent_in(item, months, next_end) if months else None
+
+    inside = [m for m in months if start <= m.period < end]
+    if inside:
+        inside[-1].percent = percent
+        for extra in inside[:-1]:
+            await session.delete(extra)
+    else:
+        months.append(PlanItemMonth(item_id=item.id, period=start, percent=percent))
+        session.add(months[-1])
+    if past and not any(end <= m.period < next_end for m in months) and next_before != percent:
+        session.add(PlanItemMonth(item_id=item.id, period=end, percent=next_before))
+    if percent is not None:
+        item.percent = percent
+    await session.flush()
+
+
+async def is_used(session: AsyncSession, item: PlanItem) -> bool:
+    """Есть ли статья хоть в одном месяце плана."""
+    months = (await _months_of(session, [item.id]))[item.id]
+    return not months or any(m.percent is not None for m in months)
 
 
 async def money_entries(session: AsyncSession, chat: Chat, start: dt.date, end: dt.date) -> list[Entry]:
@@ -198,12 +285,15 @@ async def compute(session: AsyncSession, chat: Chat, date: dt.date) -> tuple[Pla
     start_day = chat.plan_start_day or 1
     start = period_start(start_day, date)
     end = period_end(start)
-    items = await items_of(session, chat.id)
+    all_items = await items_of(session, chat.id)
+    month = await month_items(session, chat, start)
+    items = [i for i, _ in month]
+    percents = {i.id: p for i, p in month}
 
     started = None
     carried = ZERO
-    if items:
-        first = min(i.created_at for i in items).date()
+    if all_items:
+        first = min(i.created_at for i in all_items).date()
         started = period_start(start_day, first)
         if started < start:
             # Все остатки прошлых месяцев переходят в «Свободно»: доходы минус все списания
@@ -212,6 +302,9 @@ async def compute(session: AsyncSession, chat: Chat, date: dt.date) -> tuple[Pla
 
     flows = await _flows(session, chat, start, end)
     income = sum((a for _, a in flows.incomes), ZERO)
+    # Перенесённые деньги — такие же текущие деньги месяца: делятся по процентам вместе с
+    # поступлениями. Минус не делится — он уменьшает «Свободно».
+    base = income + max(carried, ZERO)
 
     goal_ids = {i.goal_id for i in items if i.kind == "goal" and i.goal_id}
     goals = {}
@@ -257,8 +350,8 @@ async def compute(session: AsyncSession, chat: Chat, date: dt.date) -> tuple[Pla
             id=item.id,
             title=item.title,
             kind=item.kind,
-            percent=item.percent,
-            allocated=share_of(income, item.percent),
+            percent=percents[item.id],
+            allocated=share_of(base, percents[item.id]),
             spent=sum((e.amount for e in entries.get(item.id, [])), ZERO),
         )
         if item.kind == "spend":
@@ -280,16 +373,16 @@ async def compute(session: AsyncSession, chat: Chat, date: dt.date) -> tuple[Pla
     for st in statuses:
         st.card_debt = debts.get(st.id)
 
-    free_percent = max(HUNDRED - sum((i.percent for i in items), ZERO), ZERO)
+    free_percent = max(HUNDRED - sum(percents.values(), ZERO), ZERO)
     free = ItemStatus(
         id=None,
         title=FREE_TITLE,
         kind="free",
         percent=free_percent,
         # Остаток от округления долей статей тоже достаётся «Свободно»
-        allocated=income - sum((s.allocated for s in statuses), ZERO) + carried,
+        allocated=base - sum((s.allocated for s in statuses), ZERO) + min(carried, ZERO),
         spent=sum((e.amount for e in entries.get(None, [])), ZERO),
-        carried=carried,
+        carried=min(carried, ZERO),
         card_debt=debts.get(None),
     )
     statuses.append(free)
@@ -319,11 +412,12 @@ async def item_entries(session: AsyncSession, chat: Chat, date: dt.date, item_id
 async def savings_for_income(session: AsyncSession, income: Income) -> list[tuple[PlanItem, Goal, Decimal]]:
     """Сколько отложить на цели с этого поступления по плану: [(статья, цель, сумма)]."""
     out = []
-    for item in await items_of(session, income.chat_id):
+    chat = await session.get(Chat, income.chat_id)
+    for item, percent in await month_items(session, chat, income.income_date):
         if item.kind != "goal" or not item.goal_id:
             continue
         goal = await session.get(Goal, item.goal_id)
-        amount = share_of(income.amount, item.percent)
+        amount = share_of(income.amount, percent)
         if goal is not None and amount > 0:
             out.append((item, goal, amount))
     return out

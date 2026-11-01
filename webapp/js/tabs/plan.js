@@ -7,8 +7,9 @@ import { openSheet, closeSheet, useMainButtonFor, showFormError } from "../sheet
 /* ---------------- Вкладка «План» ----------------
    План распределения дохода «Моих финансов» (app/shared/plan.py): каждое поступление
    делится по процентам статей, «Свободно» получает остаток процентов. По статье видно,
-   сколько выделено, потрачено и осталось. В конце месяца плана статьи обнуляются, а их
-   остатки (и минусы) переходят в «Свободно».
+   сколько выделено, потрачено и осталось. Проценты у каждого месяца свои (правка меняет
+   открытый месяц и следующие). В конце месяца плана статьи обнуляются: остаток переходит в
+   новый месяц и делится по его процентам, перерасход вычитается из «Свободно».
 
    Список компактный: статья — одна строка, те, что ушли в минус или близки к лимиту, —
    сверху. Нажатие открывает статью: цифры, «Отложил», на что ушли деньги, изменение. */
@@ -26,6 +27,10 @@ const MONTHS_GEN = ["янв", "фев", "мар", "апр", "мая", "июн", 
 function shortDate(iso) {
   const [, m, d] = iso.split("-").map(Number);
   return `${d} ${MONTHS_GEN[m - 1]}`;
+}
+
+function monthLabel(plan) {
+  return `${shortDate(plan.start)} – ${shortDate(plan.end)}`;
 }
 
 function shiftISO(iso, days) {
@@ -137,6 +142,13 @@ async function renderPlanTab() {
   const incomeLine = count
     ? `Поступило <b>${fmtMoney(income)}</b> · ${count} ${count === 1 ? "поступление" : count < 5 ? "поступления" : "поступлений"}`
     : "Поступлений пока не было — добавьте их во вкладке «💰 Доходы»";
+  // Остаток прошлых месяцев — текущие деньги месяца: делится по процентам вместе с поступлениями
+  const carried = Number(plan.carried);
+  const carriedLine = carried > 0
+    ? `<div class="hint-text">+ перенесено с прошлого месяца <b>${fmtMoney(carried)}</b> — разложено по процентам</div>`
+    : carried < 0
+      ? `<div class="hint-text">Перерасход прошлых месяцев <b class="plan-minus">−${fmtMoney(-carried)}</b> — вычтен из «Свободно»</div>`
+      : "";
   // Можно тратить — остатки расходных статей и «Свободно» (накопления не трогаем)
   const totalLeft = plan.items.reduce((s, i) => s + (i.kind === "spend" || i.kind === "free" ? Number(i.remaining) : 0), 0);
 
@@ -153,6 +165,7 @@ async function renderPlanTab() {
     <div class="dash-col dash-aside">
     <div class="card plan-summary">
       <div>${incomeLine}</div>
+      ${carriedLine}
       <div class="hint-text">Можно тратить <b>${fmtMoney(totalLeft)}</b> · распределено ${pctText(plan.percent_total)}</div>
       <button class="link-btn" id="plan-settings">Месяц плана начинается ${plan.start_day}-го числа</button>
     </div>
@@ -166,7 +179,7 @@ async function renderPlanTab() {
       ${itemRowHtml(free)}
       ${totalRowHtml(plan, isCurrent)}
     </div>
-    <div class="hint-text" style="margin: 4px 4px 16px;">В конце месяца плана статьи обнуляются: остатки и перерасходы переходят в «Свободно».</div>
+    <div class="hint-text" style="margin: 4px 4px 16px;">В конце месяца плана статьи обнуляются: всё, что осталось, переходит в новый месяц и делится по его процентам. Проценты у каждого месяца свои: новый месяц начинается с процентов прошлого.</div>
     </div>
     </div>`;
 
@@ -199,7 +212,7 @@ function openItemSheet(it, plan, isCurrent) {
   if (it.kind === "goal" && !it.goal_title) notes.push("Цель удалена — выберите другую");
   if (it.kind === "free") {
     const carried = Number(it.carried);
-    if (carried) notes.push(`${carried > 0 ? "Перенесено" : "Перерасход"} с прошлых месяцев: ${fmtMoney(Math.abs(carried))}`);
+    if (carried < 0) notes.push(`Перерасход с прошлых месяцев: ${fmtMoney(-carried)}`);
     notes.push("Сюда списываются траты без статьи");
   }
   if (it.card_debt !== null && it.card_debt !== undefined) {
@@ -357,7 +370,7 @@ async function openPlanItemModal(existing, plan) {
         <input type="number" id="pi-percent" min="0" max="100" step="0.5" value="${existing ? Number(existing.percent) : ""}">
       </div>
     </div>
-    <div class="hint-text" style="margin:-4px 0 12px;">Можно распределить ещё ${pctText(freePct)}.</div>
+    <div class="hint-text" style="margin:-4px 0 12px;">Можно распределить ещё ${pctText(freePct)}. Процент меняется с месяца ${monthLabel(plan)}, прошлые месяцы остаются как были.</div>
     <div class="field" data-for="spend">
       <label>Категории трат</label>
       <div class="hint-text" style="margin-bottom:8px;">Категория отмечается со всеми подкатегориями, в том числе с будущими. Нажмите ▸ и снимите лишние, если нужны не все.</div>
@@ -479,8 +492,10 @@ async function openPlanItemModal(existing, plan) {
     };
     if (tg && tg.MainButton) tg.MainButton.showProgress(false);
     try {
-      if (isEdit) await api(`/chats/${planChatId()}/plan/items/${existing.id}`, { method: "PATCH", body });
-      else await api(`/chats/${planChatId()}/plan/items`, { method: "POST", body });
+      // Проценты у каждого месяца свои: правим тот месяц, который открыт
+      const q = `?date=${plan.start}`;
+      if (isEdit) await api(`/chats/${planChatId()}/plan/items/${existing.id}${q}`, { method: "PATCH", body });
+      else await api(`/chats/${planChatId()}/plan/items${q}`, { method: "POST", body });
       haptic("notification", "success");
       closeSheet(overlay);
       await renderPlanTab();
@@ -494,9 +509,9 @@ async function openPlanItemModal(existing, plan) {
   const del = overlay.querySelector("#pi-delete");
   if (del) {
     del.addEventListener("click", async () => {
-      if (!(await confirmAction(`Удалить статью «${existing.title}»? Её доля перейдёт в «Свободно».`))) return;
+      if (!(await confirmAction(`Удалить статью «${existing.title}» с месяца ${monthLabel(plan)}? Её доля перейдёт в «Свободно», в прошлых месяцах статья останется.`))) return;
       try {
-        await api(`/chats/${planChatId()}/plan/items/${existing.id}`, { method: "DELETE" });
+        await api(`/chats/${planChatId()}/plan/items/${existing.id}?date=${plan.start}`, { method: "DELETE" });
         closeSheet(overlay);
         await renderPlanTab();
       } catch (e) {

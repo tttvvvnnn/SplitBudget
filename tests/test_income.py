@@ -79,18 +79,22 @@ def test_per_day_until_next_salary(client, seeded_chat, auth_header):
     client.post(f"/api/chats/{pid}/income-sources", headers=h, json={"title": "Зарплата", "amount": 120000, "day_of_month": 1})
     client.post(f"/api/chats/{pid}/income", headers=h, json={"title": "Аванс", "amount": 30000})
 
+    # 1-го числа зарплата 1-го ещё ждётся сегодня — считаем «сегодня» вторым днём месяца
+    today = TODAY if TODAY.day > 1 else TODAY + dt.timedelta(days=1)
+
     async def run():
         async with async_session_maker() as session:
             chat = await session.get(Chat, pid)
-            return await summary(session, chat, MONTH, TODAY)
+            return await summary(session, chat, MONTH, today)
 
     s = asyncio.run(run())
     next_date = dt.date.fromisoformat(f"{nm}-01")
     assert s.next_title == "Зарплата" and s.next_date == next_date
-    assert s.days_to_next == max((next_date - TODAY).days, 1)
+    assert s.days_to_next == max((next_date - today).days, 1)
     assert float(s.per_day) == pytest.approx(30000 / s.days_to_next, abs=0.01)
     # Зарплата 1-го в этом месяце уже прошла до создания — в ожидаемых её нет
-    assert float(s.expected) == 0.0
+    # (если источник создан 1-го, зарплата этого дня ещё ждётся)
+    assert float(s.expected) == (0.0 if TODAY.day > 1 else 120000.0)
 
 
 def test_salary_ask_and_confirm(client, seeded_chat, auth_header, notices):
