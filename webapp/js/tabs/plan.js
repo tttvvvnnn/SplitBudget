@@ -3,6 +3,7 @@ import { api } from "../api.js";
 import { tg, haptic, toast, confirmAction } from "../telegram.js";
 import { categoryIcon, todayISO, fmtMoney, escapeHtml } from "../format.js";
 import { openSheet, closeSheet, useMainButtonFor, showFormError } from "../sheet.js";
+import { openPlanFlow, openPlanHistory } from "./plan-analytics.js";
 
 /* ---------------- Вкладка «План» ----------------
    План распределения дохода «Моих финансов» (app/shared/plan.py): каждое поступление
@@ -12,7 +13,8 @@ import { openSheet, closeSheet, useMainButtonFor, showFormError } from "../sheet
    новый месяц и делится по его процентам, перерасход вычитается из «Свободно».
 
    Список компактный: статья — одна строка, те, что ушли в минус или близки к лимиту, —
-   сверху. Нажатие открывает статью: цифры, «Отложил», на что ушли деньги, изменение. */
+   сверху. Нажатие открывает статью: цифры, «Отложил», на что ушли деньги, изменение.
+   В сводке — «Куда ушли деньги» (Санки месяца) и «План за полгода» (plan-analytics.js). */
 
 const KIND_LABELS = {
   spend: ["💸", "Расходы", "Траты выбранных категорий списываются с этой статьи. Для кредитов и кредиток выберите «Кредиты» — туда же попадут платежи по картам."],
@@ -168,6 +170,11 @@ async function renderPlanTab() {
       ${carriedLine}
       <div class="hint-text">Можно тратить <b>${fmtMoney(totalLeft)}</b> · распределено ${pctText(plan.percent_total)}</div>
       <button class="link-btn" id="plan-settings">Месяц плана начинается ${plan.start_day}-го числа</button>
+      ${items.length ? `
+        <div class="plan-analytics">
+          <button class="chip" id="plan-flow">🌊 Куда ушли деньги</button>
+          <button class="chip" id="plan-history">📊 План за полгода</button>
+        </div>` : ""}
     </div>
     </div>
     <div class="dash-col">
@@ -191,6 +198,10 @@ async function renderPlanTab() {
     });
   });
   content.querySelector("#plan-settings").addEventListener("click", () => openPlanSettings(plan));
+  const flowBtn = content.querySelector("#plan-flow");
+  if (flowBtn) flowBtn.addEventListener("click", () => { haptic("selection"); openPlanFlow(plan); });
+  const historyBtn = content.querySelector("#plan-history");
+  if (historyBtn) historyBtn.addEventListener("click", () => { haptic("selection"); openPlanHistory(plan); });
   content.querySelectorAll(".plan-row").forEach((el) => {
     el.addEventListener("click", () => {
       haptic("selection");

@@ -31,6 +31,8 @@ def _out(st: GoalStatus) -> GoalOut:
         saved_this_month=st.saved_this_month,
         months_left=st.months_left,
         monthly_needed=st.monthly_needed,
+        pace=st.pace,
+        eta_month=st.eta_month,
         deposits=[GoalDepositOut.model_validate(d) for d in st.deposits[:RECENT_DEPOSITS]],
     )
 

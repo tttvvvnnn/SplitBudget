@@ -6,11 +6,26 @@ import { openSheet, closeSheet, useMainButtonFor, showFormError } from "../sheet
 
 /* ---------------- Вкладка «Цели» ----------------
    Цели накоплений «Моих финансов» (app/shared/goals.py): накоплено из нужного, сколько
-   откладывать в месяц до срока. Отложенное в месяце уменьшает «свободно» во вкладке
-   «Доходы». */
+   откладывать в месяц до срока, и прогноз: в каком темпе откладываете (за 3 месяца) и когда
+   при нём накопите — успеваете ли к сроку. Отложенное в месяце уменьшает «свободно» во
+   вкладке «Доходы». */
 
 function goalsChatId() {
   return state.personalChatId;
+}
+
+/* «В нынешнем темпе (~5 000 ₽/мес) накопите в марте 2027 · ✅ успеваете к сроку» */
+const MONTHS_PREP = ["январе", "феврале", "марте", "апреле", "мае", "июне",
+  "июле", "августе", "сентябре", "октябре", "ноябре", "декабре"];
+
+function forecastText(g) {
+  if (!g.pace || !g.eta_month || g.is_archived || Number(g.saved) >= Number(g.target)) return "";
+  const [y, m] = g.eta_month.split("-").map(Number);
+  let text = `В нынешнем темпе (~${fmtMoney(g.pace)}/мес) накопите в ${MONTHS_PREP[m - 1]} ${y}`;
+  if (g.deadline) {
+    text += g.eta_month <= g.deadline.slice(0, 7) ? " · ✅ успеваете к сроку" : " · ⚠️ к сроку не успеваете";
+  }
+  return text;
 }
 
 function goalCardHtml(g) {
@@ -28,6 +43,7 @@ function goalCardHtml(g) {
   } else if (Number(g.saved_this_month) > 0) {
     plan = `В этом месяце отложено ${fmtMoney(g.saved_this_month)}`;
   }
+  const forecast = forecastText(g);
   return `
     <div class="card budget-card goal-card ${g.is_archived ? "archived" : ""}" data-id="${g.id}">
       <div class="budget-head">
@@ -40,6 +56,7 @@ function goalCardHtml(g) {
         ${g.is_archived ? '<span class="hint-text">в архиве</span>' : ""}
       </div>
       ${plan ? `<div class="hint-text" style="margin-top:6px;">${escapeHtml(plan)}</div>` : ""}
+      ${forecast ? `<div class="hint-text goal-forecast">${escapeHtml(forecast)}</div>` : ""}
     </div>`;
 }
 

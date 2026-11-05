@@ -7,10 +7,19 @@ import json
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.dependencies import ChatContext, get_chat_context
-from app.shared import plan
+from app.shared import plan, plan_analytics
 from app.shared.custom_categories import plan_keys, tree_for
 from app.shared.models import Goal, GoalDeposit, PlanItem
-from app.shared.schemas import PlanEntryOut, PlanItemIn, PlanItemOut, PlanOrderIn, PlanOut, PlanSettingsIn
+from app.shared.schemas import (
+    PlanEntryOut,
+    PlanFlowOut,
+    PlanHistoryOut,
+    PlanItemIn,
+    PlanItemOut,
+    PlanOrderIn,
+    PlanOut,
+    PlanSettingsIn,
+)
 
 router = APIRouter(tags=["plan"])
 
@@ -123,6 +132,20 @@ async def get_entries(
                      category=e.category, subcategory=e.subcategory)
         for e in entries
     ]
+
+
+@router.get("/chats/{chat_id}/plan/history", response_model=PlanHistoryOut)
+async def get_plan_history(date: dt.date | None = None, ctx: ChatContext = Depends(get_chat_context)) -> PlanHistoryOut:
+    """Статьи за 6 месяцев плана, заканчивая месяцем с date (app/shared/plan_analytics.py)."""
+    _personal(ctx)
+    return await plan_analytics.history(ctx.session, ctx.chat, date or dt.date.today())
+
+
+@router.get("/chats/{chat_id}/plan/flow", response_model=PlanFlowOut)
+async def get_plan_flow(date: dt.date | None = None, ctx: ChatContext = Depends(get_chat_context)) -> PlanFlowOut:
+    """Куда ушли деньги месяца плана с date — для диаграммы Санки."""
+    _personal(ctx)
+    return await plan_analytics.flow(ctx.session, ctx.chat, date or dt.date.today())
 
 
 @router.post("/chats/{chat_id}/plan/items", response_model=PlanOut, status_code=201)

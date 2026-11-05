@@ -6,7 +6,7 @@ import datetime as dt
 import json
 from decimal import Decimal
 
-from app.shared.stats import Row, build_stats, fetch_range, prev_period, stats_period
+from app.shared.stats import Row, build_stats, fetch_range, prev_period, prices, stats_period, year_ago_period
 
 D = dt.date
 
@@ -32,9 +32,12 @@ def test_prev_period_and_fetch_range():
     start, end = stats_period(date_from=D(2026, 10, 5), date_to=D(2026, 10, 14))
     assert (start, end) == (D(2026, 10, 5), D(2026, 10, 15))
     assert prev_period(start, end) == (D(2026, 9, 25), D(2026, 10, 5))
-    # для года нужен весь прошлый год, для месяца хватает 12 месяцев тренда
+    # для года нужен весь прошлый год, для месяца — тот же месяц год назад (тренд — 12 месяцев)
     assert fetch_range(D(2026, 1, 1), D(2027, 1, 1)) == (D(2025, 1, 1), D(2027, 1, 1))
-    assert fetch_range(*stats_period("2026-10")) == (D(2025, 11, 1), D(2026, 11, 1))
+    assert fetch_range(*stats_period("2026-10")) == (D(2025, 10, 1), D(2026, 11, 1))
+    assert fetch_range(D(2026, 7, 1), D(2026, 10, 1)) == (D(2025, 7, 1), D(2026, 10, 1))
+    assert year_ago_period(*stats_period("2026-10")) == (D(2025, 10, 1), D(2025, 11, 1))
+    assert year_ago_period(D(2026, 1, 1), D(2027, 1, 1)) is None  # у года это и есть прошлый период
 
 
 def test_build_stats_extra_fields():
