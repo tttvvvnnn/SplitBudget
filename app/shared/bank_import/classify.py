@@ -24,6 +24,8 @@ _RULES: list[tuple[str, str]] = [
     ("Вывод средств с брокерского счета", base.SELF),
     ("Внутренний перевод на договор", base.CONTRACT),
     ("Перевод с договора", base.CONTRACT),
+    ("Внутрибанковский перевод", base.CONTRACT),
+    ("Операция в других кредитных организациях", base.TRANSFER),
     ("Внешний перевод", base.TRANSFER),
     ("Внешний банковский перевод", base.TRANSFER),
     ("Пополнение. Система быстрых платежей", base.TRANSFER),
@@ -34,10 +36,14 @@ _RULES: list[tuple[str, str]] = [
     ("Снятие наличных", base.CASH),
 ]
 
-_LEGAL = {"ооо", "ип", "ао", "пао", "зао", "оао", "llc", "ltd"}
-_NOISE = {"sbp", "p", "qr", "c2b", "тс", "rus", "g.", "г."}
+_LEGAL = {"ооо", "ип", "ао", "пао", "зао", "оао", "тоо", "ooo", "ip", "llc", "ltd"}
+_NOISE = {"sbp", "p", "e", "qr", "c2b", "тс", "rus", "ru", "g.", "г."}
+# Покупка без «Оплата в», только с реквизитами эквайринга: «AIA*benzuber MOSCOW RU»
+_MERCHANT_LIKE = re.compile(r"\*|\sRUS?$")
 # Одна сеть пишется в выписке то латиницей, то кириллицей — сводим, чтобы была одна группа
 _ALIASES = {"pyaterochka": "Пятерочка", "cppk": "ЦППК", "magnit": "Магнит", "perekrestok": "Перекресток"}
+_SALARY = re.compile(r"зарплат|заработн|аванс|оклад|преми[яи]|отпускн", re.IGNORECASE)
+_BANK_FROM = re.compile(r"Банка?\s+([A-Za-zА-Яа-яЁё][\w-]*)")
 _CONTRACT_NUM = re.compile(r"договор[а]?\s+(\d+)")
 
 
@@ -46,7 +52,7 @@ def clean_title(text: str) -> str:
     text = re.sub(r"-\s+", "-", text.strip())  # «ЦППК- 2000012» — перенос строки в PDF
     tokens = text.split()
     # «… MOSCOW RUS», «… g. Tula RUS»: город и страна в конце карточных операций
-    if len(tokens) > 1 and tokens[-1].upper() == "RUS":
+    if len(tokens) > 1 and tokens[-1].upper() in ("RUS", "RU"):
         tokens = tokens[:-1]
         if len(tokens) > 1:
             tokens = tokens[:-1]
@@ -54,19 +60,31 @@ def clean_title(text: str) -> str:
             tokens = tokens[:-1]
     out: list[str] = []
     for token in tokens:
-        # «YM*AMPP» — префикс платёжного агрегатора
-        if "*" in token and len(token.split("*", 1)[0]) <= 3:
-            token = token.split("*", 1)[1]
+        token = token.strip('"«»')
+        # «YM*AMPP» — префикс платёжного агрегатора; «YANDEX*GO» — просто разделитель
+        if "*" in token:
+            head, tail = token.split("*", 1)
+            token = tail if len(head) <= 3 else f"{head} {tail}"
         kept = []
-        for part in token.split("_"):
-            # «CPPK-2000002-APB09» → «CPPK»: куски с цифрами — номера касс и точек
-            pieces = [p for p in part.split("-") if p and not re.search(r"\d", p)]
-            part = "-".join(pieces)
+        for part in re.split(r"[_\s]", token):
+            # «CPPK-2000002-APB09» → «CPPK»: куски с цифрами — номера касс и точек;
+            # «Цветы3», «Otpe4atok» — слово с парой цифр — оставляем, отрезав цифры по краям
+            pieces = []
+            for piece in part.split("-"):
+                digits = sum(c.isdigit() for c in piece)
+                letters = sum(c.isalpha() for c in piece)
+                if digits and (letters < 4 or digits > 2):
+                    continue
+                pieces.append(piece.strip("0123456789№") if digits else piece)
+            part = "-".join(p for p in pieces if p)
             if part and part.lower() not in _NOISE:
                 kept.append(part)
         word = " ".join(kept).strip(".,;:_- ")
         if word and word.lower() not in _NOISE and word.lower() not in _LEGAL:
             out.append(word)
+    # Одиночные латинские буквы — хвосты кодов («spiritfit G», «Обжорка E»)
+    if len(out) > 1:
+        out = [w for w in out if len(w) > 1 or not re.fullmatch(r"[A-Za-z]", w)] or out
     title = " ".join(out)
     if len(re.sub(r"[^A-Za-zА-Яа-яЁё]", "", title)) < 2:
         # Остался мусор вроде «Ч» из «Ч50510_P_QR» — лучше показать как есть, без суффиксов
@@ -86,7 +104,7 @@ def classify(op: Operation) -> Operation:
             rest = desc[len(prefix):].strip(" .")
             break
     else:
-        op.kind = base.UNKNOWN
+        op.kind = base.EXPENSE if op.amount < 0 and _MERCHANT_LIKE.search(desc) else base.UNKNOWN
         rest = desc
 
     if op.kind == base.EXPENSE:
@@ -102,8 +120,15 @@ def classify(op: Operation) -> Operation:
         op.title = "Наличные"
     elif op.kind == base.INCOME and desc.startswith("Кэшбэк"):
         op.title = "Кэшбэк"
+    elif op.kind == base.INCOME and desc.startswith("Банковский перевод"):
+        m = _BANK_FROM.search(rest)
+        op.title = f"Перевод из банка {m[1]}" if m else "Банковский перевод"
     else:
         op.title = desc
+    # Зарплату банк подписывает по-разному, но слово в описании есть почти всегда
+    if op.amount > 0 and _SALARY.search(desc) and op.kind not in (base.SELF, base.REFUND):
+        op.kind = base.INCOME
+        op.title = "Зарплата"
     # Знак важнее описания: «Оплата» с плюсом — это возврат, доход с минусом — непонятно что
     if op.kind == base.EXPENSE and op.amount > 0:
         op.kind = base.REFUND
