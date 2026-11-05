@@ -23,6 +23,11 @@ MAX_DAYS = 3 * 366  # длиннее свой период не берём: эт
 TOP_EXPENSES = 5
 TOP_PLACES = 5
 ZERO = Decimal("0")
+# Обязательные платежи не показывают, в какие дни человек тратит: аренда в 40 тысяч, оплаченная
+# в пятницу, сделала бы пятницу «днём трат». В график по дням недели они не идут: траты из
+# «Платежей», категория «Кредиты» (в ней и погашения кредиток) и аренда с коммуналкой.
+MANDATORY_CATEGORIES = {"Кредиты"}
+MANDATORY_SUBCATEGORIES = {("Дом", "Аренда"), ("Дом", "Коммуналка")}
 
 
 class Row(NamedTuple):
@@ -32,6 +37,14 @@ class Row(NamedTuple):
     amount: Decimal
     title: str = ""
     recurring: bool = False
+
+
+def is_mandatory(row: Row) -> bool:
+    return (
+        row.recurring
+        or row.category in MANDATORY_CATEGORIES
+        or (row.category, row.subcategory) in MANDATORY_SUBCATEGORIES
+    )
 
 
 def shift_month(month: str, delta: int) -> str:
@@ -174,8 +187,14 @@ def build_stats(start: dt.date, end: dt.date, rows: list[Row], today: dt.date | 
     )
 
     weekdays = [ZERO] * 7
+    weekday_counts = [0] * 7
+    mandatory = [r for r in cur_rows if is_mandatory(r)]
     for r in cur_rows:
+        if is_mandatory(r):
+            continue
         weekdays[r.date.weekday()] += r.amount
+        if r.amount > 0:
+            weekday_counts[r.date.weekday()] += 1
     recurring = [r for r in cur_rows if r.recurring]
     top = sorted((r for r in cur_rows if r.amount > 0), key=lambda r: (r.amount, r.date), reverse=True)
 
@@ -195,6 +214,9 @@ def build_stats(start: dt.date, end: dt.date, rows: list[Row], today: dt.date | 
         trend=trend,
         category_trend=category_trend,
         weekdays=weekdays,
+        weekday_counts=weekday_counts,
+        weekdays_excluded=sum((r.amount for r in mandatory), ZERO),
+        weekdays_excluded_count=len(mandatory),
         top_expenses=[
             TopExpense(title=r.title, category=r.category, expense_date=r.date, amount=r.amount)
             for r in top[:TOP_EXPENSES]
