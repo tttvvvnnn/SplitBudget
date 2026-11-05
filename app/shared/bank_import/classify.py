@@ -36,6 +36,8 @@ _RULES: list[tuple[str, str]] = [
 
 _LEGAL = {"ооо", "ип", "ао", "пао", "зао", "оао", "llc", "ltd"}
 _NOISE = {"sbp", "p", "qr", "c2b", "тс", "rus", "g.", "г."}
+# Одна сеть пишется в выписке то латиницей, то кириллицей — сводим, чтобы была одна группа
+_ALIASES = {"pyaterochka": "Пятерочка", "cppk": "ЦППК", "magnit": "Магнит", "perekrestok": "Перекресток"}
 _CONTRACT_NUM = re.compile(r"договор[а]?\s+(\d+)")
 
 
@@ -69,6 +71,8 @@ def clean_title(text: str) -> str:
     if len(re.sub(r"[^A-Za-zА-Яа-яЁё]", "", title)) < 2:
         # Остался мусор вроде «Ч» из «Ч50510_P_QR» — лучше показать как есть, без суффиксов
         title = re.sub(r"(_P)?_(SBP|QR)$", "", text).strip()
+    if (alias := _ALIASES.get(title.split(" ")[0].lower())) is not None:
+        return alias
     if title.isupper() and len(title) > 3 and re.search(r"[A-Z]", title):
         title = title.title()  # «PYATEROCHKA» → «Pyaterochka»
     return title

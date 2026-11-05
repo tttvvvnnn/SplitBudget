@@ -894,3 +894,51 @@ class TidyApplyIn(BaseModel):
 class TidyApplyOut(BaseModel):
     moved: int
     categories: list[CategoryTreeNodeOut]
+
+
+class BankPurchaseOut(BaseModel):
+    date: dt.date
+    amount: Decimal
+    description: str  # как в выписке
+    duplicate_title: str | None = None  # уже внесено: название и дата той траты
+    duplicate_date: dt.date | None = None
+
+
+class BankGroupOut(BaseModel):
+    """Покупки с одним названием («Пятерочка» ×9) и категория для них."""
+
+    title: str
+    category: str | None  # None — не опознали, по умолчанию не импортируем
+    subcategory: str | None
+    source: str | None
+    purchases: list[BankPurchaseOut]
+
+
+class BankSkippedOut(BaseModel):
+    kind: str  # savings | self | contract | transfer | cash | income | refund | unknown
+    count: int
+    total: Decimal
+
+
+class BankPreviewOut(BaseModel):
+    bank: str
+    period_from: dt.date | None
+    period_to: dt.date | None
+    groups: list[BankGroupOut]
+    skipped: list[BankSkippedOut]
+
+
+class BankImportRow(BaseModel):
+    date: dt.date
+    amount: Decimal = Field(gt=0)
+    title: str = Field(min_length=1, max_length=255)
+    category: str = Field(min_length=1, max_length=64)
+    subcategory: str | None = Field(default=None, max_length=64)
+
+
+class BankImportIn(BaseModel):
+    rows: list[BankImportRow] = Field(min_length=1, max_length=3000)
+
+
+class BankImportOut(BaseModel):
+    created: int

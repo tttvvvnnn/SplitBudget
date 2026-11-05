@@ -5,6 +5,7 @@ import { categoryIcon, monthLabel, shiftMonth, fmtMoney, escapeHtml } from "../f
 import { openExpenseModal, dayHeaderLabel } from "./expenses.js";
 import { categoryBadgeHtml } from "../category-fields.js";
 import { openCategoriesSheet } from "../categories.js";
+import { openBankImportSheet } from "../bank-import.js";
 import { renderMonthAside } from "../month-aside.js";
 import { switchTab } from "../shell.js";
 
@@ -85,6 +86,7 @@ async function renderAllExpensesTab() {
       <div class="total-line" id="total-line"></div>
       <div class="top-actions">
         <button class="btn small secondary" id="categories-btn">🏷 Категории</button>
+        <button class="btn small secondary" id="bank-import-btn">📥 Выписка</button>
       </div>
     </div>
     <div class="dash main-aside">
@@ -116,6 +118,14 @@ async function renderAllExpensesTab() {
   document.getElementById("categories-btn").addEventListener("click", () => {
     haptic("selection");
     openCategoriesSheet(() => renderAllExpensesTab());
+  });
+  document.getElementById("bank-import-btn").addEventListener("click", () => {
+    haptic("selection");
+    openBankImportSheet((rows) => {
+      // Показываем месяц выписки, чтобы сразу увидеть добавленное
+      if (rows.length) state.month = rows[0].date.slice(0, 7);
+      renderAllExpensesTab();
+    });
   });
   bindShareToggle(content, () => {
     content.querySelectorAll("#share-toggle button").forEach((x) => x.classList.toggle("active", x.dataset.mode === shareMode()));
