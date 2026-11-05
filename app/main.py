@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routers import (
-    balances, budgets, categories, chats, credits, expenses, goals, income, obligations, overview, pdf, plan,
+    balances, bank_import, budgets, categories, chats, credits, expenses, goals, income, obligations, overview, pdf, plan,
     recurring, stats, web,
 )
 from app.bot.bot_instance import bot
@@ -115,6 +115,7 @@ for router in (
     plan.router,
     pdf.router,
     credits.router,
+    bank_import.router,
     categories.router,
     web.router,
 ):

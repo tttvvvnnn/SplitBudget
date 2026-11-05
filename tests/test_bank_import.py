@@ -106,8 +106,8 @@ def test_parse_rejects_non_pdf():
     "raw, title",
     [
         ("DA2A ТС Пятерочка", "Пятерочка"),
-        ("PYATEROCHKA 10563 MOSCOW RUS", "Pyaterochka"),
-        ("CPPK-2000002-APB09 MOSCOW RUS", "Cppk"),
+        ("PYATEROCHKA 10563 MOSCOW RUS", "Пятерочка"),
+        ("CPPK-2000002-APB09 MOSCOW RUS", "ЦППК"),
         ("ЦППК- 2000012_SBP", "ЦППК"),
         ("Vkusnoitochka_24105_SBP", "Vkusnoitochka"),
         ("Кофейня Gagarin._SBP", "Кофейня Gagarin"),
