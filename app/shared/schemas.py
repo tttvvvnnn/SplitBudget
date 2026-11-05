@@ -364,6 +364,8 @@ class CategoryStat(BaseModel):
     prev_total: Decimal = Decimal("0")  # та же категория в прошлом периоде
     prev_to_date: Decimal | None = None  # прошлый период за тот же срок, если этот ещё идёт
     avg_total: Decimal | None = None  # в среднем за 3 прошлых месяца (только для месяца; если идёт — за тот же срок)
+    prev_count: int = 0  # сколько трат было в прошлом периоде (если этот идёт — за тот же срок)
+    year_ago_total: Decimal | None = None  # тот же период год назад (если идёт — за тот же срок)
 
 
 class MonthTotal(BaseModel):
@@ -391,6 +393,31 @@ class PlaceStat(BaseModel):
     total: Decimal
 
 
+class PriceChange(BaseModel):
+    """Как изменилась цена регулярной покупки (stats.prices): медиана первого и последнего месяца."""
+
+    title: str
+    category: str
+    old: Decimal
+    new: Decimal
+    percent: Decimal
+    first_month: str
+    last_month: str
+    count: int
+
+
+class Insight(BaseModel):
+    """Наблюдение по статистике (app/shared/insights.py). В text суммы — местами {0}, {1}…
+    из amounts: их форматирует клиент (валюта пространства)."""
+
+    kind: str
+    icon: str
+    tone: str  # good | bad | info
+    text: str
+    amounts: list[Decimal] = Field(default_factory=list)
+    category: str | None = None
+
+
 class StatsOut(BaseModel):
     period: str  # 'YYYY-MM' для месяца, иначе 'YYYY-MM-DD/YYYY-MM-DD'
     date_from: dt.date
@@ -408,8 +435,14 @@ class StatsOut(BaseModel):
     daily: list[Decimal] = Field(default_factory=list)
     prev_daily: list[Decimal] = Field(default_factory=list)
     # Итоги за 12 месяцев, заканчивая последним месяцем периода, от старых к новым
+    # Тот же период год назад (только месяц и квартал; если идёт — за тот же срок), None — трат не было
+    year_ago_total: Decimal | None = None
     trend: list[MonthTotal] = Field(default_factory=list)
     category_trend: list[CategoryTrend] = Field(default_factory=list)  # по убыванию суммы за 12 мес
+    mandatory_trend: list[Decimal] = Field(default_factory=list)  # обязательные (stats.is_mandatory), как trend
+    # Траты по дням с 1-го числа первого месяца тренда до конца периода, без обязательных платежей
+    days_from: dt.date | None = None
+    day_totals: list[Decimal] = Field(default_factory=list)
     # Пн..вс за период без обязательных платежей (stats.is_mandatory): сумма и число трат
     weekdays: list[Decimal] = Field(default_factory=list)
     weekday_counts: list[int] = Field(default_factory=list)
@@ -419,6 +452,9 @@ class StatsOut(BaseModel):
     places: list[PlaceStat] = Field(default_factory=list)
     recurring_total: Decimal = Decimal("0")  # траты из регулярных платежей
     recurring_count: int = 0
+    prices: list[PriceChange] = Field(default_factory=list)  # подорожало и подешевело за 12 мес
+    price_index: Decimal | None = None  # на сколько % в среднем изменились цены регулярных покупок
+    insights: list[Insight] = Field(default_factory=list)
     # Только «Мои финансы»: доходы по месяцам (как trend) и за период
     income_trend: list[MonthTotal] | None = None
     income_total: Decimal | None = None
@@ -518,6 +554,8 @@ class GoalOut(BaseModel):
     months_left: int | None
     monthly_needed: Decimal | None
     deposits: list[GoalDepositOut]
+    pace: Decimal | None = None  # сколько в среднем откладывали в месяц за 3 месяца
+    eta_month: str | None = None  # когда накопится при таком темпе, 'YYYY-MM'
 
 
 class SubscriptionHintOut(BaseModel):
@@ -581,6 +619,59 @@ class PlanEntryOut(BaseModel):
     source: str  # expense | card | deposit
     category: str | None = None
     subcategory: str | None = None
+
+
+class PlanHistoryPeriodOut(BaseModel):
+    start: dt.date
+    end: dt.date  # включительно
+    income: Decimal
+    finished: bool  # месяц плана закончился
+    active: bool  # план тогда уже был
+
+
+class PlanHistoryItemOut(BaseModel):
+    """Статья за полгода (app/shared/plan_analytics.py): по месяцам, как PlanHistoryOut.periods;
+    None — статьи в том месяце не было."""
+
+    id: int | None
+    title: str
+    kind: str
+    percent: Decimal | None = None  # в последнем месяце
+    allocated: list[Decimal | None]
+    spent: list[Decimal | None]
+    months: int = 0  # прошедших месяцев со статьёй
+    over: int = 0  # из них ушла в минус
+    suggested_percent: Decimal | None = None  # сколько процентов покрыло бы обычные траты
+
+
+class PlanHistoryOut(BaseModel):
+    periods: list[PlanHistoryPeriodOut]
+    items: list[PlanHistoryItemOut]
+
+
+class PlanFlowNodeOut(BaseModel):
+    id: str
+    title: str
+    column: int  # 0 — откуда деньги, 1 — статьи плана, 2 — куда ушли
+    kind: str  # income | over | spend | goal | free | category | left
+
+
+class PlanFlowLinkOut(BaseModel):
+    source: str
+    target: str
+    value: Decimal
+
+
+class PlanFlowOut(BaseModel):
+    """Куда ушли деньги месяца плана — для диаграммы Санки (app/shared/plan_analytics.py)."""
+
+    start: dt.date
+    end: dt.date  # включительно
+    income: Decimal
+    carried: Decimal
+    spent: Decimal
+    nodes: list[PlanFlowNodeOut]
+    links: list[PlanFlowLinkOut]
 
 
 class PlanSettingsIn(BaseModel):
@@ -680,6 +771,31 @@ class CreditCardOut(BaseModel):
     purchases: list[CreditPurchaseOut]  # последние покупки и погашения
     unpaid: list[CreditPurchaseOut] = []  # непогашенные покупки, от старых к новым
     opening_left: Decimal = Decimal("0")  # непогашенный стартовый долг (гасится первым)
+
+
+class DebtPayoffOut(BaseModel):
+    """Когда закроется карта или кредит при нынешнем темпе (app/shared/debt_history.py)."""
+
+    kind: str  # card | loan
+    title: str
+    debt: Decimal
+    monthly: Decimal  # платёж кредита или сколько в среднем вносили на карту за 3 месяца
+    months_left: int | None  # None — при таком темпе не закроется
+    payoff_month: str | None  # 'YYYY-MM'
+    interest_left: Decimal | None = None  # у кредита со ставкой: сколько ещё уйдёт на проценты
+
+
+class DebtHistoryOut(BaseModel):
+    """Долги за 12 месяцев: на конец каждого месяца (у текущего — на сегодня). None — ни карты,
+    ни кредита тогда ещё не было в приложении."""
+
+    months: list[str]
+    cards: list[Decimal | None]
+    loans: list[Decimal | None]  # тело кредитов
+    interest: list[Decimal]  # уплачено процентов по кредитам и начислено по картам за месяц
+    interest_total: Decimal
+    payoff: list[DebtPayoffOut]
+    free_month: str | None  # когда закроется всё; None — что-то не закроется при нынешнем темпе
 
 
 class LoanTrancheIn(BaseModel):

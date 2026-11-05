@@ -14,7 +14,9 @@ import { openRecurringModal } from "./recurring.js";
    Тратой становится погашение: «Внести» записывает трату «Кредиты», и она закрывает покупки
    по очереди, от самых старых. «Продлить срок» переносит даты при том же долге, «Начислили %» —
    покупка «Проценты» в карте, «Сверить с банком» правит долг руками. Кредиты — обязательные
-   платежи с остатком долга: платёж записывается тратой и уменьшает остаток. */
+   платежи с остатком долга: платёж записывается тратой и уменьшает остаток.
+   «📊 Долги во времени» — шторка с долгом за 12 месяцев, процентами и прогнозом, когда что
+   закроется при нынешнем темпе (app/shared/debt_history.py). */
 
 const MONTHS_GEN = ["января", "февраля", "марта", "апреля", "мая", "июня",
   "июля", "августа", "сентября", "октября", "ноября", "декабря"];
@@ -27,6 +29,7 @@ const OP_LABELS = {
 };
 
 let cache = null; // последний ответ GET /credits — для шторок
+let debtChart = null;
 
 function creditsChatId() {
   return state.personalChatId;
@@ -124,8 +127,12 @@ function loanHtml(l) {
 
 async function renderCreditsTab() {
   const content = document.getElementById("content");
+  let history = null;
   try {
-    cache = await api(`/chats/${creditsChatId()}/credits`);
+    [cache, history] = await Promise.all([
+      api(`/chats/${creditsChatId()}/credits`),
+      api(`/chats/${creditsChatId()}/credits/history`).catch(() => null),
+    ]);
   } catch (e) {
     content.innerHTML = `<div class="empty-state">${escapeHtml(e.message)}</div>`;
     return;
@@ -144,6 +151,8 @@ async function renderCreditsTab() {
         <div class="hint-text">Всего долг</div>
         <div class="credit-total">${fmtMoney(cache.total_debt)}</div>
         ${cache.next_deadline ? `<div class="hint-text">Ближайший срок: ${dateLabel(cache.next_deadline)} (${daysText(cache.next_deadline)})</div>` : ""}
+        ${history && Number(cache.total_debt) > 0 ? `<div class="hint-text">${freeText(history)}</div>` : ""}
+        ${history ? '<button class="link-btn debt-history-btn" id="debt-history">📊 Долги во времени</button>' : ""}
       </div>`}
     <div class="section-title">💳 Кредитные карты</div>
     ${active.length ? active.map(cardHtml).join("") : '<div class="empty-state">Карт пока нет.<br>Нажмите «+», чтобы добавить кредитку.</div>'}
@@ -163,9 +172,109 @@ async function renderCreditsTab() {
   content.querySelectorAll("[data-loan]").forEach((el) => {
     el.addEventListener("click", () => openLoan(loans.find((l) => l.recurring_id === Number(el.dataset.loan))));
   });
+  const historyBtn = content.querySelector("#debt-history");
+  if (historyBtn) {
+    historyBtn.addEventListener("click", () => {
+      haptic("selection");
+      openDebtHistory(history);
+    });
+  }
   content.querySelector("#add-loan").addEventListener("click", () => {
     haptic("impact", "light");
     openRecurringModal(null, { kind: "loan", onSaved: renderCreditsTab });
+  });
+}
+
+function monthsWord(n) {
+  const m10 = n % 10, m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return "месяц";
+  if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return "месяца";
+  return "месяцев";
+}
+
+const MONTHS_DAT = ["январю", "февралю", "марту", "апрелю", "маю", "июню",
+  "июлю", "августу", "сентябрю", "октябрю", "ноябрю", "декабрю"];
+
+function byMonth(ym) {
+  const [y, m] = ym.split("-").map(Number);
+  return `к ${MONTHS_DAT[m - 1]} ${y}`;
+}
+
+/* «Без долгов к марту 2027» — когда закроется последний долг при нынешнем темпе. */
+function freeText(h) {
+  if (h.free_month) return `При нынешнем темпе без долгов ${byMonth(h.free_month)}`;
+  return "При нынешнем темпе не всё закроется: по карте не вносили или платёж меньше процентов";
+}
+
+function payoffText(p) {
+  if (Number(p.debt) <= 0) return "долга нет";
+  if (p.months_left === null) {
+    return p.kind === "card" ? "за 3 месяца не вносили — срок не посчитать" : "платёж не покрывает проценты";
+  }
+  return `закроется ${byMonth(p.payoff_month)} · ${p.months_left} ${monthsWord(p.months_left)}`;
+}
+
+/* Долги во времени: долг по картам и тело кредитов на конец каждого месяца, проценты по
+   месяцам и прогноз по каждой карте и кредиту. */
+function openDebtHistory(h) {
+  const short = (ym) => monthShort(ym).split(" ")[0];
+  const overlay = openSheet(`
+    <div class="sheet-title">📊 Долги во времени</div>
+    <div class="hint-text">${freeText(h)}</div>
+    <div class="section-title">Долг на конец месяца</div>
+    <div class="chart-wrap sheet-chart">
+      <div class="chart-legend">
+        <span><i class="dot" style="background:#ff9500"></i>карты</span>
+        <span><i class="dot" style="background:var(--link)"></i>кредиты</span>
+      </div>
+      <div class="chart-box"><canvas id="debt-chart"></canvas></div>
+    </div>
+    ${Number(h.interest_total) > 0 ? `
+      <div class="section-title">Проценты за год: ${fmtMoney(h.interest_total)}</div>
+      <div class="card">${h.months.map((m, i) => (Number(h.interest[i]) > 0 ? `
+        <div class="balance-row"><span>${monthShort(m)}</span><span>${fmtMoney(h.interest[i])}</span></div>` : "")).join("")}</div>` : ""}
+    <div class="section-title">Когда закроется</div>
+    <div class="card">${h.payoff.map((p) => `
+      <div class="balance-row payoff-row">
+        <span>${p.kind === "card" ? "💳" : "🏦"} ${escapeHtml(p.title)}
+          <span class="hint-text">${fmtMoney(p.debt)} · ${p.kind === "card" ? `вносите ~${fmtMoney(p.monthly)}/мес` : `платёж ${fmtMoney(p.monthly)}`}</span></span>
+        <span class="payoff-when">${payoffText(p)}${p.interest_left !== null && Number(p.interest_left) > 0 ? `<span class="hint-text">ещё ~${fmtMoney(p.interest_left)} процентов</span>` : ""}</span>
+      </div>`).join("") || '<div class="hint-text">Долгов нет.</div>'}</div>
+    <div class="hint-text" style="margin-top:8px">По карте — сколько в среднем вносили за 3 последних месяца, без новых покупок. По кредиту — по платежу и ставке.</div>`);
+
+  const canvas = overlay.querySelector("#debt-chart");
+  if (!window.Chart || !canvas) return;
+  if (debtChart) debtChart.destroy();
+  const link = getComputedStyle(document.documentElement).getPropertyValue("--link").trim();
+  const hint = getComputedStyle(document.documentElement).getPropertyValue("--hint").trim();
+  const num = (v) => (v === null ? null : Number(v));
+  debtChart = new Chart(canvas, {
+    type: "bar",
+    data: {
+      labels: h.months.map(short),
+      datasets: [
+        { label: "карты", data: h.cards.map(num), backgroundColor: "#ff9500", borderRadius: 4, borderSkipped: false, maxBarThickness: 26 },
+        { label: "кредиты", data: h.loans.map(num), backgroundColor: link, borderRadius: 4, borderSkipped: false, maxBarThickness: 26 },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 300 },
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: {
+          label: (item) => ` ${item.dataset.label}: ${fmtMoney(item.parsed.y)}`,
+          footer: (items) => `Всего: ${fmtMoney(items.reduce((a, i) => a + (i.parsed.y || 0), 0))}`,
+        } },
+      },
+      scales: {
+        x: { stacked: true, grid: { display: false }, border: { display: false }, ticks: { color: hint, maxRotation: 0, autoSkipPadding: 8, font: { size: 11 } } },
+        y: { stacked: true, beginAtZero: true, border: { display: false }, grid: { color: getComputedStyle(document.documentElement).getPropertyValue("--border").trim() },
+          ticks: { color: hint, maxTicksLimit: 4, font: { size: 11 }, callback: (v) => (Math.abs(v) >= 1000 ? `${+(v / 1000).toFixed(1)}k` : v) } },
+      },
+    },
   });
 }
 

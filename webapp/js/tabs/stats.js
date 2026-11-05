@@ -12,7 +12,11 @@ import { shareMode, shareToggleHtml, bindShareToggle } from "./all.js";
    по категории открывает шторку с её историей за 12 месяцев, подкатегориями и тратами.
    Ниже: для месяца — нарастающий итог по дням с прогнозом и календарь трат; дни недели,
    регулярные и разовые, крупнейшие траты и частые места; столбики по месяцам с разбивкой по
-   категориям; в «Моих финансах» — доходы и расходы по месяцам. Данные — app/shared/stats.py. */
+   категориям; в «Моих финансах» — доходы и расходы по месяцам. Данные — app/shared/stats.py.
+   Сверху — наблюдения карточками (app/shared/insights.py). Сравнивать категории можно и с тем же
+   периодом год назад. «Чаще или дороже» раскладывает рост категории на число покупок и средний
+   чек, «Цены» — подорожание регулярных покупок, «Обязательные и на жизнь» — сколько уходит на
+   аренду, кредиты и платежи, «Год по дням» — тепловая карта трат за 12 месяцев. */
 
 // Первые семь — как раньше в пончике; дальше — для категорий сверх семи и тех, что есть только
 // в истории за 12 месяцев. Серый — только «Остальное».
@@ -21,6 +25,8 @@ const PALETTE = ["#2481cc", "#34c759", "#ff9500", "#ff3b30", "#af52de", "#5ac8fa
 const OTHER_COLOR = "#8e8e93";
 const INCOME_COLOR = "#34c759";
 const RATE_COLOR = "#ff9500";
+const MANDATORY_COLOR = "#8e8e93";
+const MONEY_PATTERN = /\{(\d+)\}/g;
 const STACK_CATEGORIES = 7; // столько категорий в столбиках по месяцам, остальное — «Остальное»
 const MONTHS_SHORT = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
 const WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
@@ -42,7 +48,7 @@ function savePref(key, value) {
   try { localStorage.setItem(key, value); } catch (e) { /* не критично */ }
 }
 let periodMode = pref("statsPeriod", "month");
-let compareMode = pref("statsCompare", "prev"); // "prev" — к прошлому периоду, "avg" — к среднему за 3 мес
+let compareMode = pref("statsCompare", "prev"); // "prev" — к прошлому периоду, "avg" — к среднему за 3 мес, "year" — к году назад
 let weekdayMode = pref("statsWeekdays", "sum"); // дни недели: "sum" — по сумме, "count" — по числу трат
 let custom = { from: pref("statsFrom", ""), to: pref("statsTo", "") };
 
@@ -80,6 +86,7 @@ function currentPeriod() {
     return {
       from: isoDate(y, q * 3 + 1, 1), to: isoDate(y, q * 3 + 3, lastDay(y, q * 3 + 3)),
       label: `${QUARTERS[q]} квартал ${y}`, step: 3, prevLabel: "к прошлому кварталу", sameLabel: () => "к тому же сроку прошлого квартала", prevIn: "в прошлом квартале",
+      yearLabel: `к ${QUARTERS[q]} кв. ${y - 1}`,
     };
   }
   if (periodMode === "year") {
@@ -96,6 +103,7 @@ function currentPeriod() {
   return {
     from: isoDate(y, m, 1), to: isoDate(y, m, lastDay(y, m)), label: monthLabel(state.month), step: 1,
     prevLabel: `к ${MONTHS_DATIVE[prevMonth]}`, prevIn: "в прошлом месяце", month: state.month,
+    yearLabel: `к ${MONTHS_SHORT[m - 1]} ${y - 1}`,
     sameLabel: (short) => `к 1–${new Date().getDate()} ${short ? MONTHS_SHORT[prevMonth] : MONTHS_GENITIVE[prevMonth]}`,
   };
 }
@@ -179,7 +187,8 @@ async function renderStatsTab() {
   const empty = stats.by_category.length === 0;
   const colors = categoryColors(stats);
   const hasAvg = stats.avg_total !== null && stats.avg_total !== undefined;
-  const compare = hasAvg && compareMode === "avg" ? "avg" : "prev";
+  const hasYear = stats.year_ago_total !== null && stats.year_ago_total !== undefined && !!period.yearLabel;
+  const compare = (hasAvg && compareMode === "avg") ? "avg" : (hasYear && compareMode === "year") ? "year" : "prev";
   // период ещё идёт — сравниваем с тем же сроком прошлого (сервер считает prev_to_date)
   const partial = stats.prev_to_date !== null && stats.prev_to_date !== undefined;
   // доходы за квартал/год/свой период — из статистики, против «Моих трат» (в «Всего» сравнивать не с чем)
@@ -189,6 +198,7 @@ async function renderStatsTab() {
   const headerDeltas = [
     deltaHtml(cur, partial ? Number(stats.prev_to_date) : Number(stats.prev_total), partial ? period.sameLabel() : period.prevLabel),
     hasAvg ? deltaHtml(cur, Number(stats.avg_total), "к среднему за 3 мес") : "",
+    hasYear ? deltaHtml(cur, Number(stats.year_ago_total), period.yearLabel) : "",
   ].filter(Boolean).join('<span class="hint-text"> · </span>');
 
   destroyCharts();
@@ -217,6 +227,7 @@ async function renderStatsTab() {
     </div>
     <div class="stats-grid">
     ${incomeCard}
+    ${insightsHtml(stats)}
     ${empty ? '<div class="empty-state">Нет трат за этот период.</div>' : `
       <div class="stats-split">
       <div class="chart-wrap donut-wrap">
@@ -227,10 +238,11 @@ async function renderStatsTab() {
         </div>
       </div>
       <div>
-        ${hasAvg ? `
+        ${hasAvg || hasYear ? `
           <div class="share-toggle compare-toggle" id="compare-toggle">
             <button data-compare="prev" class="${compare === "prev" ? "active" : ""}">${partial ? period.sameLabel(true) : period.prevLabel}</button>
-            <button data-compare="avg" class="${compare === "avg" ? "active" : ""}">к среднему за 3 мес</button>
+            ${hasAvg ? `<button data-compare="avg" class="${compare === "avg" ? "active" : ""}">к среднему за 3 мес</button>` : ""}
+            ${hasYear ? `<button data-compare="year" class="${compare === "year" ? "active" : ""}">${period.yearLabel}</button>` : ""}
           </div>` : ""}
         <div class="card stats-list">
           ${stats.by_category.map((c, i) => categoryRowHtml(c, i, cur, colors, compare)).join("")}
@@ -282,7 +294,20 @@ async function renderStatsTab() {
             <div class="section-title">Частые места</div>
             <div class="card">${placesHtml(stats)}</div>
           </div>` : ""}
-      </div>`}
+      </div>
+      ${driversHtml(stats) || stats.prices.length ? `
+        <div class="stats-pair">
+          ${driversHtml(stats) ? `
+            <div>
+              <div class="section-title">Чаще или дороже <span class="hint-text">${partial ? period.sameLabel(true) : period.prevLabel}</span></div>
+              <div class="card">${driversHtml(stats)}</div>
+            </div>` : ""}
+          ${stats.prices.length ? `
+            <div>
+              <div class="section-title">Цены за год</div>
+              <div class="card">${pricesHtml(stats)}</div>
+            </div>` : ""}
+        </div>` : ""}`}
     <div class="stats-panel wide">
     <div class="section-title trend-title">
       <span>По месяцам</span>
@@ -296,6 +321,18 @@ async function renderStatsTab() {
       <div class="chart-legend trend-legend" id="trend-legend"></div>
     </div>
     </div>
+    ${stats.mandatory_trend.some((v) => Number(v) > 0) ? `
+      <div class="stats-panel wide">
+      <div class="section-title">Обязательные и на жизнь</div>
+      <div class="card mandatory-card">${mandatoryHtml(stats, personal && !total ? incomeTotal(stats, period, income) : 0)}</div>
+      <div class="chart-wrap">
+        <div class="chart-legend">
+          <span><i class="dot" style="background:${MANDATORY_COLOR}"></i>обязательные</span>
+          <span><i class="dot" style="background:${cssVar("--link")}"></i>на жизнь</span>
+        </div>
+        <div class="chart-box"><canvas id="stats-mandatory"></canvas></div>
+      </div>
+      </div>` : ""}
     ${showIncomeTrend(stats, personal, total) ? `
       <div class="stats-panel wide">
       <div class="section-title">Доходы и расходы</div>
@@ -309,6 +346,11 @@ async function renderStatsTab() {
         <div class="hint-text income-trend-note" id="income-note"></div>
       </div>
       </div>` : ""}
+    ${stats.day_totals.some((v) => Number(v) > 0) ? `
+      <div class="stats-panel wide">
+      <div class="section-title">Год по дням</div>
+      <div class="card year-card">${yearHtml(stats)}</div>
+      </div>` : ""}
     </div>
   `;
 
@@ -320,7 +362,23 @@ async function renderStatsTab() {
     });
   });
   bindCategoryRows();
-  content.querySelectorAll(".cal-day[data-day]").forEach((cell) => {
+  const moreBtn = content.querySelector("#insights-more");
+  if (moreBtn) {
+    moreBtn.addEventListener("click", () => {
+      haptic("selection");
+      content.querySelector(".insights").classList.add("open");
+      moreBtn.remove();
+    });
+  }
+  content.querySelectorAll(".insight[data-category]").forEach((card) => {
+    card.addEventListener("click", () => {
+      const c = stats.by_category.find((x) => x.category === card.dataset.category);
+      if (!c) return;
+      haptic("selection");
+      openCategorySheet(ctx, c);
+    });
+  });
+  content.querySelectorAll(".cal-day[data-day], .year-day[data-day]").forEach((cell) => {
     cell.addEventListener("click", () => {
       haptic("selection");
       openDaySheet(ctx, cell.dataset.day);
@@ -332,6 +390,7 @@ async function renderStatsTab() {
       trendMonths = Number(b.dataset.months);
       content.querySelectorAll(".trend-toggle button").forEach((x) => x.classList.toggle("active", x === b));
       drawTrend(ctx);
+      drawMandatory(ctx);
       drawIncomeTrend(ctx);
     });
   });
@@ -394,6 +453,7 @@ async function renderStatsTab() {
     if (period.month) drawDaily(stats, forecast, isCurrent);
   }
   drawTrend(ctx);
+  drawMandatory(ctx);
   drawIncomeTrend(ctx);
 }
 
@@ -457,7 +517,7 @@ function categoryRowHtml(c, idx, total, colors, compare) {
   const share = total ? (amount / total) * 100 : 0;
   const color = colors.get(c.category);
   const prev = c.prev_to_date !== null && c.prev_to_date !== undefined ? c.prev_to_date : c.prev_total;
-  const base = compare === "avg" ? Number(c.avg_total) : Number(prev);
+  const base = compare === "avg" ? Number(c.avg_total) : compare === "year" ? Number(c.year_ago_total) : Number(prev);
   return `
     <div class="stats-cat" data-idx="${idx}">
       <div class="stats-cat-head">
@@ -469,6 +529,148 @@ function categoryRowHtml(c, idx, total, colors, compare) {
         ${deltaHtml(amount, base)}
       </div>
     </div>`;
+}
+
+/* Наблюдения карточками: суммы в тексте — {0}, {1}… (валюту знает только клиент). Тап по
+   наблюдению о категории открывает её шторку. */
+const INSIGHTS_SHOWN = 3; // остальные — по «Ещё»
+
+function wholeMoney(amount) {
+  const currency = state.chat ? state.chat.currency : "";
+  return `${Math.round(Number(amount)).toLocaleString("ru-RU")} ${currency}`;
+}
+
+function insightText(it) {
+  return escapeHtml(it.text).replace(MONEY_PATTERN, (_, i) => `<b>${wholeMoney(it.amounts[Number(i)])}</b>`);
+}
+
+function insightsHtml(stats) {
+  if (!stats.insights || !stats.insights.length) return "";
+  const more = stats.insights.length - INSIGHTS_SHOWN;
+  return `
+    <div class="stats-panel wide">
+      <div class="insights">${stats.insights.map((it, i) => `
+        <div class="insight ${it.tone} ${i >= INSIGHTS_SHOWN ? "extra" : ""}" ${it.category ? `data-category="${escapeHtml(it.category)}"` : ""}>
+          <span class="insight-icon">${it.icon}</span>
+          <span class="insight-text">${insightText(it)}</span>
+        </div>`).join("")}
+        ${more > 0 ? `<button class="link-btn insights-more" id="insights-more">Ещё ${more} ${plural(more, "наблюдение", "наблюдения", "наблюдений")}</button>` : ""}
+      </div>
+    </div>`;
+}
+
+/* Чаще или дороже: рост категории к прошлому периоду раскладывается на число покупок и средний
+   чек. Δ = (n₁ − n₀) × чек₀ + n₁ × (чек₁ − чек₀): что больше, то и «виновато». */
+function driverRows(stats) {
+  const total = Number(stats.total);
+  return stats.by_category.map((c) => {
+    const base = Number(c.prev_to_date ?? c.prev_total);
+    if (!base || c.prev_count < 2 || c.count < 2) return null; // по одной покупке — не вывод
+    const amount = Number(c.total);
+    const diff = amount - base;
+    const oldAvg = base / c.prev_count;
+    const newAvg = amount / c.count;
+    const byCount = (c.count - c.prev_count) * oldAvg;
+    const byPrice = c.count * (newAvg - oldAvg);
+    const reason = Math.abs(byCount) >= Math.abs(byPrice)
+      ? (byCount >= 0 ? "чаще" : "реже")
+      : (byPrice >= 0 ? "дороже" : "дешевле");
+    return { c, diff, oldAvg, newAvg, reason };
+  }).filter((r) => r && Math.abs(r.diff) >= total * 0.03)
+    .sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff))
+    .slice(0, 5);
+}
+
+function driversHtml(stats) {
+  const rows = driverRows(stats);
+  if (!rows.length) return "";
+  return rows.map(({ c, diff, oldAvg, newAvg, reason }) => `
+    <div class="driver-row">
+      <div class="driver-head">
+        <span>${categoryIcon(c.category)} ${escapeHtml(c.category)} <span class="driver-tag ${diff > 0 ? "up" : "down"}">${reason}</span></span>
+        <span class="delta ${diff > 0 ? "up" : "down"}">${diff > 0 ? "+" : "−"}${fmtMoney(Math.abs(diff))}</span>
+      </div>
+      <div class="hint-text driver-sub">${c.count} × ${compactMoney(newAvg)} · было ${c.prev_count} × ${compactMoney(oldAvg)}</div>
+    </div>`).join("");
+}
+
+/* Цены регулярных покупок за 12 месяцев (stats.prices): первая и последняя цена. */
+function pricesHtml(stats) {
+  const index = stats.price_index === null || stats.price_index === undefined ? null : Number(stats.price_index);
+  return `
+    ${stats.prices.map((p) => `
+      <div class="balance-row cat-expense">
+        <span class="cat-expense-title">${categoryIcon(p.category)} ${escapeHtml(p.title)}
+          <span class="hint-text">· ${monthShort(p.first_month)} → ${monthShort(p.last_month)}</span></span>
+        <span class="price-change">${compactMoney(Number(p.old))} → ${compactMoney(Number(p.new))}
+          <span class="delta ${Number(p.percent) > 0 ? "up" : "down"}">${Number(p.percent) > 0 ? "▲" : "▼"} ${Math.abs(Math.round(Number(p.percent)))}%</span></span>
+      </div>`).join("")}
+    ${index !== null ? `<div class="hint-text bar-note">${index > 0
+      ? `Регулярные покупки в среднем подорожали на ${index.toLocaleString("ru-RU")}%`
+      : index < 0 ? `Регулярные покупки в среднем подешевели на ${Math.abs(index).toLocaleString("ru-RU")}%`
+        : "Цены регулярных покупок в среднем не изменились"}</div>` : ""}`;
+}
+
+/* Доходы периода для «Обязательных и на жизнь»: за месяц — из «Доходов», иначе — из статистики. */
+function incomeTotal(stats, period, income) {
+  if (period.month) return income ? Number(income.received) : 0;
+  return Number(stats.income_total || 0);
+}
+
+/* Сколько из трат периода — обязательные (аренда, коммуналка, кредиты, «Платежи», как в днях
+   недели) и сколько «на жизнь». С доходом — сколько остаётся после обязательных. */
+function mandatoryHtml(stats, income) {
+  const total = Number(stats.total);
+  const mandatory = Number(stats.weekdays_excluded || 0);
+  const living = total - mandatory;
+  const pct = total ? Math.round((mandatory / total) * 100) : 0;
+  return `
+    <div class="split-bar mandatory-bar"><div style="width:${total ? (mandatory / total) * 100 : 0}%"></div></div>
+    <div class="income-vs-rows ${income > 0 ? "" : "two"}">
+      <div><span class="hint-text">Обязательные · ${pct}%</span><b>${fmtMoney(mandatory)}</b></div>
+      <div><span class="hint-text">На жизнь · ${100 - pct}%</span><b>${fmtMoney(living)}</b></div>
+      ${income > 0 ? `<div><span class="hint-text">Доход после обязательных</span><b class="${income - mandatory >= 0 ? "positive" : "negative"}">${fmtMoney(income - mandatory)}</b></div>` : ""}
+    </div>`;
+}
+
+/* Год по дням: строка — месяц, клетка — день. Цвет — по квартилям дней с тратами, чтобы
+   один телевизор не сделал бледными все остальные дни. Обязательные платежи не входят. */
+function yearHtml(stats) {
+  const from = stats.days_from;
+  const values = stats.day_totals.map(Number);
+  const spent = values.filter((v) => v > 0).sort((a, b) => a - b);
+  const q = (p) => spent[Math.min(spent.length - 1, Math.floor(p * spent.length))] || 0;
+  const thresholds = [q(0.25), q(0.5), q(0.75), q(0.9)];
+  const level = (v) => (v <= 0 ? 0 : 1 + thresholds.filter((t) => v > t).length);
+  const [fy, fm] = from.split("-").map(Number);
+  const today = todayISO();
+  const rows = [];
+  let index = 0;
+  let maxDay = null;
+  while (index < values.length) {
+    const y = fy + Math.floor((fm - 1 + rows.length) / 12);
+    const m = ((fm - 1 + rows.length) % 12) + 1;
+    const days = Math.min(lastDay(y, m), values.length - index);
+    const cells = [];
+    for (let d = 1; d <= 31; d++) {
+      if (d > days) { cells.push('<span class="year-day blank"></span>'); continue; }
+      const v = values[index + d - 1];
+      const iso = isoDate(y, m, d);
+      if (v > 0 && (!maxDay || v > maxDay.v)) maxDay = { v, iso };
+      cells.push(`<button class="year-day l${level(v)} ${iso > today ? "future" : ""}" ${v > 0 ? `data-day="${iso}"` : "disabled"}
+        title="${d} ${MONTHS_SHORT[m - 1]}: ${v > 0 ? fmtMoney(v) : "нет трат"}" aria-label="${d} ${MONTHS_SHORT[m - 1]}: ${v > 0 ? fmtMoney(v) : "нет трат"}"></button>`);
+    }
+    rows.push(`<div class="year-row"><span class="year-label">${MONTHS_SHORT[m - 1]}</span><div class="year-cells">${cells.join("")}</div></div>`);
+    index += days;
+  }
+  const passed = values.filter((_, i) => {
+    const date = new Date(fy, fm - 1, 1 + i);
+    return isoDate(date.getFullYear(), date.getMonth() + 1, date.getDate()) <= today;
+  }).length;
+  return `
+    <div class="year-grid">${rows.join("")}</div>
+    <div class="year-legend hint-text">меньше ${[0, 1, 2, 3, 4, 5].map((l) => `<i class="year-day l${l}"></i>`).join("")} больше</div>
+    <div class="hint-text cal-note">Дней с тратами: ${spent.length} из ${passed}${maxDay ? ` · больше всего ${longDate(maxDay.iso)} — ${fmtMoney(maxDay.v)}` : ""} · без обязательных платежей</div>`;
 }
 
 /* Календарь месяца: чем больше потрачено в день, тем насыщеннее клетка; тап — траты дня. */
@@ -578,9 +780,17 @@ function amountOf(ctx, e) {
   return ctx.personal && !ctx.total ? Number(e.my_share) : Number(e.amount);
 }
 
-async function fillExpenses(ctx, box, filter, { showDate = true } = {}) {
+/* Траты одного дня вне периода (из «Года по дням») — отдельным запросом. */
+function dayExpenses(ctx, iso) {
+  return ctx.personal
+    ? api(`/all/expenses?date_from=${iso}&date_to=${iso}`)
+    : api(`/chats/${state.chatId}/expenses?date_from=${iso}&date_to=${iso}&limit=1000`);
+}
+
+async function fillExpenses(ctx, box, filter, { showDate = true, day = null } = {}) {
   try {
-    const items = await periodExpenses(ctx);
+    const outside = day && (day < ctx.period.from || day > ctx.period.to);
+    const items = await (outside ? dayExpenses(ctx, day) : periodExpenses(ctx));
     const rows = items.filter((e) => filter(e) && amountOf(ctx, e) !== 0);
     box.innerHTML = rows.length ? rows.map((e) => `
       <div class="balance-row cat-expense">
@@ -632,7 +842,7 @@ function openDaySheet(ctx, iso) {
     <div class="sheet-title">${longDate(iso)}</div>
     <div class="hint-text" id="day-sum"></div>
     <div class="card" id="day-expenses"><div class="loading">Загрузка…</div></div>`);
-  fillExpenses(ctx, overlay.querySelector("#day-expenses"), (e) => e.expense_date === iso, { showDate: false }).then((rows) => {
+  fillExpenses(ctx, overlay.querySelector("#day-expenses"), (e) => e.expense_date === iso, { showDate: false, day: iso }).then((rows) => {
     if (!rows.length) return;
     const sum = rows.reduce((a, e) => a + amountOf(ctx, e), 0);
     overlay.querySelector("#day-sum").textContent = `${fmtMoney(sum)} · ${rows.length} ${plural(rows.length, "трата", "траты", "трат")}`;
@@ -794,6 +1004,39 @@ function drawTrend(ctx) {
     legend.innerHTML = shown.map((s) => `
       <span><i class="dot round" style="background:${colorOf(s)}"></i>${escapeHtml(s.category)}</span>`).join("");
   }
+}
+
+/* Обязательные и «на жизнь» по месяцам: столбики друг на друге, месяцы периода — ярко. */
+function drawMandatory(ctx) {
+  if (!window.Chart) return;
+  if (charts.mandatory) charts.mandatory.destroy();
+  const canvas = document.getElementById("stats-mandatory");
+  if (!canvas) return;
+  const { stats, period } = ctx;
+  const trend = stats.trend.slice(-trendMonths);
+  const months = trend.map((t) => t.month);
+  const mandatory = stats.mandatory_trend.slice(-trendMonths).map(Number);
+  const living = trend.map((t, i) => Number(t.total) - mandatory[i]);
+  const link = cssVar("--link");
+  const options = baseOptions();
+  options.scales.x.stacked = true;
+  options.scales.y.stacked = true;
+  options.interaction = { mode: "index", intersect: false };
+  options.plugins.tooltip = {
+    callbacks: {
+      label: (item) => ` ${item.dataset.label}: ${fmtMoney(item.parsed.y)}`,
+      footer: (items) => `Всего: ${fmtMoney(Number(trend[items[0].dataIndex].total))}`,
+    },
+  };
+  const bar = (label, data, color) => ({
+    label, data, backgroundColor: months.map((m) => (inPeriod(m, period) ? color : `${color}66`)),
+    borderRadius: 4, borderSkipped: false, maxBarThickness: 34,
+  });
+  charts.mandatory = new Chart(canvas, {
+    type: "bar",
+    data: { labels: months.map(monthShort), datasets: [bar("обязательные", mandatory, MANDATORY_COLOR), bar("на жизнь", living, link)] },
+    options,
+  });
 }
 
 /* Доходы и расходы по месяцам и доля отложенного (только «Мои финансы», «Мои траты»). */

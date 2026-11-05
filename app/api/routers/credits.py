@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 
 from app.api.dependencies import ChatContext, get_chat_context
-from app.shared import credits, loans
+from app.shared import credits, debt_history, loans
 from app.shared.models import CreditCard, CreditOperation, Expense, LoanTranche, RecurringExpense
 from app.shared.schemas import (
     CreditAdjustIn,
@@ -18,6 +18,7 @@ from app.shared.schemas import (
     CreditOperationOut,
     CreditPurchaseOut,
     CreditsOut,
+    DebtHistoryOut,
     LoanOut,
     LoanTrancheIn,
     LoanTrancheOut,
@@ -132,6 +133,13 @@ def _apply(card: CreditCard, payload: CreditCardIn) -> None:
     card.category = payload.category or "Кредиты"
     card.subcategory = payload.subcategory or None
     card.is_archived = payload.is_archived
+
+
+@router.get("/chats/{chat_id}/credits/history", response_model=DebtHistoryOut)
+async def get_debt_history(ctx: ChatContext = Depends(get_chat_context)) -> DebtHistoryOut:
+    """Долги за 12 месяцев, проценты и когда всё закроется (app/shared/debt_history.py)."""
+    _personal(ctx)
+    return await debt_history.history(ctx.session, ctx.chat, dt.date.today())
 
 
 @router.post("/chats/{chat_id}/credit-cards", response_model=CreditCardOut, status_code=201)

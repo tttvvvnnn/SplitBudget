@@ -1321,6 +1321,81 @@ select.dd-native { display: none !important; }
 .split-bar { height: 8px; border-radius: 4px; background: color-mix(in srgb, var(--hint) 30%, transparent); overflow: hidden; margin: 4px 0 6px; }
 .split-bar div { height: 100%; background: var(--link); }
 
+/* Наблюдения, «Чаще или дороже», цены, обязательные, год по дням — tabs/stats.js */
+.insights { display: grid; gap: 8px; margin-bottom: 12px; }
+.insight {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 1px solid var(--glass-edge);
+  border-left: 3px solid var(--hint);
+  border-radius: 14px;
+  background: var(--card-bg);
+  font-size: 14px;
+  line-height: 1.35;
+}
+.insight.good { border-left-color: var(--success); }
+.insight.bad { border-left-color: var(--danger); }
+.insight.info { border-left-color: var(--link); }
+.insight[data-category] { cursor: pointer; }
+.insight.extra { display: none; }
+.insights.open .insight.extra { display: flex; }
+.insights-more { justify-self: start; padding: 2px 4px; color: var(--link); font-size: 13.5px; }
+.income-vs-rows.two { grid-template-columns: repeat(2, 1fr); }
+.insight-icon { font-size: 17px; line-height: 1.2; }
+.insight-text b { font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+.driver-row { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.driver-row:last-child { border-bottom: none; }
+.driver-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 14px; }
+.driver-sub { margin: 3px 0 0; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.driver-tag {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 1px 7px;
+  border-radius: 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+  vertical-align: 1px;
+}
+.driver-tag.up { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); }
+.driver-tag.down { color: var(--success); background: color-mix(in srgb, var(--success) 14%, transparent); }
+.price-change { white-space: nowrap; font-variant-numeric: tabular-nums; font-size: 13.5px; }
+.price-change .delta { margin-left: 4px; }
+
+.mandatory-card { padding: 12px 14px; margin-bottom: 10px; }
+.mandatory-bar { background: color-mix(in srgb, var(--link) 30%, transparent); }
+.mandatory-bar div { background: #8e8e93; }
+
+.year-card { padding: 12px; }
+.year-grid { display: grid; gap: 3px; }
+.year-row { display: grid; grid-template-columns: 28px 1fr; align-items: center; gap: 6px; }
+.year-label { font-size: 11px; color: var(--hint); }
+.year-cells { display: grid; grid-template-columns: repeat(31, minmax(0, 1fr)); gap: 2px; }
+.year-day {
+  display: block;
+  aspect-ratio: 1 / 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  border-radius: 2px;
+  background: var(--field-bg);
+  cursor: pointer;
+}
+.year-day:disabled, .year-day.blank { cursor: default; }
+.year-day.blank { background: none; }
+.year-day.future { opacity: 0.4; }
+.year-day.l1 { background: color-mix(in srgb, var(--link) 22%, var(--field-bg)); }
+.year-day.l2 { background: color-mix(in srgb, var(--link) 42%, var(--field-bg)); }
+.year-day.l3 { background: color-mix(in srgb, var(--link) 62%, var(--field-bg)); }
+.year-day.l4 { background: color-mix(in srgb, var(--link) 80%, var(--field-bg)); }
+.year-day.l5 { background: var(--link); }
+.year-legend { display: flex; align-items: center; justify-content: flex-end; gap: 3px; margin: 10px 0 0; font-size: 11.5px; }
+.year-legend .year-day { width: 10px; cursor: default; }
+.year-legend .year-day:first-of-type { margin-left: 4px; }
+.year-legend .year-day:last-of-type { margin-right: 4px; }
+
 .trend-legend { margin: 10px 0 0; }
 .chart-legend .dot.round { width: 8px; height: 8px; border-radius: 50%; }
 .income-trend-note { margin: 10px 0 0; font-size: 12.5px; }
@@ -1553,6 +1628,50 @@ select.dd-native { display: none !important; }
 .credit-summary { padding: 14px; }
 .credit-total { font-size: 26px; font-weight: 700; margin: 2px 0 4px; font-variant-numeric: tabular-nums; }
 .credit-sub { color: var(--hint); }
+.goal-forecast { margin-top: 4px; }
+.plan-analytics { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.plan-analytics .chip { font-size: 13px; }
+.sankey-card { padding: 12px; overflow: hidden; }
+.sankey { display: block; overflow: visible; }
+.sankey-label {
+  font-size: 11.5px;
+  fill: var(--text);
+  paint-order: stroke;
+  stroke: var(--sheet-bg, var(--bg));
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+.sankey-value { fill: var(--hint); font-variant-numeric: tabular-nums; }
+.sankey path:hover { fill-opacity: 0.5; }
+.sankey-note { margin: 10px 0 0; font-size: 12.5px; }
+.ph-card { padding: 10px 12px; }
+.ph-row { display: grid; grid-template-columns: minmax(80px, 1.4fr) repeat(var(--n), minmax(0, 1fr)); gap: 4px; align-items: center; }
+.ph-head { font-size: 11px; color: var(--hint); text-align: center; padding-bottom: 4px; }
+.ph-item { padding: 7px 0; border-bottom: 1px solid var(--border); }
+.ph-item:last-of-type { border-bottom: none; }
+.ph-title { font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ph-cell {
+  display: inline-block;
+  padding: 3px 0;
+  border-radius: 6px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.ph-cell.ok { color: var(--success); background: color-mix(in srgb, var(--success) 14%, transparent); }
+.ph-cell.warn { color: #c77700; background: color-mix(in srgb, #ff9500 16%, transparent); }
+.ph-cell.over { color: var(--danger); background: color-mix(in srgb, var(--danger) 14%, transparent); }
+.ph-cell.partial { opacity: 0.5; }
+.ph-cell.none { background: none; }
+.ph-note { margin: 4px 0 0; font-size: 12px; }
+.ph-legend { margin: 10px 0 0; font-size: 11.5px; line-height: 1.8; }
+.ph-legend .ph-cell { padding: 1px 5px; }
+.debt-history-btn { display: block; margin: 8px 0 0; padding: 0; color: var(--link); }
+.payoff-row { align-items: flex-start; }
+.payoff-row > span:first-child .hint-text { display: block; margin: 2px 0 0; font-size: 12.5px; }
+.payoff-when { text-align: right; font-size: 13px; }
+.payoff-when .hint-text { display: block; margin: 2px 0 0; font-size: 12px; }
 .credit-card.archived { opacity: 0.55; }
 .credit-lines { font-size: 13px; color: var(--hint); margin-top: 6px; line-height: 1.45; }
 .credit-actions { display: flex; gap: 10px; margin-top: 10px; }
@@ -2034,6 +2153,8 @@ select.dd-native { display: none !important; }
   .stats-grid .chart-box { height: 240px; }
   .stats-grid .donut-box { height: 300px; }
   .cal-day { aspect-ratio: auto; height: 46px; }
+  .year-day { aspect-ratio: auto; height: 16px; }
+  .year-legend .year-day { height: 10px; }
 
   /* ---- Мышь: подсветка под курсором вместо «гаснет при нажатии» ---- */
   .expense-card, .budget-card, .obligation-row, .income-row, .stats-cat, .card[data-id],

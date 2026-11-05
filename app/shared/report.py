@@ -2,7 +2,7 @@
 «Моим финансам» и в каждый семейный чат. Командой /summary — то же за текущий месяц.
 
 В отчёте: сколько потрачено и сравнение с прошлым месяцем, топ категорий, что выросло
-сильнее всего, лимиты, обязательные платежи; в личном — доходы и сколько осталось, долги
+сильнее всего, наблюдения месяца (app/shared/insights.py), лимиты, обязательные платежи; в личном — доходы и сколько осталось, долги
 по кредиткам за месяц и остаток по кредитам (app/shared/credits.py),
 в семейном — кто сколько заплатил; в личном — ещё и прогресс целей накоплений.
 """
@@ -20,8 +20,11 @@ from app.shared.categories import CATEGORY_TREE
 from app.shared.credits import month_debts
 from app.shared.goals import goals_status
 from app.shared.models import Chat, Expense, Income, Member, MonthlyReport
+from app.shared.my_spending import my_expenses
 from app.shared.obligations import fmt_amount, month_of, obligations
 from app.shared.plan import items_of
+from app.shared.schemas import Insight
+from app.shared.stats import Row, build_stats, fetch_range
 
 ZERO = Decimal("0")
 MONTHS = (
@@ -29,6 +32,9 @@ MONTHS = (
     "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь",
 )
 TOP = 3
+INSIGHTS = 3
+# В итогах уже есть «сильнее всего выросло» к прошлому месяцу — его не повторяем
+INSIGHTS_SKIP = {"driver"}
 # Рост категории попадает в отчёт, если он заметный, а не на пару сотен рублей
 GROWTH_MIN_SHARE = Decimal("0.05")
 
@@ -52,6 +58,38 @@ def _percent_change(now: Decimal, before: Decimal) -> str:
     change = (now - before) * 100 / before
     arrow = "↑" if change > 0 else "↓"
     return f" ({arrow}{abs(change):.0f}% к прошлому месяцу)"
+
+
+def insight_text(insight: Insight, currency: str) -> str:
+    """Наблюдение для бота: суммы {0}, {1}… — в валюте пространства."""
+    text = escape(insight.text)
+    for i, amount in enumerate(insight.amounts):
+        text = text.replace(f"{{{i}}}", fmt_amount(amount, currency))
+    return f"{insight.icon} {text}"
+
+
+async def month_insights(session: AsyncSession, chat: Chat, month: str, today: dt.date) -> list[Insight]:
+    """Наблюдения за месяц: в «Моих финансах» — по твоим тратам (как статистика), в семейном
+    чате — по тратам чата."""
+    start, end = month_range(month)
+    fetch_start, fetch_end = fetch_range(start, end)
+    if chat.is_personal:
+        rows = [
+            Row(m.expense.expense_date, m.expense.category, m.expense.subcategory, m.amount,
+                m.expense.title, m.expense.recurring_id is not None)
+            for m in await my_expenses(session, chat.id, fetch_start, fetch_end)
+            if m.amount
+        ]
+    else:
+        result = await session.execute(
+            select(
+                Expense.expense_date, Expense.category, Expense.subcategory, Expense.amount,
+                Expense.title, Expense.recurring_id.is_not(None),
+            ).where(Expense.chat_id == chat.id, Expense.expense_date >= fetch_start, Expense.expense_date < fetch_end)
+        )
+        rows = [Row(*r) for r in result.all()]
+    insights = build_stats(start, end, rows, today).insights
+    return [i for i in insights if i.kind not in INSIGHTS_SKIP][:INSIGHTS]
 
 
 async def build_report(session: AsyncSession, chat: Chat, month: str, partial: bool = False) -> str | None:
@@ -103,6 +141,12 @@ async def build_report(session: AsyncSession, chat: Chat, month: str, partial: b
         if growth:
             cat, diff = max(growth, key=lambda x: x[1])
             lines.append(f"\n📈 Сильнее всего выросло: {_icon(cat)} {escape(cat)} +{money(diff)}")
+
+    insights = await month_insights(session, chat, month, dt.date.today())
+    if insights:
+        lines.append("")
+        lines.append("💡 Наблюдения:")
+        lines.extend(insight_text(i, chat.currency) for i in insights)
 
     statuses = [s for s in await budgets_status(session, chat, month) if s.budget.amount > 0]
     if chat.is_personal and await items_of(session, chat.id):

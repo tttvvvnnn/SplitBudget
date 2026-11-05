@@ -490,13 +490,15 @@ async def month_debts(session: AsyncSession, chat: Chat, start: dt.date, end: dt
             elif date >= start:
                 in_month -= amount
                 paid += amount
-        for kind, date, amount in (
+        for kind, date, amount, expense_id in (
             await session.execute(
-                select(CreditOperation.kind, CreditOperation.op_date, CreditOperation.amount).where(
-                    CreditOperation.card_id.in_(ids), CreditOperation.amount.is_not(None)
-                )
+                select(
+                    CreditOperation.kind, CreditOperation.op_date, CreditOperation.amount, CreditOperation.expense_id
+                ).where(CreditOperation.card_id.in_(ids), CreditOperation.amount.is_not(None))
             )
         ).all():
+            if kind == "interest" and expense_id is not None:
+                continue  # проценты — покупка «Проценты» в карте, она уже посчитана выше
             change = -amount if kind == "payment" else amount
             if date >= end:
                 after += change
