@@ -121,9 +121,9 @@ async function renderAllExpensesTab() {
   });
   document.getElementById("bank-import-btn").addEventListener("click", () => {
     haptic("selection");
-    openBankImportSheet((rows) => {
-      // Показываем месяц выписки, чтобы сразу увидеть добавленное
-      if (rows.length) state.month = rows[0].date.slice(0, 7);
+    openBankImportSheet((dates) => {
+      // Показываем последний месяц выписки, чтобы сразу увидеть добавленное
+      if (dates.length) state.month = dates[dates.length - 1].slice(0, 7);
       renderAllExpensesTab();
     });
   });

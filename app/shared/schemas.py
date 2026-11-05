@@ -896,12 +896,25 @@ class TidyApplyOut(BaseModel):
     categories: list[CategoryTreeNodeOut]
 
 
+class BankMatchOut(BaseModel):
+    """Уже внесённая запись, похожая на операцию из выписки."""
+
+    level: str  # exact | same_sum | likely | maybe
+    default: str  # mine | statement | both — что выбрано, пока не поменяли
+    id: int  # трата или доход
+    title: str
+    amount: Decimal
+    date: dt.date
+    category: str | None = None
+    space: str | None = None  # семейный чат, если трата оттуда
+    editable: bool  # можно «взять из выписки»
+
+
 class BankPurchaseOut(BaseModel):
     date: dt.date
     amount: Decimal
     description: str  # как в выписке
-    duplicate_title: str | None = None  # уже внесено: название и дата той траты
-    duplicate_date: dt.date | None = None
+    match: BankMatchOut | None = None
 
 
 class BankGroupOut(BaseModel):
@@ -914,8 +927,18 @@ class BankGroupOut(BaseModel):
     purchases: list[BankPurchaseOut]
 
 
+class BankIncomeOut(BaseModel):
+    date: dt.date
+    amount: Decimal
+    title: str
+    description: str
+    checked: bool
+    source_id: int | None = None  # регулярный доход, который это поступление закрывает
+    match: BankMatchOut | None = None
+
+
 class BankSkippedOut(BaseModel):
-    kind: str  # savings | self | contract | transfer | cash | income | refund | unknown
+    kind: str  # savings | self | contract | transfer | cash | refund | unknown
     count: int
     total: Decimal
 
@@ -925,6 +948,7 @@ class BankPreviewOut(BaseModel):
     period_from: dt.date | None
     period_to: dt.date | None
     groups: list[BankGroupOut]
+    incomes: list[BankIncomeOut]
     skipped: list[BankSkippedOut]
 
 
@@ -936,9 +960,37 @@ class BankImportRow(BaseModel):
     subcategory: str | None = Field(default=None, max_length=64)
 
 
+class BankExpenseUpdate(BaseModel):
+    expense_id: int
+    date: dt.date
+    amount: Decimal = Field(gt=0)
+    title: str = Field(min_length=1, max_length=255)
+    category: str | None = Field(default=None, max_length=64)
+    subcategory: str | None = Field(default=None, max_length=64)
+
+
+class BankIncomeRow(BaseModel):
+    date: dt.date
+    amount: Decimal = Field(gt=0)
+    title: str = Field(min_length=1, max_length=255)
+    source_id: int | None = None
+
+
+class BankIncomeUpdate(BaseModel):
+    income_id: int
+    date: dt.date
+    amount: Decimal = Field(gt=0)
+
+
 class BankImportIn(BaseModel):
-    rows: list[BankImportRow] = Field(min_length=1, max_length=3000)
+    rows: list[BankImportRow] = Field(default=[], max_length=5000)
+    updates: list[BankExpenseUpdate] = Field(default=[], max_length=5000)
+    incomes: list[BankIncomeRow] = Field(default=[], max_length=1000)
+    income_updates: list[BankIncomeUpdate] = Field(default=[], max_length=1000)
 
 
 class BankImportOut(BaseModel):
-    created: int
+    created: int  # новых трат
+    updated: int  # трат и доходов, взятых из выписки
+    incomes: int
+    payments: int  # обязательных платежей, отмеченных оплаченными
