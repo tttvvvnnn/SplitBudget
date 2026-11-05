@@ -496,7 +496,11 @@ def _trend(r: Report, c: dict) -> str:
 
 def _weekdays(r: Report, c: dict) -> str:
     values = [float(v) for v in r.stats.weekdays]
-    return f'<div class="card"><h3>По дням недели</h3>{bars_svg(list(WEEKDAYS), values, c, height=110)}</div>'
+    note = ""
+    if r.stats.weekdays_excluded_count:
+        note = (f'<div class="chart-legend"><span>без обязательных платежей '
+                f'({_money(r.stats.weekdays_excluded, r.chat.currency)})</span></div>')
+    return f'<div class="card"><h3>По дням недели</h3>{bars_svg(list(WEEKDAYS), values, c, height=110)}{note}</div>'
 
 
 def _category_table(r: Report) -> str:

@@ -43,6 +43,7 @@ function savePref(key, value) {
 }
 let periodMode = pref("statsPeriod", "month");
 let compareMode = pref("statsCompare", "prev"); // "prev" — к прошлому периоду, "avg" — к среднему за 3 мес
+let weekdayMode = pref("statsWeekdays", "sum"); // дни недели: "sum" — по сумме, "count" — по числу трат
 let custom = { from: pref("statsFrom", ""), to: pref("statsTo", "") };
 
 function cssVar(name) {
@@ -256,8 +257,14 @@ async function renderStatsTab() {
         </div>` : ""}
       <div class="stats-pair">
         <div>
-          <div class="section-title">По дням недели</div>
-          <div class="card">${weekdaysHtml(stats)}</div>
+          <div class="section-title trend-title">
+            <span>По дням недели</span>
+            <div class="share-toggle trend-toggle" id="weekday-toggle">
+              <button data-mode="sum" class="${weekdayMode === "sum" ? "active" : ""}">Сумма</button>
+              <button data-mode="count" class="${weekdayMode === "count" ? "active" : ""}">Число</button>
+            </div>
+          </div>
+          <div class="card" id="weekdays-card">${weekdaysHtml(stats)}</div>
         </div>
         ${stats.recurring_count ? `
           <div>
@@ -326,6 +333,16 @@ async function renderStatsTab() {
       content.querySelectorAll(".trend-toggle button").forEach((x) => x.classList.toggle("active", x === b));
       drawTrend(ctx);
       drawIncomeTrend(ctx);
+    });
+  });
+  content.querySelectorAll("#weekday-toggle button").forEach((b) => {
+    b.addEventListener("click", () => {
+      if (b.dataset.mode === weekdayMode) return;
+      haptic("selection");
+      weekdayMode = b.dataset.mode;
+      savePref("statsWeekdays", weekdayMode);
+      content.querySelectorAll("#weekday-toggle button").forEach((x) => x.classList.toggle("active", x === b));
+      content.querySelector("#weekdays-card").innerHTML = weekdaysHtml(stats);
     });
   });
   content.querySelectorAll("#period-toggle button").forEach((b) => {
@@ -482,12 +499,17 @@ function calendarHtml(stats, month) {
     <div class="hint-text cal-note">Дней с тратами: ${spentDays} из ${passed}${max > 0 ? ` · больше всего ${fmtMoney(max)}` : ""}</div>`;
 }
 
-/* Дни недели: доля трат периода по дням, выходные — отдельной строкой. */
+/* Дни недели: доля трат периода по дням — по сумме или по числу трат, выходные — отдельной
+   строкой. Обязательные платежи (аренда, коммуналка, кредиты, «Платежи») сюда не входят: они
+   не говорят, в какие дни тратишь. Сколько их не вошло — в подписи. */
 function weekdaysHtml(stats) {
-  const values = stats.weekdays.map(Number);
+  const byCount = weekdayMode === "count";
+  const values = (byCount ? stats.weekday_counts || [] : stats.weekdays).map(Number);
   const sum = values.reduce((a, b) => a + b, 0);
   const max = Math.max(...values, 0);
   const weekend = sum ? Math.round(((values[5] + values[6]) / sum) * 100) : 0;
+  const excluded = Number(stats.weekdays_excluded || 0);
+  const n = stats.weekdays_excluded_count || 0;
   return `
     ${values.map((v, i) => `
       <div class="bar-row ${i >= 5 ? "weekend" : ""}">
@@ -495,7 +517,8 @@ function weekdaysHtml(stats) {
         <div class="bar-row-track"><div style="width:${max ? (v / max) * 100 : 0}%"></div></div>
         <span class="bar-row-value">${sum ? Math.round((v / sum) * 100) : 0}%</span>
       </div>`).join("")}
-    <div class="hint-text bar-note">На выходные — ${weekend}% трат</div>`;
+    <div class="hint-text bar-note">На выходные — ${weekend}% ${byCount ? "покупок" : "трат"}</div>
+    ${n ? `<div class="hint-text bar-note">Без обязательных платежей: ${n} ${plural(n, "платёж", "платежа", "платежей")} на ${fmtMoney(excluded)}</div>` : ""}`;
 }
 
 /* Регулярные платежи (подписки, кредиты, коммуналка) против остальных трат. */

@@ -53,7 +53,10 @@ def test_build_stats_extra_fields():
     assert s.avg_total == Decimal("450.00")  # (300 + 600) / 2 месяца с тратами
     cats = {c.category: c for c in s.by_category}
     assert cats["Еда"].avg_total == Decimal("200.00") and cats["Кафе"].avg_total == Decimal("0.00")
-    assert s.weekdays[0] == Decimal("290") and s.weekdays[1] == Decimal("50") and s.weekdays[6] == Decimal("700")
+    # «Интернет» в воскресенье — из «Платежей», в дни недели не идёт
+    assert s.weekdays[0] == Decimal("290") and s.weekdays[1] == Decimal("50") and s.weekdays[6] == Decimal("0")
+    assert s.weekday_counts == [2, 1, 0, 0, 0, 0, 0]
+    assert (s.weekdays_excluded, s.weekdays_excluded_count) == (Decimal("700"), 1)
     assert [t.title for t in s.top_expenses] == ["Интернет", "Пятёрочка", "Кофе", "пятерочка!"]
     assert [(p.title, p.count, p.total) for p in s.places] == [("Пятёрочка", 2, Decimal("250"))]
     assert (s.recurring_total, s.recurring_count) == (Decimal("700"), 1)
@@ -129,3 +132,20 @@ def test_unfinished_period_compares_same_days():
     assert s.avg_total == Decimal("200.00")  # (100 + 300) / 2
     # прошедший месяц — без prev_to_date
     assert build_stats(*stats_period("2026-09"), rows, today=D(2026, 10, 10)).prev_to_date is None
+
+
+def test_weekdays_skip_mandatory_payments():
+    """Аренда, коммуналка и кредиты, даже записанные вручную, не делают день «днём трат»."""
+    rows = [
+        Row(D(2026, 10, 2), "Дом", "Аренда", Decimal("40000"), "Квартира"),  # пятница
+        Row(D(2026, 10, 2), "Дом", "Коммуналка", Decimal("5000"), "ЖКХ"),
+        Row(D(2026, 10, 2), "Кредиты", "Кредитная карта", Decimal("7500"), "Погашение Озон"),
+        Row(D(2026, 10, 2), "Продукты", None, Decimal("1000"), "Пятёрочка"),
+        Row(D(2026, 10, 3), "Дом", "Ремонт и мебель", Decimal("3000"), "Полка"),  # суббота
+        Row(D(2026, 10, 3), "Кафе", None, Decimal("500"), "Кофе"),
+    ]
+    s = build_stats(*stats_period("2026-10"), rows, today=D(2026, 11, 2))
+    assert s.weekdays[4] == Decimal("1000") and s.weekdays[5] == Decimal("3500")
+    assert s.weekday_counts[4] == 1 and s.weekday_counts[5] == 2
+    assert (s.weekdays_excluded, s.weekdays_excluded_count) == (Decimal("52500"), 3)
+    assert s.total == Decimal("57000")  # в итогах и категориях всё по-прежнему

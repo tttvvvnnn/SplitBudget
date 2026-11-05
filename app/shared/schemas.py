@@ -410,7 +410,11 @@ class StatsOut(BaseModel):
     # Итоги за 12 месяцев, заканчивая последним месяцем периода, от старых к новым
     trend: list[MonthTotal] = Field(default_factory=list)
     category_trend: list[CategoryTrend] = Field(default_factory=list)  # по убыванию суммы за 12 мес
-    weekdays: list[Decimal] = Field(default_factory=list)  # пн..вс за период
+    # Пн..вс за период без обязательных платежей (stats.is_mandatory): сумма и число трат
+    weekdays: list[Decimal] = Field(default_factory=list)
+    weekday_counts: list[int] = Field(default_factory=list)
+    weekdays_excluded: Decimal = Decimal("0")  # сколько обязательных платежей не вошло в график
+    weekdays_excluded_count: int = 0
     top_expenses: list[TopExpense] = Field(default_factory=list)
     places: list[PlaceStat] = Field(default_factory=list)
     recurring_total: Decimal = Decimal("0")  # траты из регулярных платежей
